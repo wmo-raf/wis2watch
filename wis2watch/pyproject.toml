@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wis2watch"
+authors = [{ name = "Erick Otenyo", email = "eotenyo@wmo.int" }]
+description = """Monitoring WIS2 Nodes and Services"""
+
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dynamic = ["version", "dependencies"]
+classifiers = []
+
+
+[project.scripts]
+wis2watch = "wis2watch.manage:main"
+
+
+[tool.setuptools]
+include-package-data = true
+# https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html
+platforms = ["Linux"]
+
+[tool.setuptools.packages.find]
+namespaces = true
+where = ["src/"]
+include = ["wis2watch", "wis2watch.*"]
+
+[tool.setuptools.dynamic]
+# version always from the code
+version = { attr = "wis2watch.version.__version__" }
+dependencies = { file = ["requirements.txt"] }
