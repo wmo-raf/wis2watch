@@ -51,9 +51,9 @@ export function useMapNodes() {
 
     const updateMonitoredNodes = (statusData) => {
         monitoredNodes.value = {}
-
-        if (statusData.clients) {
-            statusData.clients.forEach(client => {
+        if (statusData) {
+            const clients = Object.values(statusData)
+            clients.forEach(client => {
                 monitoredNodes.value[client.node_id] = client
             })
         }

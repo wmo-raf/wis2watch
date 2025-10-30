@@ -132,6 +132,11 @@ class WIS2Node(TimeStampedModel):
                     f"{self.base_url}/oapi/collections/stations/items?f=json"
                 )
         super().save(*args, **kwargs)
+    
+    def get_topics(self):
+        datasets = self.datasets.filter(status='active')
+        topics = [dataset.wmo_topic_hierarchy for dataset in datasets]
+        return topics
 
 
 @register_snippet

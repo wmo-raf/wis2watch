@@ -78,6 +78,7 @@ INSTALLED_APPS = [
     "wis2watch.home",
     "wis2watch.core",
     "wis2watch.api",
+    "wis2watch.mqtt",
     "wis2watch.ws",
     "wis2watch.monitoring",
 ]
@@ -311,3 +312,18 @@ VUE_FRONTEND_USE_DEV_SERVER = DEBUG
 VUE_FRONTEND_DEV_SERVER_URL = 'http://localhost:5173'
 VUE_FRONTEND_DEV_SERVER_PATH = '/static/vue/src'
 VUE_FRONTEND_STATIC_PATH = 'vue'
+
+CELERY_BEAT_SCHEDULE = {
+    'monitor-all-active-nodes': {
+        'task': 'wis2watch.mqtt.tasks.monitor_all_active_nodes',
+        'schedule': 300.0,  # Every 5 minutes
+    },
+    'refresh-mqtt-locks': {
+        'task': 'wis2watch.mqtt.tasks.refresh_mqtt_locks',
+        'schedule': 240.0,  # Every 4 minutes
+    },
+    'cleanup-stale-mqtt-locks': {
+        'task': 'wis2watch.mqtt.tasks.cleanup_stale_mqtt_locks',
+        'schedule': 600.0,  # Every 10 minutes
+    },
+}

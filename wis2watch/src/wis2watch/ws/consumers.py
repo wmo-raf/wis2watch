@@ -2,8 +2,7 @@ import json
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
-
-from wis2watch.core.mqtt_client import mqtt_service
+from django.core.cache import cache
 
 
 class MQTTStatusConsumer(AsyncWebsocketConsumer):
@@ -28,22 +27,39 @@ class MQTTStatusConsumer(AsyncWebsocketConsumer):
             action = data.get('action')
             node_id = data.get('node_id')
             
-            result = None
             if action == 'start':
-                result = await self.start_node(node_id)
+                await self.start_node(node_id)
+                await self.send(text_data=json.dumps({
+                    'type': 'action_result',
+                    'action': 'start',
+                    'node_id': node_id,
+                    'status': 'queued'
+                }))
+            
             elif action == 'stop':
-                result = await self.stop_node(node_id)
+                await self.stop_node(node_id)
+                await self.send(text_data=json.dumps({
+                    'type': 'action_result',
+                    'action': 'stop',
+                    'node_id': node_id,
+                    'status': 'queued'
+                }))
+            
             elif action == 'restart':
-                result = await self.restart_node(node_id)
+                await self.restart_node(node_id)
+                await self.send(text_data=json.dumps({
+                    'type': 'action_result',
+                    'action': 'restart',
+                    'node_id': node_id,
+                    'status': 'queued'
+                }))
+            
             elif action == 'get_status':
                 status = await self.get_mqtt_status()
                 await self.send(text_data=json.dumps({
                     'type': 'status',
                     'data': status
                 }))
-                return
-            
-            # Status will be broadcast automatically via the mqtt_client broadcast functions
         
         except Exception as e:
             await self.send(text_data=json.dumps({
@@ -54,7 +70,7 @@ class MQTTStatusConsumer(AsyncWebsocketConsumer):
     async def status_update(self, event):
         """Handle status update messages from group"""
         await self.send(text_data=json.dumps({
-            'type': 'status',
+            'type': 'status_update',
             'data': event['status']
         }))
     
@@ -64,9 +80,6 @@ class MQTTStatusConsumer(AsyncWebsocketConsumer):
             'type': 'message',
             'data': {
                 'node_id': event['node_id'],
-                'node_name': event['node_name'],
-                'message_id': event['message_id'],
-                'wigos_id': event['wigos_id'],
                 'topic': event['topic'],
                 'timestamp': event['timestamp']
             }
@@ -74,16 +87,45 @@ class MQTTStatusConsumer(AsyncWebsocketConsumer):
     
     @database_sync_to_async
     def get_mqtt_status(self):
-        return mqtt_service.get_status()
+        """Get status from cache instead of direct service"""
+        from wis2watch.core.models import WIS2Node
+        
+        status = {}
+        active_nodes = WIS2Node.objects.filter(status='active')
+        
+        for node in active_nodes:
+            cache_key = f"mqtt_node_{node.id}_status"
+            node_status = cache.get(cache_key)
+            
+            if node_status:
+                status[node.id] = node_status
+            else:
+                status[node.id] = {
+                    'node_id': node.id,
+                    'status': 'unknown',
+                    'last_update': None,
+                    'error': None
+                }
+        
+        return status
     
     @database_sync_to_async
     def start_node(self, node_id):
-        return mqtt_service.start_node(int(node_id))
+        """Queue start task in Celery"""
+        from wis2watch.mqtt.tasks import start_mqtt_monitoring
+        start_mqtt_monitoring.delay(int(node_id))
+        return True
     
     @database_sync_to_async
     def stop_node(self, node_id):
-        return mqtt_service.stop_node(int(node_id))
+        """Queue stop task in Celery"""
+        from wis2watch.mqtt.tasks import stop_mqtt_monitoring
+        stop_mqtt_monitoring.delay(int(node_id))
+        return True
     
     @database_sync_to_async
     def restart_node(self, node_id):
-        return mqtt_service.restart_node(int(node_id))
+        """Queue restart task in Celery"""
+        from wis2watch.mqtt.tasks import restart_mqtt_monitoring
+        restart_mqtt_monitoring.delay(int(node_id))
+        return True
