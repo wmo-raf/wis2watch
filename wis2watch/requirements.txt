@@ -20,3 +20,4 @@ uvicorn[standard]==0.38.0
 wagtail-font-awesome-svg==2.0
 paho-mqtt==2.1.0
 channels-redis==4.3.0
+django-vue-utils==0.1.8
