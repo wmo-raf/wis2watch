@@ -78,6 +78,7 @@ INSTALLED_APPS = [
     "wis2watch.home",
     "wis2watch.core",
     "wis2watch.api",
+    "wis2watch.ws",
     "wis2watch.monitoring",
 ]
 
