@@ -351,6 +351,25 @@ def sync_metadata(node_id):
     return combined_stats, None
 
 
+def sync_all_nodes():
+    """
+    Trigger synchronization for all active nodes.
+    Should be run periodically (e.g., every hour).
+    """
+    from .models import WIS2Node
+    
+    active_nodes = WIS2Node.objects.filter(status='active')
+    
+    logger.info(f"Starting sync for {active_nodes.count()} active nodes")
+    
+    for node in active_nodes:
+        # Chain the tasks: first sync metadata, then stations
+        sync_discovery_metadata(node.id)
+        sync_stations(node.id)
+    
+    logger.info("Sync completed for all active nodes")
+
+
 def health_check_nodes():
     """
     Perform health checks on all active nodes.
