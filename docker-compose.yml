@@ -60,6 +60,7 @@ services:
     restart: always
     environment:
       <<: *backend-variables
+      DJANGO_CONTEXT: "web"
     expose:
       - "8000"
     depends_on:
@@ -87,6 +88,7 @@ services:
     command: celery-worker
     environment:
       <<: *backend-variables
+      DJANGO_CONTEXT: "celery-worker"
       WAIT_HOSTS: wis2watch_db:5432,wis2watch_redis:6379,adl:8000
     depends_on:
       - wis2watch_db
@@ -111,6 +113,7 @@ services:
     command: celery-beat
     environment:
       <<: *backend-variables
+      DJANGO_CONTEXT: "celery-beat"
       WAIT_HOSTS: wis2watch_db:5432,wis2watch_redis:6379,wis2watch:8000
     depends_on:
       - wis2watch_db
