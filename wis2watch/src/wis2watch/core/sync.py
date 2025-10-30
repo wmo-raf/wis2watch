@@ -5,8 +5,6 @@ import requests
 from django.contrib.gis.geos import Point
 from django.utils import timezone as dj_timezone
 
-from .models import WIS2Node, Station, Dataset, SyncLog
-
 logger = logging.getLogger(__name__)
 
 
@@ -17,6 +15,8 @@ def sync_discovery_metadata(node_id):
     Args:
         node_id: ID of the WIS2Node
     """
+    
+    from .models import WIS2Node, Dataset, SyncLog
     
     try:
         node = WIS2Node.objects.get(id=node_id)
@@ -193,6 +193,8 @@ def sync_stations(node_id):
         node_id: ID of the WIS2Node
     """
     
+    from .models import WIS2Node, Station, Dataset, SyncLog
+    
     try:
         node = WIS2Node.objects.get(id=node_id)
         logger.info(f"Starting stations sync for {node.name}")
@@ -353,6 +355,9 @@ def health_check_nodes():
     """
     Perform health checks on all active nodes.
     """
+    
+    from .models import WIS2Node
+    
     nodes = WIS2Node.objects.filter(status='active')
     results = []
     

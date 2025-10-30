@@ -1,4 +1,5 @@
 from django.contrib.gis.db import models
+from django.contrib.gis.geos import Polygon
 from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
@@ -77,6 +78,16 @@ class WIS2Node(TimeStampedModel):
         blank=True,
         help_text="WMO centre ID"
     )
+    
+    @property
+    def country_center_point(self):
+        """Returns the geographic center point of the country"""
+        country = self.country
+        geo_extent = country.geo_extent
+        if geo_extent:
+            centroid = Polygon.from_bbox(geo_extent).centroid
+            return [centroid.x, centroid.y]
+        return None
     
     panels = [
         FieldPanel('name'),

@@ -3,8 +3,11 @@ from django.contrib import admin
 from django.urls import include, path
 from wagtail.admin import urls as wagtailadmin_urls
 
+from wis2watch.api import urls as api_urls
+
 urlpatterns = [
     path("debug/django-admin/", admin.site.urls),
+    path("api/", include(api_urls), name="wis2watch_api"),
     path("", include(wagtailadmin_urls)),
 ]
 

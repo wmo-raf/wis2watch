@@ -15,6 +15,7 @@ import os
 
 import dj_database_url
 import environ
+
 from wis2watch.version import VERSION
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -40,6 +41,10 @@ DEBUG = env('DEBUG', False)
 # Application definition
 
 INSTALLED_APPS = [
+    
+    'daphne',
+    'channels',
+    
     "wagtail.contrib.forms",
     "wagtail.contrib.redirects",
     "wagtail.embeds",
@@ -67,9 +72,13 @@ INSTALLED_APPS = [
     "django_countries",
     "django_celery_beat",
     "django_celery_results",
+    "django_vue_utilities",
+    "rest_framework",
     
     "wis2watch.home",
     "wis2watch.core",
+    "wis2watch.api",
+    "wis2watch.monitoring",
 ]
 
 MIDDLEWARE = [
@@ -256,6 +265,15 @@ CACHES = {
 
 CELERY_CACHE_BACKEND = "default"
 
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [REDIS_URL],
+        },
+    },
+}
+
 WIS2WATCH_LOG_LEVEL = env.str("WIS2WATCH_LOG_LEVEL", "INFO")
 WIS2WATCH_DATABASE_LOG_LEVEL = env.str("WIS2WATCH_DATABASE_LOG_LEVEL", "ERROR")
 
@@ -286,3 +304,9 @@ LOGGING = {
         "level": WIS2WATCH_DATABASE_LOG_LEVEL,
     },
 }
+
+VUE_FRONTEND_USE_TYPESCRIPT = False
+VUE_FRONTEND_USE_DEV_SERVER = DEBUG
+VUE_FRONTEND_DEV_SERVER_URL = 'http://localhost:5173'
+VUE_FRONTEND_DEV_SERVER_PATH = '/static/vue/src'
+VUE_FRONTEND_STATIC_PATH = 'vue'

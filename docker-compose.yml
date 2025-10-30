@@ -1,0 +1,138 @@
+# backend environment variables, their defaults if left blank etc.
+x-backend-variables: &backend-variables
+  WAIT_HOSTS: wis2watch_db:5432,wis2watch_redis:6379
+  WAIT_TIMEOUT: 120
+  WIS2WATCH_GUNICORN_NUM_OF_WORKERS: ${WIS2WATCH_GUNICORN_NUM_OF_WORKERS:-4}
+  WIS2WATCH_GUNICORN_TIMEOUT: ${WIS2WATCH_GUNICORN_TIMEOUT:-300}
+  DEBUG: ${WIS2WATCH_DEBUG:-False}
+  WAGTAIL_SITE_NAME: ${WAGTAIL_SITE_NAME:-WIS2WATCH}
+  TIME_ZONE: ${TIME_ZONE:-UTC}
+  SECRET_KEY: ${SECRET_KEY:?}
+  ALLOWED_HOSTS: ${ALLOWED_HOSTS}
+  CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS}
+  DATABASE_URL: timescalegis://${WIS2WATCH_DB_USER}:${WIS2WATCH_DB_PASSWORD}@wis2watch_db:5432/${WIS2WATCH_DB_NAME}
+  EMAIL_HOST: ${EMAIL_HOST:-}
+  EMAIL_PORT: ${EMAIL_PORT:-}
+  EMAIL_USE_TLS: ${EMAIL_USE_TLS:-}
+  EMAIL_HOST_USER: ${EMAIL_HOST_USER:-}
+  EMAIL_HOST_PASSWORD: ${EMAIL_HOST_PASSWORD:-}
+  DJANGO_ADMINS: ${DJANGO_ADMINS:-}
+  WAGTAILADMIN_BASE_URL: ${WAGTAILADMIN_BASE_URL:-}
+  LANGUAGE_CODE: ${LANGUAGE_CODE:-en}
+  WIS2WATCH_LOG_LEVEL: ${WIS2WATCH_LOG_LEVEL:-WARN}
+  WIS2WATCH_DATABASE_LOG_LEVEL: ${WIS2WATCH_DATABASE_LOG_LEVEL:-ERROR}
+  WIS2WATCH_CELERY_BEAT_DEBUG_LEVEL: ${WIS2WATCH_CELERY_BEAT_DEBUG_LEVEL:-INFO}
+  WIS2WATCH_CELERY_WORKER_LOG_LEVEL: ${WIS2WATCH_CELERY_WORKER_LOG_LEVEL:-INFO}
+  MIGRATE_ON_STARTUP: ${MIGRATE_ON_STARTUP:-true}
+  COLLECT_STATICFILES_ON_STARTUP: ${COLLECT_STATICFILES_ON_STARTUP:-true}
+  REDIS_URL: redis://wis2watch_redis:6379/0
+
+services:
+  wis2watch_db:
+    container_name: wis2watch_db
+    image: timescale/timescaledb-ha:pg17
+    restart: always
+    command: postgres -c max_connections=${POSTGRES_MAX_CONNECTIONS:-300} -c shared_buffers=${POSTGRES_SHARED_BUFFERS:-2GB}
+    environment:
+      - POSTGRES_USER=${WIS2WATCH_DB_USER:-?}
+      - POSTGRES_DB=${WIS2WATCH_DB_NAME:-?}
+      - POSTGRES_PASSWORD=${WIS2WATCH_DB_PASSWORD:-?}
+    ports:
+      - "5432"
+    volumes:
+      - ${WIS2WATCH_DB_VOLUME:-./docker/db_data/}:/home/postgres/pgdata/data
+
+  wis2watch_redis:
+    image: redis:alpine
+    container_name: wis2watch_redis
+    restart: always
+
+  wis2watch:
+    container_name: wis2watch
+    image: wis2watch
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - UID=${UID}
+        - GID=${GID}
+        - DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX=${DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX:-}
+    restart: always
+    environment:
+      <<: *backend-variables
+    expose:
+      - "8000"
+    depends_on:
+      - wis2watch_db
+      - wis2watch_redis
+    ports:
+      - "8000"
+    volumes:
+      - ${WIS2WATCH_STATIC_VOLUME:-./docker/static}:/wis2watch/app/src/wis2watch/static
+      - ${WIS2WATCH_MEDIA_VOLUME:-./docker/media}:/wis2watch/app/src/wis2watch/media
+      - ${WIS2WATCH_BACKUP_VOLUME:-./docker/backup}:/wis2watch/app/src/wis2watch/backup
+
+  wis2watch_celery_worker:
+    container_name: wis2watch_celery_worker
+    image: wis2watch
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - UID=${UID}
+        - GID=${GID}
+        - DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX=${DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX:-}
+    restart: always
+    init: true
+    command: celery-worker
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: wis2watch_db:5432,wis2watch_redis:6379,adl:8000
+    depends_on:
+      - wis2watch_db
+      - wis2watch_redis
+    volumes:
+      - ${WIS2WATCH_STATIC_VOLUME:-./docker/static}:/wis2watch/app/src/wis2watch/static
+      - ${WIS2WATCH_MEDIA_VOLUME:-./docker/media}:/wis2watch/app/src/wis2watch/media
+      - ${WIS2WATCH_BACKUP_VOLUME:-./docker/backup}:/wis2watch/app/src/wis2watch/backup
+
+  wis2watch_celery_beat:
+    container_name: wis2watch_celery_beat
+    image: wis2watch
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - UID=${UID}
+        - GID=${GID}
+        - DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX=${DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX:-}
+    restart: always
+    init: true
+    command: celery-beat
+    environment:
+      <<: *backend-variables
+      WAIT_HOSTS: wis2watch_db:5432,wis2watch_redis:6379,wis2watch:8000
+    depends_on:
+      - wis2watch_db
+      - wis2watch_redis
+    volumes:
+      - ${WIS2WATCH_STATIC_VOLUME:-./docker/static}:/wis2watch/app/src/wis2watch/static
+      - ${WIS2WATCH_MEDIA_VOLUME:-./docker/media}:/wis2watch/app/src/wis2watch/media
+      - ${WIS2WATCH_BACKUP_VOLUME:-./docker/backup}:/wis2watch/app/src/wis2watch/backup
+
+  wis2watch_web_proxy:
+    container_name: wis2watch_web_proxy
+    image: nginx:1.20.2-alpine
+    restart: always
+    volumes:
+      - ${WIS2WATCH_STATIC_VOLUME:-./docker/static}:/wagtail_static
+      - ${WIS2WATCH_MEDIA_VOLUME:-./docker/media}:/wagtail_media
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf
+    ports:
+      - ${WIS2WATCH_WEB_PROXY_PORT:-80}:80
+
+
+networks:
+  default:
+    external: true
+    name: ${WIS2WATCH_NETWORK_NAME:-wis2watch}
