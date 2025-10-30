@@ -127,7 +127,7 @@ services:
     volumes:
       - ${WIS2WATCH_STATIC_VOLUME:-./docker/static}:/wagtail_static
       - ${WIS2WATCH_MEDIA_VOLUME:-./docker/media}:/wagtail_media
-      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./nginx.conf:/etc/nginx/nginx.conf
     ports:
       - ${WIS2WATCH_WEB_PROXY_PORT:-80}:80
 
