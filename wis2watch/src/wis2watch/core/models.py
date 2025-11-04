@@ -55,6 +55,11 @@ class WIS2Node(TimeStampedModel):
         help_text="Custom URL for stations list. Auto-generated for wis2box."
     )
     
+    verify_ssl = models.BooleanField(
+        default=True,
+        help_text="Verify SSL certificates when connecting to the node"
+    )
+    
     # MQTT Configuration
     mqtt_host = models.CharField(max_length=255, blank=True)
     mqtt_port = models.IntegerField(default=1883)
@@ -100,6 +105,8 @@ class WIS2Node(TimeStampedModel):
             FieldPanel('discovery_metadata_url'),
             FieldPanel('stations_url'),
         ], heading="API Endpoints"),
+        
+        FieldPanel('verify_ssl'),
         
         MultiFieldPanel([
             FieldPanel('mqtt_host'),

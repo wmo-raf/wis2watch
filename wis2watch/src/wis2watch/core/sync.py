@@ -35,7 +35,8 @@ def sync_discovery_metadata(node_id):
         response = requests.get(
             node.discovery_metadata_url,
             timeout=30,
-            headers={'Accept': 'application/json'}
+            headers={'Accept': 'application/json'},
+            verify=node.verify_ssl,
         )
         response.raise_for_status()
         
@@ -212,7 +213,8 @@ def sync_stations(node_id):
         response = requests.get(
             node.stations_url,
             timeout=30,
-            headers={'Accept': 'application/json'}
+            headers={'Accept': 'application/json'},
+            verify=node.verify_ssl,
         )
         response.raise_for_status()
         
@@ -386,7 +388,8 @@ def health_check_nodes():
             response = requests.get(
                 node.discovery_metadata_url,
                 timeout=10,
-                headers={'Accept': 'application/json'}
+                headers={'Accept': 'application/json'},
+                verify=node.verify_ssl,
             )
             
             if response.status_code == 200:
