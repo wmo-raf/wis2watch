@@ -386,7 +386,7 @@ const showDataPoint = (geometry) => {
   // Remove marker after animation completes (3 seconds)
   setTimeout(() => {
     tempMarker.remove()
-  }, 3000)
+  }, 5000)
 }
 
 const formatRelativeTime = (timestamp) => {
