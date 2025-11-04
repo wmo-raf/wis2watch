@@ -553,7 +553,7 @@ defineExpose({
   }
 }
 
-/* NEW: Temporary data point visualization */
+
 .data-point {
   width: 16px;
   height: 16px;
