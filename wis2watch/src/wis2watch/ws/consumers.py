@@ -76,12 +76,16 @@ class MQTTStatusConsumer(AsyncWebsocketConsumer):
     
     async def message_received(self, event):
         """Handle message received notifications"""
+        
+        payload = event['payload']
+        
         await self.send(text_data=json.dumps({
             'type': 'message',
             'data': {
                 'node_id': event['node_id'],
                 'topic': event['topic'],
-                'timestamp': event['timestamp']
+                'timestamp': event['timestamp'],
+                "geometry": payload.get('geometry'),
             }
         }))
     

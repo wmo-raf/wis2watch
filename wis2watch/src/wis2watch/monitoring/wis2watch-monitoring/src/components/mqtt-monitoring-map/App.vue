@@ -129,11 +129,17 @@ const handleMessageReceived = (data) => {
   console.log('📬 Message received for node:', data.node_id)
 
   if (mapRef.value) {
+    // Pulse the node marker
     mapRef.value.pulseMarker(data.node_id)
 
     // Show notification with topic info
     const topicInfo = data.topic ? ` (${data.topic})` : ''
     mapRef.value.showNotif(`Message received${topicInfo}`)
+
+    // Show data point on map if message contains geometry
+    if (data.geometry) {
+      mapRef.value.showDataPoint(data.geometry)
+    }
   }
 
   // Refresh status to get updated message count

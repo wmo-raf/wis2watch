@@ -68,7 +68,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['node-click', 'action'])
+const emit = defineEmits(['node-click'])
 
 const mapContainer = ref(null)
 const map = ref(null)
@@ -194,7 +194,10 @@ const createMarker = (node, coords) => {
   // Don't add inline styles that will conflict with CSS
   updateMarkerStyle(el, node)
 
-  const marker = new maplibregl.Marker({element: el})
+  const marker = new maplibregl.Marker({
+    element: el,
+    draggable: false
+  })
       .setLngLat(coords)
       .addTo(map.value)
 
@@ -233,7 +236,6 @@ const showPopup = (node, coords) => {
           : 'danger'
       : 'secondary'
 
-
   // Format last message time
   let lastMessageHTML = ''
   if (isMonitored && node.last_message_time) {
@@ -254,6 +256,16 @@ const showPopup = (node, coords) => {
       </div>
     `
   }
+
+  // Link to node base URL
+  const nodeUrlHTML = node.base_url ? `
+    <div class="popup-actions">
+      <a href="${node.base_url}" target="_blank" rel="noopener noreferrer" class="p-button p-button-outlined p-button-sm">
+        <i class="pi pi-external-link"></i>
+        <span>Visit Node</span>
+      </a>
+    </div>
+  ` : ''
 
   const popup = new maplibregl.Popup({closeButton: true, className: 'prime-popup'})
       .setLngLat(coords)
@@ -305,6 +317,8 @@ const showPopup = (node, coords) => {
           `
           }
         </div>
+
+        ${nodeUrlHTML}
       </div>
     `
       )
@@ -331,6 +345,47 @@ const showNotif = (message) => {
   showNotification.value = true
   setTimeout(() => {
     showNotification.value = false
+  }, 3000)
+}
+
+/**
+ * Show a temporary pulsing data point at a specific location
+ * Used to visualize incoming MQTT messages with geometry data
+ *
+ * @param {Object} geometry - GeoJSON geometry object with coordinates
+ * Example: {type: "Point", coordinates: [lon, lat, elevation]}
+ */
+const showDataPoint = (geometry) => {
+  if (!map.value) {
+    console.warn('⚠️ Map not initialized yet')
+    return
+  }
+
+  if (!geometry || geometry.type !== 'Point' || !geometry.coordinates) {
+    console.warn('⚠️ Invalid geometry for data point:', geometry)
+    return
+  }
+
+  const [lon, lat] = geometry.coordinates
+
+  // Create temporary marker element
+  const el = document.createElement('div')
+  el.className = 'data-point'
+
+  // Create marker
+  const tempMarker = new maplibregl.Marker({
+    element: el,
+    draggable: false,
+    anchor: 'center'
+  })
+      .setLngLat([lon, lat])
+      .addTo(map.value)
+
+  console.log(`📍 Data point shown at [${lon.toFixed(4)}, ${lat.toFixed(4)}]`)
+
+  // Remove marker after animation completes (3 seconds)
+  setTimeout(() => {
+    tempMarker.remove()
   }, 3000)
 }
 
@@ -365,14 +420,9 @@ const formatRelativeTime = (timestamp) => {
 defineExpose({
   pulseMarker,
   showNotif,
-  flyToNode
+  flyToNode,
+  showDataPoint  // NEW: Expose the data point visualization function
 })
-
-if (typeof window !== 'undefined') {
-  window.handleMQTTAction = (action, nodeId) => {
-    emit('action', {action, nodeId})
-  }
-}
 </script>
 
 <style scoped>
@@ -472,6 +522,7 @@ if (typeof window !== 'undefined') {
   }
 }
 
+/* Node markers */
 .marker {
   width: 30px;
   height: 30px;
@@ -482,19 +533,17 @@ if (typeof window !== 'undefined') {
   transition: box-shadow 0.3s, filter 0.3s;
 }
 
-/* Use filter and box-shadow for hover effect - they don't affect positioning */
 .marker:hover {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
   filter: brightness(1.1);
 }
 
 .marker.pulse {
-  animation: pulse 2s infinite;
+  animation: markerPulse 2s ease-out;
 }
 
-@keyframes pulse {
-  0%,
-  100% {
+@keyframes markerPulse {
+  0%, 100% {
     opacity: 1;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   }
@@ -504,7 +553,52 @@ if (typeof window !== 'undefined') {
   }
 }
 
+/* NEW: Temporary data point visualization */
+.data-point {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(34, 197, 94, 0.9); /* Bright green */
+  border: 2px solid rgba(255, 255, 255, 1);
+  box-shadow: 0 0 15px rgba(34, 197, 94, 0.8),
+  0 0 30px rgba(34, 197, 94, 0.4);
+  animation: dataPointPulse 3s ease-out forwards;
+  pointer-events: none; /* Don't interfere with map interactions */
+}
 
+@keyframes dataPointPulse {
+  0% {
+    transform: scale(0);
+    opacity: 0;
+    box-shadow: 0 0 15px rgba(34, 197, 94, 0.8),
+    0 0 30px rgba(34, 197, 94, 0.4);
+  }
+  15% {
+    transform: scale(1.3);
+    opacity: 1;
+    box-shadow: 0 0 20px rgba(34, 197, 94, 1),
+    0 0 40px rgba(34, 197, 94, 0.6);
+  }
+  25% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  /* Hold visible with pulsing glow */
+  75% {
+    transform: scale(1);
+    opacity: 1;
+    box-shadow: 0 0 15px rgba(34, 197, 94, 0.8),
+    0 0 30px rgba(34, 197, 94, 0.4);
+  }
+  /* Fade out and expand */
+  100% {
+    transform: scale(2);
+    opacity: 0;
+    box-shadow: 0 0 5px rgba(34, 197, 94, 0.2);
+  }
+}
+
+/* Popup styles */
 :deep(.prime-popup .maplibregl-popup-content) {
   padding: 0;
   border-radius: var(--border-radius);
@@ -560,10 +654,35 @@ if (typeof window !== 'undefined') {
   padding: 1rem;
   border-top: 1px solid var(--surface-border);
   display: flex;
-  gap: 0.5rem;
+  justify-content: center;
 }
 
 :deep(.popup-actions .p-button) {
-  flex: 1;
+  width: 100%;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+/* Button styles */
+:deep(.p-button) {
+  font-size: 0.875rem;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+  border: 1px solid var(--primary-color);
+  color: var(--primary-color);
+  background: transparent;
+}
+
+:deep(.p-button:hover) {
+  background: var(--primary-color);
+  color: white;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 </style>
