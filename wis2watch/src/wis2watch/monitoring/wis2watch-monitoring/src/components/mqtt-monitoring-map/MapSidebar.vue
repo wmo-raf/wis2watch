@@ -4,7 +4,7 @@
       <div class="w2w-sidebar-content">
         <div class="w2w-sidebar-header">
           <div class="header-top">
-            <h2>Messages Monitoring</h2>
+            <h2>WIS2 Nodes Monitoring</h2>
             <Button
                 :icon="isCollapsed ? 'pi pi-chevron-right' : 'pi pi-chevron-left'"
                 text
