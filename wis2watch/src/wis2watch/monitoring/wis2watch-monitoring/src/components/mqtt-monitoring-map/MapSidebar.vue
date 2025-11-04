@@ -136,6 +136,7 @@ const statsData = computed(() => [
   {label: 'Total Nodes', value: props.stats.totalNodes, color: 'var(--p-amber-500)'},
   {label: 'Connected', value: props.stats.connectedNodes, color: 'var(--p-green-500)'},
   {label: 'Disconnected', value: props.stats.disconnectedNodes, color: 'var(--p-red-500)'},
+  {label: 'Inactive', value: props.stats.inactiveNodes, color: 'var(--p-gray-500)'},
 ])
 
 const getNodeSeverity = (node) => {

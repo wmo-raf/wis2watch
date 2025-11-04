@@ -1,24 +1,53 @@
 <template>
   <div class="map-container">
     <div ref="mapContainer" class="map"></div>
-    <div v-if="showNotification" class="notification">
-      {{ notificationMessage }}
-    </div>
-    <div class="connection-indicator" :class="connectionStatus">
-      <i class="pi" :class="{
-        'pi-check-circle': connectionStatus === 'connected',
-        'pi-spin pi-spinner': connectionStatus === 'connecting',
-        'pi-times-circle': connectionStatus === 'disconnected' || connectionStatus === 'error'
-      }"></i>
-      {{ statusText }}
-    </div>
+
+    <Card class="ws-status">
+      <template #content>
+        <div class="status-content">
+          <Badge
+              :severity="statusSeverity"
+              :value="statusText"
+          >
+            <i :class="statusIcon"></i>
+          </Badge>
+        </div>
+      </template>
+    </Card>
+
+    <Card class="legend">
+      <template #header>
+        <div class="legend-title">
+          <i class="pi pi-info-circle"></i>
+          Node Status
+        </div>
+      </template>
+      <template #content>
+        <div class="legend-items">
+          <div v-for="item in legendItems" :key="item.label" class="legend-item">
+            <Badge :severity="item.severity"/>
+            <span>{{ item.label }}</span>
+          </div>
+        </div>
+      </template>
+    </Card>
+
+    <transition name="p-message">
+      <Message v-if="showNotification" severity="success" :closable="false" class="notification">
+        <i class="pi pi-check-circle"></i>
+        {{ notificationMessage }}
+      </Message>
+    </transition>
   </div>
 </template>
 
 <script setup>
-import {computed, onMounted, ref, watch} from 'vue'
+import {ref, onMounted, watch, computed} from 'vue'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
+import Card from 'primevue/card'
+import Badge from 'primevue/badge'
+import Message from 'primevue/message'
 
 const props = defineProps({
   nodesByCountry: {
@@ -39,7 +68,7 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['node-click'])
+const emit = defineEmits(['node-click', 'action'])
 
 const mapContainer = ref(null)
 const map = ref(null)
@@ -47,12 +76,43 @@ const markers = ref({})
 const showNotification = ref(false)
 const notificationMessage = ref('')
 
+const legendItems = [
+  {label: 'Connected', severity: 'success'},
+  {label: 'Connecting', severity: 'warning'},
+  {label: 'Disconnected', severity: 'danger'},
+  {label: 'Not Monitored', severity: 'secondary'}
+]
+
+const statusSeverity = computed(() => {
+  switch (props.connectionStatus) {
+    case 'connected':
+      return 'success'
+    case 'disconnected':
+      return 'danger'
+    case 'error':
+      return 'danger'
+    default:
+      return 'warning'
+  }
+})
+
+const statusIcon = computed(() => {
+  switch (props.connectionStatus) {
+    case 'connected':
+      return 'pi pi-check-circle'
+    case 'disconnected':
+      return 'pi pi-times-circle'
+    case 'error':
+      return 'pi pi-exclamation-circle'
+    default:
+      return 'pi pi-spinner pi-spin'
+  }
+})
+
 const statusText = computed(() => {
   switch (props.connectionStatus) {
     case 'connected':
       return 'Connected'
-    case 'connecting':
-      return 'Connecting...'
     case 'disconnected':
       return 'Disconnected'
     case 'error':
@@ -87,8 +147,8 @@ const initMap = () => {
     zoom: 2
   })
 
-  map.value.addControl(new maplibregl.NavigationControl())
-  map.value.addControl(new maplibregl.FullscreenControl())
+  map.value.addControl(new maplibregl.FullscreenControl(), "bottom-right")
+  map.value.addControl(new maplibregl.NavigationControl({showCompass: false}), "bottom-right")
 
   map.value.on('load', () => {
     console.log('🗺️ Map loaded')
@@ -173,6 +233,7 @@ const showPopup = (node, coords) => {
           : 'danger'
       : 'secondary'
 
+
   // Format last message time
   let lastMessageHTML = ''
   if (isMonitored && node.last_message_time) {
@@ -193,16 +254,6 @@ const showPopup = (node, coords) => {
       </div>
     `
   }
-
-  // Create link to node base URL
-  const nodeUrlHTML = node.base_url ? `
-    <div class="popup-link">
-      <a href="${node.base_url}" target="_blank" rel="noopener noreferrer" class="p-button p-button-outlined p-button-sm">
-        <i class="pi pi-external-link"></i>
-        <span>Visit Node</span>
-      </a>
-    </div>
-  ` : ''
 
   const popup = new maplibregl.Popup({closeButton: true, className: 'prime-popup'})
       .setLngLat(coords)
@@ -254,8 +305,6 @@ const showPopup = (node, coords) => {
           `
           }
         </div>
-
-        ${nodeUrlHTML}
       </div>
     `
       )
@@ -318,12 +367,19 @@ defineExpose({
   showNotif,
   flyToNode
 })
+
+if (typeof window !== 'undefined') {
+  window.handleMQTTAction = (action, nodeId) => {
+    emit('action', {action, nodeId})
+  }
+}
 </script>
 
 <style scoped>
 .map-container {
   flex: 1;
   position: relative;
+  height: 100%;
 }
 
 .map {
@@ -331,99 +387,139 @@ defineExpose({
   height: 100%;
 }
 
-.notification {
+.ws-status {
   position: absolute;
-  top: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--primary-color);
-  color: white;
-  padding: 1rem 2rem;
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  top: 10px;
+  right: 10px;
   z-index: 1000;
-  animation: slideDown 0.3s ease;
+  min-width: 150px;
 }
 
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateX(-50%) translateY(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(-50%) translateY(0);
-  }
+.ws-status :deep(.p-card-body) {
+  padding: 0.75rem;
 }
 
-.connection-indicator {
-  position: absolute;
-  bottom: 20px;
-  right: 20px;
-  background: white;
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+.ws-status :deep(.p-card-content) {
+  padding: 0;
+}
+
+.status-content {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.status-content :deep(.p-badge) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.875rem;
-  z-index: 100;
+  padding: 0.5rem 0.75rem;
 }
 
-.connection-indicator.connected {
-  color: var(--green-600);
+.legend {
+  position: absolute;
+  bottom: 30px;
+  left: 10px;
+  z-index: 1000;
+  min-width: 200px;
 }
 
-.connection-indicator.connecting {
-  color: var(--yellow-600);
+.legend :deep(.p-card-body) {
+  padding: 1rem;
 }
 
-.connection-indicator.disconnected,
-.connection-indicator.error {
-  color: var(--red-600);
+.legend-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--surface-border);
 }
 
-:deep(.marker) {
-  transition: transform 0.2s;
+.legend-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-:deep(.marker:hover) {
-  transform: scale(1.2);
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.875rem;
 }
 
-:deep(.marker.pulse) {
-  animation: pulse 1s ease-out;
+.notification {
+  position: absolute;
+  top: 70px;
+  right: 10px;
+  z-index: 1000;
+  min-width: 300px;
+  animation: slideInRight 0.3s ease-out;
+}
+
+@keyframes slideInRight {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.marker {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 3px solid white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+  transition: box-shadow 0.3s, filter 0.3s;
+}
+
+/* Use filter and box-shadow for hover effect - they don't affect positioning */
+.marker:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  filter: brightness(1.1);
+}
+
+.marker.pulse {
+  animation: pulse 2s infinite;
 }
 
 @keyframes pulse {
-  0%, 100% {
-    transform: scale(1);
+  0%,
+  100% {
     opacity: 1;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   }
   50% {
-    transform: scale(1.5);
-    opacity: 0.7;
+    opacity: 0.6;
+    box-shadow: 0 2px 20px rgba(0, 0, 0, 0.6);
   }
 }
 
-/* Popup styles */
-:deep(.maplibregl-popup-content) {
+
+:deep(.prime-popup .maplibregl-popup-content) {
   padding: 0;
-  border-radius: 8px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-radius: var(--border-radius);
+  overflow: hidden;
   min-width: 300px;
 }
 
-:deep(.p-card) {
-  border-radius: 8px;
-  overflow: hidden;
+:deep(.prime-popup .p-card) {
+  border: none;
+  box-shadow: none;
 }
 
 :deep(.popup-header) {
   padding: 1rem;
-  background: var(--surface-50);
-  border-bottom: 1px solid var(--surface-200);
+  border-bottom: 1px solid var(--surface-border);
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -433,23 +529,20 @@ defineExpose({
   margin: 0;
   font-size: 1.1rem;
   font-weight: 600;
-  color: var(--text-color);
 }
 
 :deep(.popup-body) {
   padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
 :deep(.info-row) {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  margin-bottom: 0.75rem;
-  font-size: 0.9rem;
-}
-
-:deep(.info-row:last-child) {
-  margin-bottom: 0;
+  font-size: 0.875rem;
 }
 
 :deep(.info-row i) {
@@ -460,62 +553,17 @@ defineExpose({
 :deep(.info-row label) {
   font-weight: 600;
   color: var(--text-color-secondary);
-  min-width: 90px;
+  min-width: 100px;
 }
 
-:deep(.info-row span) {
-  color: var(--text-color);
-}
-
-:deep(.popup-link) {
+:deep(.popup-actions) {
   padding: 1rem;
-  border-top: 1px solid var(--surface-200);
+  border-top: 1px solid var(--surface-border);
   display: flex;
-  justify-content: center;
-}
-
-:deep(.popup-link .p-button) {
-  width: 100%;
-  justify-content: center;
   gap: 0.5rem;
 }
 
-/* PrimeVue badge and chip overrides for popup */
-:deep(.p-badge) {
-  font-size: 0.75rem;
-  padding: 0.25rem 0.5rem;
-}
-
-:deep(.p-chip) {
-  font-size: 0.75rem;
-  padding: 0.25rem 0.5rem;
-  background: var(--surface-100);
-}
-
-/* Button styles in popup */
-:deep(.p-button) {
-  font-size: 0.875rem;
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-  transition: all 0.2s;
-  text-decoration: none;
-  border: 1px solid var(--primary-color);
-  color: var(--primary-color);
-  background: transparent;
-}
-
-:deep(.p-button:hover) {
-  background: var(--primary-color);
-  color: white;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-:deep(.p-button i) {
-  font-size: 1rem;
+:deep(.popup-actions .p-button) {
+  flex: 1;
 }
 </style>

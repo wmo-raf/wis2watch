@@ -12,6 +12,7 @@ export function useMapNodes() {
         totalNodes: allNodes.value.length,
         connectedNodes: Object.values(monitoredNodes.value).filter(n => n.is_connected).length,
         disconnectedNodes: Object.values(monitoredNodes.value).filter(n => !n.is_connected).length,
+        inactiveNodes: allNodes.value.length - Object.keys(monitoredNodes.value).length
     }))
 
     const filteredNodes = computed(() => {
