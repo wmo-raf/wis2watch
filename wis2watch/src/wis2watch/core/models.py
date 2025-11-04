@@ -1,5 +1,7 @@
 from django.contrib.gis.db import models
 from django.contrib.gis.geos import Polygon
+from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
@@ -144,6 +146,15 @@ class WIS2Node(TimeStampedModel):
         datasets = self.datasets.filter(status='active')
         topics = [dataset.wmo_topic_hierarchy for dataset in datasets]
         return topics
+
+
+@receiver(post_save, sender=WIS2Node)
+def sync_node_metadata(sender, instance, created, **kwargs):
+    """
+    Signal to trigger metadata synchronization when a WIS2Node is created or updated.
+    """
+    from wis2watch.core.tasks import run_sync_metadata
+    run_sync_metadata.delay(instance.id)
 
 
 @register_snippet

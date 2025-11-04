@@ -55,6 +55,24 @@ def run_sync_stations(self, node_id):
     return stats
 
 
+@shared_task(bind=True, max_retries=3)
+def run_sync_metadata(self, node_id):
+    stats, exc = sync_discovery_metadata(node_id)
+    
+    if not stats and exc:
+        logger.error(f"[DISCOVERY SYNC] No stats returned for node {node_id}. Retrying...")
+        
+        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+    
+    stats, exc = sync_stations(node_id)
+    if not stats and exc:
+        logger.error(f"[STATION SYNC] No stats returned for node {node_id}. Retrying...")
+        
+        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+    
+    return stats
+
+
 @shared_task
 def run_sync_all_nodes():
     """
