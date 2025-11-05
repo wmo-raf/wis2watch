@@ -30,23 +30,6 @@ def dataset_stations_as_csv(dataset, output_file):
     
     stations = dataset.stations.all()
     
-    s = {
-        "id": "0-566-0-65281",
-        "type": "Feature",
-        "geometry": {"type": "Point", "coordinates": [8.11368, 6.32485, 44.0]},
-        "properties": {
-            "id": "0-566-0-65281",
-            "url": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-566-0-65281",
-            "name": "ABAKALIKI",
-            "topic": "origin/a/wis2/ng-nimet/data/core/weather/surface-based-observations/synop",
-            "status": "operational",
-            "topics": ["origin/a/wis2/ng-nimet/data/core/weather/surface-based-observations/synop"],
-            "wmo_region": "africa", "facility_type": "landFixed", "territory_name": "NGA",
-            "barometer_height": 91.0, "wigos_station_identifier": "0-566-0-65281",
-            "traditional_station_identifier": ""
-        }
-    }
-    
     # Write station data
     for station in stations:
         raw_json = station.raw_json
