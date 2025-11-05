@@ -90,16 +90,6 @@ def node_details(request, node_id):
     Returns:
         HttpResponse: Rendered page with node details.
     """
-    node = get_object_or_404(WIS2Node, pk=node_id)
-    
-    nodes_index_url_name = WIS2NodeViewSet().get_url_name("index")
-    nodes_index_url = reverse_lazy(nodes_index_url_name)
-    
-    breadcrumbs_items = [
-        {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-        {"url": nodes_index_url, "label": _("Nodes")},
-        {"url": "", "label": node.name},
-    ]
     
     if request.method == "POST":
         form = SyncNodeForm(request.POST)
@@ -115,6 +105,17 @@ def node_details(request, node_id):
                 messages.success(request, _("Node synchronization completed successfully."))
         else:
             messages.error(request, _("Invalid form submission."))
+    
+    node = get_object_or_404(WIS2Node, pk=node_id)
+    
+    nodes_index_url_name = WIS2NodeViewSet().get_url_name("index")
+    nodes_index_url = reverse_lazy(nodes_index_url_name)
+    
+    breadcrumbs_items = [
+        {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+        {"url": nodes_index_url, "label": _("Nodes")},
+        {"url": "", "label": node.name},
+    ]
     
     context = {
         "breadcrumbs_items": breadcrumbs_items,
