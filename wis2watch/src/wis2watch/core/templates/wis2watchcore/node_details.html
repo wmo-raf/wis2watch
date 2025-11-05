@@ -1,0 +1,363 @@
+{% extends "wagtailadmin/generic/base.html" %}
+
+{% load i18n wagtailadmin_tags static %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .node-header {
+            background: #f5f5f5;
+            padding: 20px;
+            border-radius: 5px;
+            margin-top: 30px;
+            margin-bottom: 30px;
+        }
+
+        .node-info {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .info-item {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #666;
+            font-size: 0.85em;
+            margin-bottom: 5px;
+        }
+
+        .info-value {
+            color: #333;
+        }
+
+        .dataset-card {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 5px;
+            margin-bottom: 25px;
+            overflow: hidden;
+        }
+
+        .dataset-header {
+            background: #f8f9fa;
+            padding: 15px 20px;
+            border-bottom: 1px solid #e0e0e0;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .dataset-header:hover {
+            background: #e9ecef;
+        }
+
+        .dataset-title {
+            font-size: 1.1em;
+            font-weight: 600;
+            color: #333;
+            margin: 0;
+        }
+
+        .dataset-meta {
+            display: flex;
+            gap: 15px;
+            margin-top: 8px;
+            font-size: 0.9em;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 3px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+
+        .badge-core {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge-recommended {
+            background: #cce5ff;
+            color: #004085;
+        }
+
+        .badge-active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge-inactive {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .dataset-content {
+            padding: 20px;
+            display: none;
+        }
+
+        .dataset-content.active {
+            display: block;
+        }
+
+        .dataset-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .stations-section {
+            margin-top: 20px;
+        }
+
+        .stations-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+
+        .stations-title {
+            font-size: 1em;
+            font-weight: 600;
+            color: #555;
+        }
+
+        .station-count {
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .stations-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        .stations-table th {
+            background: #f5f5f5;
+            padding: 10px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid #ddd;
+            font-size: 0.9em;
+        }
+
+        .stations-table td {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            font-size: 0.9em;
+        }
+
+        .stations-table tr:hover {
+            background: #f9f9f9;
+        }
+
+        .no-stations {
+            text-align: center;
+            padding: 30px;
+            color: #999;
+            font-style: italic;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 50px;
+            color: #999;
+        }
+
+        .toggle-icon {
+            transition: transform 0.3s;
+        }
+
+        .toggle-icon.rotated {
+            transform: rotate(180deg);
+        }
+
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <!-- Node Header -->
+    <div class="node-header">
+        <h2>{{ node.name }}</h2>
+        <div class="node-info">
+            <div class="info-item">
+                <span class="info-label">{% trans "Country" %}</span>
+                <span class="info-value">{{ node.country.name }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">{% trans "Node Type" %}</span>
+                <span class="info-value">{{ node.get_node_type_display }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">{% trans "Centre ID" %}</span>
+                <span class="info-value">{{ node.centre_id|default:"—" }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">{% trans "Status" %}</span>
+                <span class="info-value">
+                    <span class="badge badge-{{ node.status }}">{{ node.get_status_display }}</span>
+                </span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">{% trans "Base URL" %}</span>
+                <span class="info-value">
+                    <a href="{{ node.base_url }}" target="_blank">{{ node.base_url }}</a>
+                </span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">{% trans "Last Check" %}</span>
+                <span class="info-value">{{ node.last_check|date:"Y-m-d H:i:s"|default:"—" }}</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Datasets Section -->
+    <h3>{% trans "Datasets" %} ({{ node.datasets.count }})</h3>
+
+    {% if node.datasets.all %}
+        {% for dataset in node.datasets.all %}
+            <div class="dataset-card">
+                <div class="dataset-header" onclick="toggleDataset({{ dataset.id }})">
+                    <div>
+                        <h4 class="dataset-title">{{ dataset.title }}</h4>
+                        <div class="dataset-meta">
+                        <span class="badge badge-{{ dataset.wmo_data_policy }}">
+                            {{ dataset.get_wmo_data_policy_display }}
+                        </span>
+                            <span class="badge badge-{{ dataset.status }}">
+                            {{ dataset.get_status_display }}
+                        </span>
+                            <span class="station-count">
+                            {{ dataset.stations.count }} {% trans "station" %}{{ dataset.stations.count|pluralize }}
+                        </span>
+                        </div>
+                    </div>
+                    <span class="toggle-icon" id="toggle-{{ dataset.id }}">▼</span>
+                </div>
+
+                <div class="dataset-content" id="content-{{ dataset.id }}">
+                    <div class="dataset-details">
+                        <div class="info-item">
+                            <span class="info-label">{% trans "Identifier" %}</span>
+                            <span class="info-value">{{ dataset.identifier }}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">{% trans "WMO Topic Hierarchy" %}</span>
+                            <span class="info-value"><code>{{ dataset.wmo_topic_hierarchy }}</code></span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">{% trans "Created" %}</span>
+                            <span class="info-value">{{ dataset.metadata_created|date:"Y-m-d H:i:s"|default:"—" }}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">{% trans "Updated" %}</span>
+                            <span class="info-value">{{ dataset.metadata_updated|date:"Y-m-d H:i:s"|default:"—" }}</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="info-label">{% trans "Last Synced" %}</span>
+                            <span class="info-value">{{ dataset.last_synced|date:"Y-m-d H:i:s"|default:"—" }}</span>
+                        </div>
+                    </div>
+
+                    <!-- Stations Section -->
+                    <div class="stations-section">
+                        <div class="stations-header">
+                            <h5 class="stations-title">
+                                {% trans "Stations" %} ({{ dataset.stations.count }})
+                            </h5>
+                            {% if dataset.stations.count > 0 %}
+                                {% if dataset.stations.count > 0 %}
+                                    <div>
+                                        <a href="{% url 'preview_dataset_stations_csv' dataset.id %}"
+                                           class="button bicolor button--icon button-secondary button-small">
+                                                     <span class="icon-wrapper">
+                                                         <svg class="icon icon-view" aria-hidden="true">
+                                                             <use href="#icon-view"></use>
+                                                         </svg>
+                                                     </span>
+                                            {% trans "Preview CSV" %}
+                                        </a>
+                                        <a href="{% url 'get_dataset_stations_csv' dataset.id %}"
+                                           class="button bicolor button--icon button-small">
+                                                        <span class="icon-wrapper">
+                                                            <svg class="icon download" aria-hidden="true">
+                                                                <use href="#icon-download"></use>
+                                                            </svg>
+                                                        </span>
+                                            {% trans "Download CSV" %}
+                                        </a>
+                                    </div>
+                                {% endif %}
+                            {% endif %}
+                        </div>
+
+                        {% if dataset.stations.all %}
+                            <table class="listing stations-table">
+                                <thead>
+                                <tr>
+                                    <th>{% trans "WIGOS ID" %}</th>
+                                    <th>{% trans "Name" %}</th>
+                                    <th>{% trans "Facility Type" %}</th>
+                                    <th>{% trans "Location" %}</th>
+                                    <th>{% trans "Last Synced" %}</th>
+                                </tr>
+                                </thead>
+                                <tbody>
+                                {% for station in dataset.stations.all %}
+                                    <tr>
+                                        <td><code>{{ station.wigos_id }}</code></td>
+                                        <td>{{ station.name }}</td>
+                                        <td>{{ station.get_facility_type_display }}</td>
+                                        <td>
+                                            {{ station.location.y|floatformat:4 }}°,
+                                            {{ station.location.x|floatformat:4 }}°
+                                            {% if station.location.z %}
+                                                ({{ station.location.z|floatformat:0 }}m)
+                                            {% endif %}
+                                        </td>
+                                        <td>{{ station.last_synced|date:"Y-m-d H:i:s"|default:"—" }}</td>
+                                    </tr>
+                                {% endfor %}
+                                </tbody>
+                            </table>
+                        {% else %}
+                            <div class="no-stations">
+                                {% trans "No stations associated with this dataset" %}
+                            </div>
+                        {% endif %}
+                    </div>
+                </div>
+            </div>
+        {% endfor %}
+    {% else %}
+        <div class="empty-state">
+            <p>{% trans "No datasets found for this node" %}</p>
+        </div>
+    {% endif %}
+
+
+    <script>
+        function toggleDataset(datasetId) {
+            const content = document.getElementById('content-' + datasetId);
+            const icon = document.getElementById('toggle-' + datasetId);
+
+            content.classList.toggle('active');
+            icon.classList.toggle('rotated');
+        }
+    </script>
+{% endblock %}
