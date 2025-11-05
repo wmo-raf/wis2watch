@@ -329,4 +329,8 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'wis2watch.mqtt.tasks.cleanup_stale_mqtt_locks',
         'schedule': 600.0,  # Every 10 minutes
     },
+    'sync-nodes-metadata': {
+        'task': 'wis2watch.core.tasks.run_sync_all_nodes',
+        'schedule': 3600.0,  # Every hour
+    },
 }

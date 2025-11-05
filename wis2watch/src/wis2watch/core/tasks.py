@@ -56,7 +56,7 @@ def run_sync_stations(self, node_id):
 
 
 @shared_task(bind=True, max_retries=3)
-def run_sync_metadata(self, node_id):
+def run_sync_node_metadata(self, node_id):
     stats, exc = sync_discovery_metadata(node_id)
     
     if not stats and exc:
@@ -87,10 +87,7 @@ def run_sync_all_nodes():
     
     for node in active_nodes:
         # Chain the tasks: first sync metadata, then stations
-        sync_discovery_metadata.apply_async(
-            args=[str(node.id)],
-            link=sync_stations.si(str(node.id))
-        )
+        run_sync_node_metadata.delay(node.id)
     
     logger.info("Sync tasks queued for all active nodes")
 
