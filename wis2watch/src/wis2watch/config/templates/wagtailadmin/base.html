@@ -1,0 +1,25 @@
+{% extends "wagtailadmin/base.html" %}
+{% load static wis2watch_tags %}
+
+{% block branding_logo %}
+
+<style>
+    .sidebar--slim .wis2watch-name {
+        display: none;
+    }
+</style>
+
+
+<div>
+    <div class="wis2watch-name" style="color:#fff;font-size: 20px">WIS2Watch</div>
+    <figure style="max-height: 100px;max-width: 100px;padding: 8px">
+        <img src="{% static 'images/wis2node.png' %}" alt="WIS2Watch Dashboard Logo"
+             style="height: 100%;width: 100%;object-fit: contain"/>
+    </figure>
+</div>
+
+<div style="color:#ababab; font-size: 12px; padding-top:1em; font-weight:600">
+    v{% wis2watch_version %}
+</div>
+{% endblock %}
+

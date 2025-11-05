@@ -89,7 +89,7 @@ services:
     environment:
       <<: *backend-variables
       DJANGO_CONTEXT: "celery-worker"
-      WAIT_HOSTS: wis2watch_db:5432,wis2watch_redis:6379,adl:8000
+      WAIT_HOSTS: wis2watch_db:5432,wis2watch_redis:6379,wis2watch:8000
     depends_on:
       - wis2watch_db
       - wis2watch_redis
