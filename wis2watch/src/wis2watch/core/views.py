@@ -6,9 +6,12 @@ from django.shortcuts import get_object_or_404, render
 from django.urls import reverse_lazy
 from django.utils.translation import gettext as _
 
+from .forms import SyncNodeForm
 from .models import Dataset, WIS2Node
 from .stations import dataset_stations_as_csv
 from .viewsets import WIS2NodeViewSet
+from .sync import sync_metadata
+from wagtail.admin import messages
 
 
 def preview_dataset_stations_csv(request, dataset_id):
@@ -89,17 +92,34 @@ def node_details(request, node_id):
     """
     node = get_object_or_404(WIS2Node, pk=node_id)
     
-    nodes_index_url = WIS2NodeViewSet().get_url_name("index")
+    nodes_index_url_name = WIS2NodeViewSet().get_url_name("index")
+    nodes_index_url = reverse_lazy(nodes_index_url_name)
     
     breadcrumbs_items = [
         {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-        {"url": reverse_lazy(nodes_index_url), "label": _("Nodes")},
+        {"url": nodes_index_url, "label": _("Nodes")},
         {"url": "", "label": node.name},
     ]
+    
+    if request.method == "POST":
+        form = SyncNodeForm(request.POST)
+        if form.is_valid():
+            node_id = form.cleaned_data['node_id']
+            
+            result, error = sync_metadata(node_id)
+            
+            if error:
+                error = str(error)
+                messages.error(request, _("Error during synchronization: ") + error)
+            else:
+                messages.success(request, _("Node synchronization completed successfully."))
+        else:
+            messages.error(request, _("Invalid form submission."))
     
     context = {
         "breadcrumbs_items": breadcrumbs_items,
         "node": node,
+        "nodes_index_url": nodes_index_url,
     }
     
     return render(request, 'wis2watchcore/node_details.html', context)

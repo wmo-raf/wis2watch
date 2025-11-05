@@ -36,6 +36,13 @@
             color: #333;
         }
 
+        .action-buttons {
+            margin-bottom: 30px;
+            display: flex;
+            gap: 4px;
+            justify-content: flex-end;
+        }
+
         .dataset-card {
             background: white;
             border: 1px solid #e0e0e0;
@@ -224,6 +231,30 @@
                 <span class="info-value">{{ node.last_check|date:"Y-m-d H:i:s"|default:"—" }}</span>
             </div>
         </div>
+    </div>
+    <div class="action-buttons">
+        <form method="post">
+            {% csrf_token %}
+            <input type="hidden" name="node_id" value="{{ node.id }}">
+            <button type="submit" class="button bicolor button--icon">
+                        <span class="icon-wrapper">
+                            <svg class="icon rotate" aria-hidden="true">
+                                <use href="#icon-rotate"></use>
+                            </svg>
+                        </span>
+                {% trans "Sync Now" %}
+            </button>
+        </form>
+
+        <a href="{{ nodes_index_url }}"
+           class="button bicolor button--icon button-secondary">
+             <span class="icon-wrapper">
+                 <svg class="icon icon-arrow-left icon" aria-hidden="true">
+                     <use href="#icon-arrow-left"></use>
+                 </svg>
+             </span>
+            {% trans "Back to Nodes" %}
+        </a>
     </div>
 
     <!-- Datasets Section -->
