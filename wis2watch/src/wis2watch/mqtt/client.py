@@ -484,15 +484,6 @@ class MQTTNodeClient:
             if not self.is_connected:
                 return False
             
-            if self.message_count > 0 and self.last_message_time:
-                time_since_last_message = dj_timezone.now() - self.last_message_time
-                if time_since_last_message > timedelta(minutes=10):
-                    logger.warning(
-                        f"Node {self.node_id} hasn't received messages in "
-                        f"{time_since_last_message.total_seconds():.0f} seconds"
-                    )
-                    return False
-            
             if self.state == ClientState.CONNECTING:
                 time_in_state = dj_timezone.now() - self.state_changed_at
                 if time_in_state > timedelta(minutes=2):
