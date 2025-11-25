@@ -2,10 +2,10 @@ import logging
 from datetime import datetime, timezone
 
 from celery import shared_task
-from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone as dj_timezone
 
+from ..core.models import StationMQTTMessageLog, Station, Dataset
 from ..core.sync import sync_metadata
 
 logger = logging.getLogger(__name__)
@@ -186,139 +186,142 @@ def health_check_mqtt_clients():
         return None
 
 
+def _prepare_observation_record(node_id: int, payload: dict) -> StationMQTTMessageLog | None:
+    """
+    Helper function to parse payload and prepare a StationMQTTMessageLog instance.
+    Returns None if validation fails or required objects (Station/Dataset) are missing.
+    Does NOT save the record to the database.
+    """
+    # [cite_start]1. Extract IDs [cite: 865, 866, 867]
+    message_id = payload.get('id')
+    properties = payload.get('properties', {})
+    wigos_id = properties.get('wigos_station_identifier')
+    metadata_id = properties.get('metadata_id')
+    
+    if not message_id or not wigos_id or not metadata_id:
+        logger.warning(
+            f"Message missing required fields (ID: {message_id}, WIGOS: {wigos_id}, Metadata: {metadata_id})")
+        return None
+    
+    # [cite_start]2. Find Station (with Sync Fallback) [cite: 868-872]
+    try:
+        station = Station.objects.get(wigos_id=wigos_id)
+    except Station.DoesNotExist:
+        # Attempt metadata sync if station missing
+        try:
+            logger.info(f"Station {wigos_id} missing. Triggering sync for node {node_id}...")
+            sync_metadata(node_id)
+            station = Station.objects.get(wigos_id=wigos_id)
+        except Station.DoesNotExist:
+            logger.error(f"Station {wigos_id} not found even after metadata sync.")
+            return None
+        except Exception as e:
+            logger.error(f"Error during metadata sync resolution: {e}")
+            raise e  # Let the caller handle retry logic
+    
+    # [cite_start]3. Find Dataset [cite: 872-873]
+    try:
+        dataset = Dataset.objects.get(identifier=metadata_id)
+    except Dataset.DoesNotExist:
+        logger.warning(f"Dataset not found for metadata_id {metadata_id}")
+        return None
+    
+    # [cite_start]4. Parse Timestamps [cite: 874-878]
+    observation_datetime = None
+    publish_datetime = dj_timezone.now()
+    
+    try:
+        if dt_str := properties.get('datetime'):
+            dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+            observation_datetime = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        
+        if pubtime_str := properties.get('pubtime'):
+            pt = datetime.fromisoformat(pubtime_str.replace('Z', '+00:00'))
+            publish_datetime = pt if pt.tzinfo else pt.replace(tzinfo=timezone.utc)
+    except ValueError as e:
+        logger.warning(f"Error parsing timestamps for message {message_id}: {e}")
+        # Continue with defaults if possible, or return None if critical
+    
+    # [cite_start]5. Extract Link [cite: 879]
+    links = payload.get('links', [])
+    canonical_link = next((link.get('href', '') for link in links if link.get('rel') == 'canonical'), '')
+    
+    # [cite_start]6. Instantiate Object (Unsaved) [cite: 880]
+    return StationMQTTMessageLog(
+        station=station,
+        dataset=dataset,
+        message_id=message_id,
+        data_id=properties.get('data_id', ''),
+        time=observation_datetime,
+        publish_datetime=publish_datetime,
+        canonical_link=canonical_link,
+        raw_json=payload
+    )
+
+
 @shared_task(bind=True, max_retries=3)
 def process_mqtt_message(self, node_id: int, topic: str, payload: dict, timestamp: str):
     """
-    Process a received MQTT message and store it in the database.
-    
-    Args:
-        node_id: Node ID
-        topic: MQTT topic the message was received on
-        payload: Parsed JSON message data
-        timestamp: ISO format timestamp when message was received
+    Process a single MQTT message.
     """
-    from wis2watch.core.models import Station, Dataset, StationMQTTMessageLog
-    
     try:
-        # Extract key fields from message
-        message_id = payload.get('id')
-        if not message_id:
-            logger.warning(f"Message missing ID field from node {node_id}")
-            return
+        record = _prepare_observation_record(node_id, payload)
         
-        properties = payload.get('properties', {})
-        links = payload.get('links', [])
-        
-        # Get station identifier
-        wigos_id = properties.get('wigos_station_identifier')
-        if not wigos_id:
-            logger.warning(f"Message {message_id} missing WIGOS station identifier")
-            return
-        
-        # Get metadata identifier to find dataset
-        metadata_id = properties.get('metadata_id')
-        if not metadata_id:
-            logger.warning(f"Message {message_id} missing metadata_id")
-            return
-        
-        # Find station
-        try:
-            station = Station.objects.get(wigos_id=wigos_id)
-        except Station.DoesNotExist:
-            logger.warning(
-                f"Station not found for WIGOS ID {wigos_id}. Message: {message_id}. "
-                f"Attempting metadata sync..."
-            )
-            try:
-                sync_metadata(node_id)
-                station = Station.objects.get(wigos_id=wigos_id)
-                logger.info(f"Station {wigos_id} found after metadata sync")
-            except Station.DoesNotExist:
-                logger.error(
-                    f"Station {wigos_id} not found even after metadata sync. "
-                    f"Message: {message_id}"
-                )
-                return
-            except Exception as e:
-                logger.error(f"Error during metadata sync: {e}", exc_info=True)
-                raise self.retry(exc=e, countdown=60)
-        except Exception as e:
-            logger.error(f"Error retrieving station: {e}", exc_info=True)
-            raise self.retry(exc=e, countdown=30)
-        
-        # Find dataset
-        try:
-            dataset = Dataset.objects.get(identifier=metadata_id)
-        except Dataset.DoesNotExist:
-            logger.warning(
-                f"Dataset not found for metadata_id {metadata_id}. "
-                f"Message: {message_id}"
-            )
-            return
-        except Exception as e:
-            logger.error(f"Error retrieving dataset: {e}", exc_info=True)
-            raise self.retry(exc=e, countdown=30)
-        
-        # Parse timestamps with proper timezone handling
-        observation_datetime = None
-        publish_datetime = None
-        
-        try:
-            dt_str = properties.get('datetime')
-            if dt_str:
-                dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
-                # Ensure timezone is set
-                if dt.tzinfo is None:
-                    dt = dt.replace(tzinfo=timezone.utc)
-                observation_datetime = dt
-        except (ValueError, AttributeError) as e:
-            logger.error(f"Error parsing datetime for message {message_id}: {e}")
-            return
-        
-        try:
-            pubtime_str = properties.get('pubtime')
-            if pubtime_str:
-                pt = datetime.fromisoformat(pubtime_str.replace('Z', '+00:00'))
-                # Ensure timezone is set
-                if pt.tzinfo is None:
-                    pt = pt.replace(tzinfo=timezone.utc)
-                publish_datetime = pt
-            else:
-                publish_datetime = dj_timezone.now()
-        except (ValueError, AttributeError) as e:
-            logger.warning(f"Error parsing pubtime for message {message_id}: {e}")
-            publish_datetime = dj_timezone.now()
-        
-        # Extract canonical link
-        canonical_link = ''
-        for link in links:
-            if link.get('rel') == 'canonical':
-                canonical_link = link.get('href', '')
-                break
-        
-        # Create observation record (use transaction for safety)
-        with transaction.atomic():
-            observation, created = StationMQTTMessageLog.objects.get_or_create(
-                message_id=message_id,
-                station=station,
+        if record:
+            # [cite_start]Atomic get_or_create logic to prevent duplicates [cite: 880]
+            # Since _prepare returns an instance, we use its attributes for the lookup
+            StationMQTTMessageLog.objects.get_or_create(
+                message_id=record.message_id,
+                station=record.station,
                 defaults={
-                    'dataset': dataset,
-                    'data_id': properties.get('data_id', ''),
-                    'time': observation_datetime,
-                    'publish_datetime': publish_datetime,
-                    'canonical_link': canonical_link,
-                    'raw_json': payload
+                    'dataset': record.dataset,
+                    'data_id': record.data_id,
+                    'time': record.time,
+                    'publish_datetime': record.publish_datetime,
+                    'canonical_link': record.canonical_link,
+                    'raw_json': record.raw_json
                 }
             )
-        
-        if created:
-            logger.info(
-                f"Stored observation: {message_id} from station {wigos_id} "
-                f"at {observation_datetime}"
-            )
-        else:
-            logger.debug(f"Duplicate message ignored: {message_id}")
+            logger.info(f"Stored observation: {record.message_id}")
     
     except Exception as e:
-        logger.error(f"Error processing message {message_id}: {e}", exc_info=True)
-        raise self.retry(exc=e, countdown=120)
+        logger.error(f"Error processing message: {e}", exc_info=True)
+        raise self.retry(exc=e, countdown=30)
+
+
+@shared_task(bind=True, max_retries=3)
+def process_mqtt_message_batch(self, batch_data: list):
+    """
+    Process a batch of MQTT messages in a single transaction.
+    Args:
+        batch_data: List of dicts, each containing:
+                    {'node_id': int, 'topic': str, 'payload': dict, 'timestamp': str}
+    """
+    records_to_create = []
+    
+    try:
+        # 1. Prepare all records in memory
+        for item in batch_data:
+            try:
+                record = _prepare_observation_record(item['node_id'], item['payload'])
+                if record:
+                    records_to_create.append(record)
+            except Exception as e:
+                # Log individual failures but don't fail the whole batch
+                logger.error(f"Failed to prepare record in batch: {e}")
+        
+        # 2. Bulk insert
+        if records_to_create:
+            with transaction.atomic():
+                # ignore_conflicts=True handles duplicate message_ids gracefully
+                created = StationMQTTMessageLog.objects.bulk_create(
+                    records_to_create,
+                    ignore_conflicts=True
+                )
+                logger.info(f"Batch processed: {len(created)} records created out of {len(batch_data)} received.")
+    
+    except Exception as e:
+        logger.error(f"Critical error processing batch: {e}", exc_info=True)
+        # We retry the batch on critical DB errors, though this might re-process good items
+        # ignore_conflicts=True protects us from duplicates during retry
+        raise self.retry(exc=e, countdown=60)
