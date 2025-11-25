@@ -141,7 +141,7 @@ class WIS2Node(TimeStampedModel):
         super().save(*args, **kwargs)
     
     def get_topics(self):
-        datasets = self.datasets.filter(status='active')
+        datasets = self.datasets.all()
         topics = [dataset.wmo_topic_hierarchy for dataset in datasets]
         return topics
     
