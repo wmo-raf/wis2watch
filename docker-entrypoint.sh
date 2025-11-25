@@ -47,6 +47,9 @@ run_setup_commands_if_configured(){
     echo "python /wis2watch/app/src/wis2watch/manage.py collectstatic --noinput"
     /wis2watch/app/src/wis2watch/manage.py collectstatic --noinput
   fi
+
+  # Trigger monitoring immediately
+  /wis2watch/app/src/wis2watch/manage.py ensure_monitoring
 }
 
 start_celery_worker() {
