@@ -1,5 +1,6 @@
 import logging
 import threading
+import uuid
 from typing import Dict, Optional
 
 from django.core.cache import cache
@@ -20,6 +21,9 @@ class MQTTMonitoringService:
     def __init__(self):
         self.clients: Dict[int, MQTTNodeClient] = {}
         self._lock = threading.RLock()
+        # Generate a unique ID for this specific running process
+        self.instance_id = str(uuid.uuid4())
+        logger.info(f"MQTT Service initialized with Instance ID: {self.instance_id}")
     
     def _get_lock_key(self, node_id: int) -> str:
         """Get cache key for node lock"""
@@ -28,14 +32,38 @@ class MQTTMonitoringService:
     def _acquire_lock(self, node_id: int) -> bool:
         """
         Attempt to acquire a lock for a node.
-        Returns True if lock acquired, False if already locked.
+        If a lock exists but belongs to a dead instance (Zombie Lock), break it.
         """
         lock_key = self._get_lock_key(node_id)
+        
+        # 1. Try to get the existing lock
+        current_lock = cache.get(lock_key)
+        
+        if current_lock:
+            owner = current_lock.get('owner')
+            
+            # If I already own it, it's fine (re-entrant safety)
+            if owner == self.instance_id:
+                return True
+            
+            # If someone else owns it, we assume it is a "Zombie" lock from a
+            # previous crash/restart of this service. We break it.
+            logger.warning(
+                f"Breaking stale lock for node {node_id}. "
+                f"Old owner: {owner}, New owner: {self.instance_id}"
+            )
+        
+        # 2. Create or Overwrite the lock with our Instance ID
         lock_data = {
             'acquired_at': dj_timezone.now().isoformat(),
-            'node_id': node_id
+            'node_id': node_id,
+            'owner': self.instance_id
         }
-        return cache.add(lock_key, lock_data, timeout=self.LOCK_TIMEOUT)
+        
+        # We use .set() instead of .add() to ensure we can overwrite zombie locks
+        cache.set(lock_key, lock_data, timeout=self.LOCK_TIMEOUT)
+        
+        return True
     
     def _release_lock(self, node_id: int):
         """Release the lock for a node"""
@@ -45,9 +73,15 @@ class MQTTMonitoringService:
     def _refresh_lock(self, node_id: int):
         """Refresh the lock for a node to extend its timeout"""
         lock_key = self._get_lock_key(node_id)
+        
+        # Preserve the original acquisition time if possible, but update refresh time
+        current_lock = cache.get(lock_key) or {}
+        acquired_at = current_lock.get('acquired_at', dj_timezone.now().isoformat())
+        
         lock_data = {
-            'acquired_at': dj_timezone.now().isoformat(),
+            'acquired_at': acquired_at,
             'node_id': node_id,
+            'owner': self.instance_id,
             'refreshed_at': dj_timezone.now().isoformat()
         }
         cache.set(lock_key, lock_data, timeout=self.LOCK_TIMEOUT)
