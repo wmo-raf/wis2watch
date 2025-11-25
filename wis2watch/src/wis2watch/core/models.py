@@ -144,6 +144,10 @@ class WIS2Node(TimeStampedModel):
         datasets = self.datasets.filter(status='active')
         topics = [dataset.wmo_topic_hierarchy for dataset in datasets]
         return topics
+    
+    @property
+    def lock_key(self):
+        return f"mqtt_node_{self.id}_lock"
 
 
 @register_snippet

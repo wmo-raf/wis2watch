@@ -15,7 +15,7 @@ class MQTTMonitoringService:
     """Service to manage MQTT clients for all nodes with thread-safe operations"""
     
     # Lock timeouts
-    LOCK_TIMEOUT = 600  # 10 minutes
+    LOCK_TIMEOUT = 120  # 2 minutes
     LOCK_REFRESH_INTERVAL = 240  # 4 minutes
     
     def __init__(self):
@@ -32,38 +32,29 @@ class MQTTMonitoringService:
     def _acquire_lock(self, node_id: int) -> bool:
         """
         Attempt to acquire a lock for a node.
-        If a lock exists but belongs to a dead instance (Zombie Lock), break it.
+        Respects existing locks from other workers.
         """
         lock_key = self._get_lock_key(node_id)
-        
-        # 1. Try to get the existing lock
         current_lock = cache.get(lock_key)
         
         if current_lock:
             owner = current_lock.get('owner')
-            
-            # If I already own it, it's fine (re-entrant safety)
             if owner == self.instance_id:
+                # Re-entrant: We already own it, success
                 return True
-            
-            # If someone else owns it, we assume it is a "Zombie" lock from a
-            # previous crash/restart of this service. We break it.
-            logger.warning(
-                f"Breaking stale lock for node {node_id}. "
-                f"Old owner: {owner}, New owner: {self.instance_id}"
-            )
+            else:
+                # LOCKED BY SOMEONE ELSE: Do not touch it.
+                logger.warning(f"Node {node_id} is locked by active worker {owner}. Skipping start.")
+                return False
         
-        # 2. Create or Overwrite the lock with our Instance ID
+        # Lock is free, take it
         lock_data = {
             'acquired_at': dj_timezone.now().isoformat(),
             'node_id': node_id,
             'owner': self.instance_id
         }
         
-        # We use .set() instead of .add() to ensure we can overwrite zombie locks
-        cache.set(lock_key, lock_data, timeout=self.LOCK_TIMEOUT)
-        
-        return True
+        return cache.add(lock_key, lock_data, timeout=self.LOCK_TIMEOUT)
     
     def _release_lock(self, node_id: int):
         """Release the lock for a node"""
@@ -198,20 +189,6 @@ class MQTTMonitoringService:
                 status[node_id] = node_status
         
         return status
-    
-    def refresh_all_locks(self):
-        """Refresh locks for all active connections"""
-        # Get snapshot to avoid concurrent modification issues
-        with self._lock:
-            active_clients = [(node_id, client) for node_id, client in self.clients.items()]
-        
-        for node_id, client in active_clients:
-            try:
-                if client.is_connected:
-                    self._refresh_lock(node_id)
-                    logger.debug(f"Refreshed lock for node {node_id}")
-            except Exception as e:
-                logger.error(f"Failed to refresh lock for node {node_id}: {e}")
     
     def cleanup_stale_locks(self):
         """Remove locks and stop clients for nodes that are no longer healthy"""

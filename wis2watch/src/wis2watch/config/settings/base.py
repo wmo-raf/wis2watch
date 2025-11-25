@@ -321,10 +321,6 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'wis2watch.mqtt.tasks.monitor_all_active_nodes',
         'schedule': 300.0,  # Every 5 minutes
     },
-    'refresh-mqtt-locks': {
-        'task': 'wis2watch.mqtt.tasks.refresh_mqtt_locks',
-        'schedule': 240.0,  # Every 4 minutes
-    },
     'cleanup-stale-mqtt-locks': {
         'task': 'wis2watch.mqtt.tasks.cleanup_stale_mqtt_locks',
         'schedule': 600.0,  # Every 10 minutes

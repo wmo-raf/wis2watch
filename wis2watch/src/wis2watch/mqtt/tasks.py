@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, timezone
 
 from celery import shared_task
+from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone as dj_timezone
 
@@ -99,6 +100,7 @@ def restart_mqtt_monitoring(self, node_id: int):
 def monitor_all_active_nodes():
     """
     Celery beat task to ensure all active nodes are being monitored.
+    Checks GLOBAL state (Redis Locks) to prevent duplicate tasks across workers.
     Run this every 5 minutes.
     """
     from wis2watch.core.models import WIS2Node
@@ -109,36 +111,28 @@ def monitor_all_active_nodes():
         active_nodes = WIS2Node.objects.filter(status='active')
         logger.info(f"Found {active_nodes.count()} active nodes")
         
-        currently_monitored = set(mqtt_monitoring_service.get_all_node_ids())
-        logger.info(f"Currently monitoring {len(currently_monitored)} nodes")
-        
         started_count = 0
         for node in active_nodes:
-            if node.id not in currently_monitored:
-                logger.info(f"Starting monitoring for unmonitored node {node.id}")
-                start_mqtt_monitoring.delay(node.id)
-                started_count += 1
+            # Check Global Lock in Redis
+            # Make sure this key format matches _get_lock_key in service.py exactly!
+            lock_key = node.lock_key
+            
+            if cache.get(lock_key):
+                # Lock exists -> Someone is already monitoring this. Do nothing.
+                continue
+            
+            # No lock -> Node is truly unmonitored. Start it.
+            logger.info(f"No global lock found for node {node.id}. Queueing start task.")
+            start_mqtt_monitoring.delay(node.id)
+            started_count += 1
         
         if started_count > 0:
             logger.info(f"Started monitoring for {started_count} nodes")
         else:
-            logger.info("All active nodes are already being monitored")
+            logger.info("All active nodes are already being monitored (locks present)")
     
     except Exception as e:
         logger.error(f"Error in monitor_all_active_nodes: {e}", exc_info=True)
-
-
-@shared_task
-def refresh_mqtt_locks():
-    """
-    Celery beat task to refresh locks for active connections.
-    Run this every 4 minutes (well before the 10-minute lock timeout).
-    """
-    try:
-        logger.debug("Refreshing MQTT locks")
-        mqtt_monitoring_service.refresh_all_locks()
-    except Exception as e:
-        logger.error(f"Error refreshing MQTT locks: {e}", exc_info=True)
 
 
 @shared_task

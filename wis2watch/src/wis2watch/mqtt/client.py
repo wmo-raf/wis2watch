@@ -3,6 +3,7 @@ import logging
 import threading
 from datetime import datetime, timedelta
 from enum import Enum
+import time
 
 import paho.mqtt.client as mqtt
 from asgiref.sync import async_to_sync
@@ -37,7 +38,7 @@ class MQTTNodeClient:
     
     # WebSocket Throttling Settings
     # 0.5s = Max 2 messages broadcast per second (Visual Sampling)
-    WS_BROADCAST_MIN_INTERVAL = 0.5
+    WS_BROADCAST_MIN_INTERVAL = 0.0
     
     # Status Cache Update Rate
     STATUS_UPDATE_INTERVAL = 10  # seconds
@@ -94,6 +95,12 @@ class MQTTNodeClient:
             self.node = WIS2Node.objects.get(id=node_id)
         except WIS2Node.DoesNotExist:
             raise ValueError(f"Node {node_id} not found in database")
+        
+        self._stop_event = threading.Event()
+        
+        # Start the refresh thread immediately
+        self._refresh_thread = threading.Thread(target=self._lock_refresh_loop, daemon=True)
+        self._refresh_thread.start()
         
         self._setup_client()
         logger.info(f"MQTTNodeClient initialized for node {self.node_id} ({self.node.name})")
@@ -436,6 +443,9 @@ class MQTTNodeClient:
         """Disconnect from MQTT broker"""
         logger.info(f"Disconnecting node {self.node_id} ({self.node.name})")
         
+        # Stop the refresh thread
+        self._stop_event.set()
+        
         # Flush remaining messages before stopping
         self._flush_buffer()
         
@@ -477,6 +487,23 @@ class MQTTNodeClient:
                 'error_count': self.error_count,
                 'last_error': self.last_error,
             }
+    
+    def _lock_refresh_loop(self):
+        """Background thread to keep the Redis lock alive while connected"""
+        from wis2watch.mqtt.service import mqtt_monitoring_service
+        
+        logger.debug(f"Starting lock refresh loop for node {self.node_id}")
+        while not self._stop_event.is_set():
+            if self.is_connected:
+                try:
+                    # Call the service method to update Redis
+                    # We access the protected method _refresh_lock directly for efficiency
+                    mqtt_monitoring_service._refresh_lock(self.node_id)
+                except Exception as e:
+                    logger.error(f"Error refreshing lock for node {self.node_id}: {e}")
+            
+            # Refresh every 30 seconds (well within the service's LOCK_TIMEOUT timeout)
+            self._stop_event.wait(30)
     
     def is_healthy(self) -> bool:
         """Check if the client is in a healthy state"""
