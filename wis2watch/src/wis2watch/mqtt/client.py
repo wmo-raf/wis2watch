@@ -377,7 +377,7 @@ class MQTTNodeClient:
             logger.error(f"Failed to broadcast message for node {self.node_id}: {e}")
     
     def connect(self):
-        """Connect to MQTT broker"""
+        """Connect to MQTT broker asynchronously"""
         try:
             self._change_state(ClientState.CONNECTING)
             
@@ -387,23 +387,23 @@ class MQTTNodeClient:
                 attempt_num = self.connection_attempts
             
             logger.info(
-                f"Attempting to connect node {self.node_id} ({self.node.name}) "
+                f"Async connection initiated for node {self.node_id} ({self.node.name}) "
                 f"to {self.broker_host}:{self.broker_port} "
                 f"(attempt #{attempt_num})"
             )
             
-            # Set socket timeout before connecting
-            self.client.connect(self.broker_host, self.broker_port, keepalive=60)
+            # Switch to connect_async to prevent blocking the Celery worker
+            # Paho will handle the handshake in the background loop
+            self.client.connect_async(self.broker_host, self.broker_port, keepalive=60)
             
-            # Apply socket timeout after connection is initiated
-            if hasattr(self.client, '_sock') and self.client._sock:
-                self.client._sock.settimeout(10)
-            
+            # We start the background loop immediately
             self.client.loop_start()
+            
             return True
         
-        except (ConnectionRefusedError, TimeoutError) as e:
-            error_msg = f"Connection failed: {str(e)}"
+        except ValueError as e:
+            # Paho raises ValueError for invalid port numbers, etc.
+            error_msg = f"Configuration error: {str(e)}"
             logger.error(f"Node {self.node_id}: {error_msg}")
             with self._lock:
                 self.failed_connections += 1
@@ -411,7 +411,8 @@ class MQTTNodeClient:
             return False
         
         except Exception as e:
-            error_msg = f"Failed to connect: {str(e)}"
+            # Catch-all for other immediate errors (e.g., DNS resolution failure in some Paho versions)
+            error_msg = f"Failed to initiate connection: {str(e)}"
             logger.error(f"Node {self.node_id}: {error_msg}", exc_info=True)
             with self._lock:
                 self.failed_connections += 1
