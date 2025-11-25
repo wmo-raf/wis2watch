@@ -95,7 +95,7 @@ class MQTTStatusConsumer(AsyncWebsocketConsumer):
         from wis2watch.core.models import WIS2Node
         
         status = {}
-        active_nodes = WIS2Node.objects.filter(status='active')
+        active_nodes = WIS2Node.objects.all()
         
         for node in active_nodes:
             cache_key = f"mqtt_node_{node.id}_status"

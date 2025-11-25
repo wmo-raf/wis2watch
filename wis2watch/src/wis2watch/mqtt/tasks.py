@@ -108,8 +108,8 @@ def monitor_all_active_nodes():
     logger.info("Checking all active nodes for monitoring status")
     
     try:
-        active_nodes = WIS2Node.objects.filter(status='active')
-        logger.info(f"Found {active_nodes.count()} active nodes")
+        active_nodes = WIS2Node.objects.all()
+        logger.info(f"Found {active_nodes.count()} nodes")
         
         started_count = 0
         for node in active_nodes:

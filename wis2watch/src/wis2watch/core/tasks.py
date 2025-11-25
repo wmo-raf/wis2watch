@@ -81,9 +81,9 @@ def run_sync_all_nodes():
     """
     from .models import WIS2Node
     
-    active_nodes = WIS2Node.objects.filter(status='active')
+    active_nodes = WIS2Node.objects.all()
     
-    logger.info(f"Starting sync for {active_nodes.count()} active nodes")
+    logger.info(f"Starting sync for {active_nodes.count()} nodes")
     
     for node in active_nodes:
         # Chain the tasks: first sync metadata, then stations

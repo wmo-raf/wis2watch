@@ -360,7 +360,7 @@ def sync_all_nodes():
     """
     from .models import WIS2Node
     
-    active_nodes = WIS2Node.objects.filter(status='active')
+    active_nodes = WIS2Node.objects.all()
     
     logger.info(f"Starting sync for {active_nodes.count()} active nodes")
     
@@ -379,7 +379,7 @@ def health_check_nodes():
     
     from .models import WIS2Node
     
-    nodes = WIS2Node.objects.filter(status='active')
+    nodes = WIS2Node.objects.all()
     results = []
     
     for node in nodes:
