@@ -8,6 +8,7 @@ import paho.mqtt.client as mqtt
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from django.core.cache import cache
+from django.db import close_old_connections
 from django.utils import timezone as dj_timezone
 
 logger = logging.getLogger(__name__)
@@ -140,6 +141,10 @@ class MQTTNodeClient:
     
     def _on_connect(self, client, userdata, flags, rc, properties=None):
         """Callback for when the client connects"""
+        
+        # Ensure we have a clean DB state for this thread
+        close_old_connections()
+        
         if rc == 0:
             logger.info(f"Node {self.node_id} ({self.node.name}) connected to MQTT broker")
             
@@ -170,6 +175,10 @@ class MQTTNodeClient:
     
     def _on_disconnect(self, client, userdata, rc, properties=None):
         """Callback for when the client disconnects"""
+        
+        # Ensure we have a clean DB state for this thread
+        close_old_connections()
+        
         logger.warning(
             f"Node {self.node_id} ({self.node.name}) disconnected from MQTT broker (rc={rc})"
         )
@@ -215,6 +224,10 @@ class MQTTNodeClient:
     
     def _on_message(self, client, userdata, msg):
         """Callback for when a message is received"""
+        
+        # Ensure we have a clean DB state for this thread
+        close_old_connections()
+        
         try:
             current_time = dj_timezone.now()
             
