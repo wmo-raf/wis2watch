@@ -53,6 +53,17 @@ class GlobalDiscoveryCatalogue(TimeStampedModel):
     def __str__(self):
         return f"{self.name} ({self.centre_id})"
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+
+        # "Sole writer" is the whole point of the flag, so designating one
+        # catalogue stands the others down rather than leaving two authorities
+        # to overwrite each other's view of a centre.
+        if self.is_writer:
+            GlobalDiscoveryCatalogue.objects.exclude(pk=self.pk).filter(
+                is_writer=True
+            ).update(is_writer=False)
+
 
 class WIS2Node(TimeStampedModel):
     """
@@ -144,6 +155,12 @@ class WIS2Node(TimeStampedModel):
         return f"{self.name} ({self.centre_id})"
 
     def save(self, *args, **kwargs):
+        # Centre IDs are lowercase by convention but are typed by hand as often
+        # as they are synced. Normalising here is what makes uniqueness on the
+        # centre ID actually hold, rather than admitting ke-meteo and KE-METEO
+        # as two nodes for one centre.
+        self.centre_id = self.centre_id.strip().lower()
+
         if not self.country:
             self.country = monitored_country_code_for_centre_id(self.centre_id)
 
@@ -293,10 +310,14 @@ class Dataset(TimeStampedModel):
         ("recommended", "Recommended"),
     ]
 
+    ACTIVE = "active"
+    INACTIVE = "inactive"
+    DELETED = "deleted"
+
     STATUS_CHOICES = [
-        ("active", "Active"),
-        ("inactive", "Inactive"),
-        ("deleted", "Deleted"),
+        (ACTIVE, "Active"),
+        (INACTIVE, "Inactive"),
+        (DELETED, "Deleted"),
     ]
 
     node = models.ForeignKey(WIS2Node, on_delete=models.CASCADE, related_name="datasets")
@@ -315,7 +336,7 @@ class Dataset(TimeStampedModel):
     self_link = models.URLField(max_length=1000, blank=True)
     collection_link = models.URLField(max_length=1000, blank=True)
     raw_json = models.JSONField(help_text=_("Complete raw JSON from discovery metadata"))
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="active")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default=ACTIVE)
     metadata_created = models.DateTimeField(null=True, blank=True)
     metadata_updated = models.DateTimeField(null=True, blank=True)
     last_synced = models.DateTimeField(null=True, blank=True)
@@ -592,8 +613,15 @@ class SyncLog(models.Model):
     items_created = models.IntegerField(default=0)
     items_updated = models.IntegerField(default=0)
     items_deleted = models.IntegerField(default=0)
+    items_errored = models.IntegerField(
+        default=0,
+        help_text=_("Items the run could not store, having stepped over them"),
+    )
 
-    error_message = models.TextField(blank=True)
+    error_message = models.TextField(
+        blank=True,
+        help_text=_("Why the run failed as a whole, as opposed to a single item"),
+    )
 
     started_at = models.DateTimeField(default=dj_timezone.now)
     completed_at = models.DateTimeField(null=True, blank=True)
@@ -610,3 +638,11 @@ class SyncLog(models.Model):
     def __str__(self):
         target = self.node or self.catalogue or _("unknown")
         return f"{target} - {self.sync_type} - {self.status} ({self.started_at})"
+
+    @property
+    def summary(self):
+        """What the run came to, in one line, for a log or a console."""
+        return (
+            f"{self.status} found={self.items_found} created={self.items_created} "
+            f"updated={self.items_updated} errored={self.items_errored}"
+        )

@@ -10,7 +10,7 @@ from wagtail.admin import messages
 from .forms import SyncNodeForm
 from .models import StationSource, WIS2Node
 from .stations import node_stations_as_csv
-from .sync import sync_metadata
+from .sync import sync_stations
 from .viewsets import WIS2NodeViewSet
 
 
@@ -96,7 +96,9 @@ def node_details(request, node_id):
         if form.is_valid():
             node_id = form.cleaned_data['node_id']
 
-            result, error = sync_metadata(node_id)
+            # Datasets come from the catalogue now, so syncing a node by hand
+            # asks it only for its station registry.
+            result, error = sync_stations(node_id)
 
             if error:
                 error = str(error)
