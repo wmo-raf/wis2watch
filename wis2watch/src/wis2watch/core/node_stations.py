@@ -22,14 +22,13 @@ so that the rules above are testable without the network.
 
 import logging
 
-import requests
 from django.contrib.gis.geos import Point
 from django.db import transaction
 from django.utils import timezone as dj_timezone
 
-from .interpretation import extract_node_stations, next_page_url
+from .interpretation import extract_node_stations
 from .models import Station, StationSource, SyncLog
-from .sync import CREATED, ERRORED, UPDATED, SyncCounts
+from .sync import CREATED, ERRORED, UPDATED, SyncCounts, fetch_pages
 
 logger = logging.getLogger(__name__)
 
@@ -37,50 +36,28 @@ logger = logging.getLogger(__name__)
 #: default page size of a station endpoint is routinely ten.
 PAGE_SIZE = 500
 
-#: A ceiling on paging, so a registry whose ``next`` links cycle cannot spin.
-MAX_PAGES = 50
-
+#: How long a node is given to answer. Shorter than a catalogue's, because
+#: there are as many of these as there are centres and many never answer.
 FETCH_TIMEOUT = 30
 
-#: What a node may say about a station that the canonical record also holds.
-#: Filled in where nothing else has, never written over.
+#: What a node may say about a station that the canonical record also holds,
+#: named the same on both. Filled in where nothing else has, never written over.
 CANONICAL_FIELDS = ("name", "facility_type", "territory", "wmo_region")
 
 
 def fetch_station_pages(node):
     """Every page of a node's station registry, exactly as returned.
 
-    Paging follows the registry's own ``next`` link, which already carries
-    whatever query the node needs to resume; only the first request supplies
-    parameters. The response format is whatever the stored endpoint asks for,
-    so a page size is all that is added here.
+    The response format is whatever the stored endpoint asks for -- the URL a
+    wis2box node advertises names it already -- so a page size is all that is
+    added here.
     """
-    url = node.stations_url
-    params = {"limit": PAGE_SIZE}
-
-    for _ in range(MAX_PAGES):
-        response = requests.get(
-            url,
-            params=params,
-            timeout=FETCH_TIMEOUT,
-            headers={"Accept": "application/json"},
-            verify=node.verify_ssl,
-        )
-        response.raise_for_status()
-        payload = response.json()
-
-        yield payload
-
-        url = next_page_url(payload)
-        if not url:
-            return
-
-        params = None
-
-    logger.warning(
-        "Stopped paging %s after %s pages; its next links do not terminate",
-        node.centre_id,
-        MAX_PAGES,
+    return fetch_pages(
+        node.stations_url,
+        params={"limit": PAGE_SIZE},
+        verify=node.verify_ssl,
+        timeout=FETCH_TIMEOUT,
+        read_from=node.centre_id,
     )
 
 
@@ -111,17 +88,9 @@ def _fill_canonical_record(station, declared):
     letting an hourly sync undo a weekly OSCAR one.
     """
     filled = {
-        field: value
-        for field, value in zip(
-            CANONICAL_FIELDS,
-            (
-                declared.name,
-                declared.facility_type,
-                declared.territory,
-                declared.wmo_region,
-            ),
-        )
-        if value and not getattr(station, field)
+        field: getattr(declared, field)
+        for field in CANONICAL_FIELDS
+        if getattr(declared, field) and not getattr(station, field)
     }
 
     location = _declared_position(declared)

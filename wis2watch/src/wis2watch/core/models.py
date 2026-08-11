@@ -427,6 +427,27 @@ class StationSourceQuerySet(models.QuerySet):
             .order_by("station__name")
         )
 
+    def with_last_transmitted(self):
+        """Each declaration beside when its station was last heard transmitting.
+
+        Declared and transmitting are different questions, and only the
+        observation can answer the second: a registry declaration is confirmed
+        by every sync run, so its own timestamp says when the node last
+        repeated itself, never whether anything is still publishing. Reading
+        the observation alongside is what makes a silent station nameable.
+        """
+        transmitted = (
+            StationSource.objects.filter(
+                station_id=models.OuterRef("station_id"),
+                source_type=StationSource.OBSERVED,
+                last_seen__isnull=False,
+            )
+            .order_by("-last_seen")
+            .values("last_seen")[:1]
+        )
+
+        return self.annotate(last_transmitted=models.Subquery(transmitted))
+
 
 class StationSource(TimeStampedModel):
     """

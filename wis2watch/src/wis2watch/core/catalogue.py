@@ -25,11 +25,10 @@ that the rules above are testable without the network.
 
 import logging
 
-import requests
 from django.db import transaction
 from django.utils import timezone as dj_timezone
 
-from .interpretation import extract_discovery_records, next_page_url
+from .interpretation import extract_discovery_records
 from .models import (
     Dataset,
     GlobalDiscoveryCatalogue,
@@ -37,7 +36,7 @@ from .models import (
     SyncLog,
     WIS2Node,
 )
-from .sync import CREATED, ERRORED, UPDATED, SyncCounts
+from .sync import CREATED, ERRORED, UPDATED, SyncCounts, fetch_pages
 
 logger = logging.getLogger(__name__)
 
@@ -46,9 +45,6 @@ DISCOVERY_METADATA_COLLECTION = "wis2-discovery-metadata"
 
 #: Records requested per page. Catalogues hold a few hundred records in total.
 PAGE_SIZE = 500
-
-#: A ceiling on paging, so a catalogue whose ``next`` links cycle cannot spin.
-MAX_PAGES = 50
 
 FETCH_TIMEOUT = 60
 
@@ -62,38 +58,13 @@ def discovery_metadata_url(catalogue):
 
 
 def fetch_discovery_pages(catalogue):
-    """Every page of a catalogue's discovery metadata, exactly as returned.
-
-    Paging follows the catalogue's own ``next`` link rather than an offset we
-    compute, since that link already carries whatever query the catalogue needs
-    to resume. Only the first request supplies parameters.
-    """
-    url = discovery_metadata_url(catalogue)
-    params = {"f": "json", "limit": PAGE_SIZE}
-
-    for _ in range(MAX_PAGES):
-        response = requests.get(
-            url,
-            params=params,
-            timeout=FETCH_TIMEOUT,
-            headers={"Accept": "application/json"},
-            verify=catalogue.verify_ssl,
-        )
-        response.raise_for_status()
-        payload = response.json()
-
-        yield payload
-
-        url = next_page_url(payload)
-        if not url:
-            return
-
-        params = None
-
-    logger.warning(
-        "Stopped paging %s after %s pages; its next links do not terminate",
-        catalogue.centre_id,
-        MAX_PAGES,
+    """Every page of a catalogue's discovery metadata, exactly as returned."""
+    return fetch_pages(
+        discovery_metadata_url(catalogue),
+        params={"f": "json", "limit": PAGE_SIZE},
+        verify=catalogue.verify_ssl,
+        timeout=FETCH_TIMEOUT,
+        read_from=catalogue.centre_id,
     )
 
 

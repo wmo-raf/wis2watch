@@ -29,7 +29,7 @@ from wis2watch.core.models import (
     WIS2Node,
 )
 
-from .support import load_json_fixture
+from .support import failing_fetch, load_json_fixture, pages
 
 CATALOGUE = "gdc_discovery_metadata.json"
 
@@ -37,25 +37,6 @@ MONITORED_CENTRE_IDS = {"ke-meteo", "cg-met", "sz-swazimet", "gh-gmet"}
 
 KE_DATASET = "urn:wmo:md:ke-meteo:synop-dataset-surface-observations"
 CG_DATASET = "urn:wmo:md:cg-met:core.climate.surface-based-observations.climat"
-
-
-def pages(*payloads):
-    """A page fetch returning fixed payloads, standing in for the network."""
-
-    def fetch(catalogue):
-        yield from payloads
-
-    return fetch
-
-
-def failing_fetch(message):
-    """A page fetch that fails the way an unreachable catalogue would."""
-
-    def fetch(catalogue):
-        raise OSError(message)
-        yield  # pragma: no cover - never reached, keeps this a generator
-
-    return fetch
 
 
 class CatalogueSyncTestCase(TestCase):
@@ -389,7 +370,7 @@ class PageFetchTests(TestCase):
         return response
 
     def test_it_asks_the_discovery_metadata_collection_of_the_catalogue(self):
-        with mock.patch("wis2watch.core.catalogue.requests.get") as get:
+        with mock.patch("wis2watch.core.sync.requests.get") as get:
             get.return_value = self.response({"features": []})
 
             list(fetch_discovery_pages(self.catalogue))
@@ -406,7 +387,7 @@ class PageFetchTests(TestCase):
         }
         second = {"features": [], "links": [{"rel": "self", "href": "..."}]}
 
-        with mock.patch("wis2watch.core.catalogue.requests.get") as get:
+        with mock.patch("wis2watch.core.sync.requests.get") as get:
             get.side_effect = [self.response(first), self.response(second)]
 
             payloads = list(fetch_discovery_pages(self.catalogue))

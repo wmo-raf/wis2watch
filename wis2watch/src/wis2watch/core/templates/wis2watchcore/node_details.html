@@ -349,7 +349,7 @@
                     <th>{% trans "Local ID" %}</th>
                     <th>{% trans "Facility Type" %}</th>
                     <th>{% trans "Location" %}</th>
-                    <th>{% trans "Last Seen" %}</th>
+                    <th>{% trans "Last Transmitted" %}</th>
                 </tr>
                 </thead>
                 <tbody>
@@ -370,7 +370,13 @@
                                 —
                             {% endif %}
                         </td>
-                        <td>{{ declaration.last_seen|date:"Y-m-d H:i:s"|default:"—" }}</td>
+                        <td>
+                            {% if declaration.last_transmitted %}
+                                {{ declaration.last_transmitted|date:"Y-m-d H:i:s" }}
+                            {% else %}
+                                {% trans "Never" %}
+                            {% endif %}
+                        </td>
                     </tr>
                 {% endfor %}
                 </tbody>

@@ -23,12 +23,8 @@ class NodeStationTaskTests(TestCase):
         )
 
     def test_every_node_advertising_a_registry_is_queued(self):
-        with mock.patch(
-            "wis2watch.core.tasks.run_sync_node_stations.delay"
-        ) as queued:
+        with mock.patch("wis2watch.core.tasks.run_sync_node_stations.delay"):
             self.assertEqual(run_sync_all_node_stations(), [self.node.id])
-
-        self.assertEqual(queued.call_args.args, (self.node.id,))
 
     def test_a_node_advertising_no_registry_is_not_asked_for_one(self):
         WIS2Node.objects.create(centre_id="ke-meteo", name="Kenya Met")

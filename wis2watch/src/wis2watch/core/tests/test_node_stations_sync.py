@@ -21,8 +21,9 @@ from django.utils import timezone as dj_timezone
 from wis2watch.core.models import Station, StationSource, SyncLog, WIS2Node
 from wis2watch.core.node_stations import fetch_station_pages, sync_node_stations
 from wis2watch.core.stations import node_stations_as_csv
+from wis2watch.core.sync import MAX_PAGES
 
-from .support import load_json_fixture
+from .support import failing_fetch, load_json_fixture, pages
 
 REGISTRY = "node_stations_gh_gmet.json"
 
@@ -38,25 +39,6 @@ DECLARED = {
     "0-288-0-65495",
     "0-288-0-65478",
 }
-
-
-def pages(*payloads):
-    """A page fetch returning fixed payloads, standing in for the network."""
-
-    def fetch(node):
-        yield from payloads
-
-    return fetch
-
-
-def failing_fetch(message):
-    """A page fetch that fails the way an unreachable node would."""
-
-    def fetch(node):
-        raise OSError(message)
-        yield  # pragma: no cover - never reached, keeps this a generator
-
-    return fetch
 
 
 def one_station(**properties):
@@ -369,7 +351,7 @@ class FetchTests(NodeStationsTestCase):
         return mock.Mock(json=mock.Mock(return_value=payload), raise_for_status=mock.Mock())
 
     def test_it_asks_the_node_for_the_stations_it_advertises(self):
-        with mock.patch("wis2watch.core.node_stations.requests.get") as get:
+        with mock.patch("wis2watch.core.sync.requests.get") as get:
             get.return_value = self.response({"features": []})
 
             list(fetch_station_pages(self.node))
@@ -384,7 +366,7 @@ class FetchTests(NodeStationsTestCase):
         }
         second = {"features": [], "links": [{"rel": "self", "href": "..."}]}
 
-        with mock.patch("wis2watch.core.node_stations.requests.get") as get:
+        with mock.patch("wis2watch.core.sync.requests.get") as get:
             get.side_effect = [self.response(first), self.response(second)]
 
             payloads = list(fetch_station_pages(self.node))
@@ -393,3 +375,19 @@ class FetchTests(NodeStationsTestCase):
         self.assertEqual(
             get.call_args_list[1].args[0], "https://wis2.meteo.gov.gh/page-2"
         )
+
+    def test_a_registry_that_never_stops_paging_fails_rather_than_half_reads(self):
+        """A run that stopped at the ceiling cannot say how much it missed."""
+        forever = {
+            "features": [],
+            "links": [{"rel": "next", "href": "https://wis2.meteo.gov.gh/page-on"}],
+        }
+
+        with mock.patch("wis2watch.core.sync.requests.get") as get:
+            get.return_value = self.response(forever)
+
+            sync_log = sync_node_stations(self.node)
+
+        self.assertEqual(sync_log.status, SyncLog.FAILED)
+        self.assertIn("do not terminate", sync_log.error_message)
+        self.assertEqual(get.call_count, MAX_PAGES)

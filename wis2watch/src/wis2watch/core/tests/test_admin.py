@@ -20,6 +20,8 @@ from wis2watch.core.viewsets import (
     WIS2NodeViewSet,
 )
 
+from .support import at
+
 
 class AdminSmokeTests(TestCase):
     """The admin is where nodes, brokers and catalogues are configured by hand."""
@@ -195,6 +197,25 @@ class NodeDetailViewTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "0-404-0-KE001")
+
+    def test_a_declared_station_that_has_never_transmitted_says_so(self):
+        """The declaration is confirmed hourly; only the observation is news."""
+        response = self.client.get(reverse("node_details", args=[self.node.id]))
+
+        self.assertContains(response, "Never")
+
+    def test_a_declared_station_shows_when_it_last_transmitted(self):
+        StationSource.objects.create(
+            station=Station.objects.get(wigos_id="0-404-0-KE001"),
+            source_type=StationSource.OBSERVED,
+            node=self.node,
+            last_seen=at("2026-08-11T10:45:00"),
+        )
+
+        response = self.client.get(reverse("node_details", args=[self.node.id]))
+
+        self.assertContains(response, "2026-08-11 10:45:00")
+        self.assertNotContains(response, "Never")
 
     def test_the_station_csv_preview_loads(self):
         response = self.client.get(reverse("preview_node_stations_csv", args=[self.node.id]))

@@ -242,8 +242,10 @@ def _record_observed_stations(records):
     a centre with no catalogue record still has stations, and losing them
     would hide exactly the traffic worth asking about.
 
-    As with a node's last-seen, time only moves forward: redeliveries and
-    messages that took the long way round say nothing new.
+    Time only moves forward, for the reasons ``_record_last_seen`` gives about
+    a node's. The two are kept apart rather than generalised: they answer
+    different questions, and the row a station's answer lives on is one of the
+    three provenance records, which a node's is not.
     """
     latest = {}
 
@@ -251,10 +253,11 @@ def _record_observed_stations(records):
         if record.station_id is None:
             continue
 
-        seen = (record.station_id, record.node_id)
+        transmitter = (record.station_id, record.node_id)
+        seen_before = latest.get(transmitter)
 
-        if seen not in latest or record.time > latest[seen]:
-            latest[seen] = record.time
+        if seen_before is None or record.time > seen_before:
+            latest[transmitter] = record.time
 
     for (station_id, node_id), seen_at in latest.items():
         moved = StationSource.objects.filter(

@@ -48,6 +48,30 @@ def at(stamp):
     return datetime.fromisoformat(stamp).replace(tzinfo=timezone.utc)
 
 
+def pages(*payloads):
+    """A page fetch returning fixed payloads, standing in for the network.
+
+    Every sync takes its page fetch as an argument for exactly this reason, so
+    the writing rules can be asserted against payloads the source really
+    returned without anything opening a socket.
+    """
+
+    def fetch(_source):
+        yield from payloads
+
+    return fetch
+
+
+def failing_fetch(message):
+    """A page fetch that fails the way an unreachable source would."""
+
+    def fetch(_source):
+        raise OSError(message)
+        yield  # pragma: no cover - never reached, keeps this a generator
+
+    return fetch
+
+
 def origin_broker(node, **kwargs):
     """A node's own broker, as a catalogue sync leaves it in the registry.
 
