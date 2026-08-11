@@ -279,6 +279,10 @@ CHANNEL_LAYERS = {
     },
 }
 
+# The countries WIS2Watch monitors, as ISO 3166 alpha-2 codes. Leave unset for
+# the whole of Africa -- see wis2watch.core.countries for the default list.
+WIS2WATCH_MONITORED_COUNTRIES = env.list("WIS2WATCH_MONITORED_COUNTRIES", default=[])
+
 WIS2WATCH_LOG_LEVEL = env.str("WIS2WATCH_LOG_LEVEL", "INFO")
 WIS2WATCH_DATABASE_LOG_LEVEL = env.str("WIS2WATCH_DATABASE_LOG_LEVEL", "ERROR")
 

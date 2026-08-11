@@ -5,7 +5,7 @@ from celery_singleton import Singleton
 from django.core.management import call_command
 
 from wis2watch.config.celery import app
-from .cleanup import cleanup_old_station_message_logs
+from .cleanup import cleanup_old_notification_messages
 from .sync import sync_discovery_metadata, sync_stations
 
 logger = get_task_logger(__name__)
@@ -93,5 +93,5 @@ def run_sync_all_nodes():
 
 
 @shared_task
-def run_cleanup_old_station_message_logs(days=90):
-    return cleanup_old_station_message_logs(days=days)
+def run_cleanup_old_notification_messages(days=90):
+    return cleanup_old_notification_messages(days=days)

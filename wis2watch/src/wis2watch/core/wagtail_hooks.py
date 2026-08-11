@@ -2,16 +2,16 @@ from django.urls import path
 from wagtail import hooks
 
 from wis2watch.core.viewsets import admin_viewsets
-from .views import node_details, preview_dataset_stations_csv, get_dataset_stations_as_csv
+from .views import node_details, preview_node_stations_csv, get_node_stations_as_csv
 
 
 @hooks.register('register_admin_urls')
 def urlconf_wis2watch():
     return [
         path("node-detail/<int:node_id>/", node_details, name="node_details"),
-        path('dataset/<int:dataset_id>/stations/preview/', preview_dataset_stations_csv,
-             name='preview_dataset_stations_csv'),
-        path('dataset/<int:dataset_id>/stations/csv/', get_dataset_stations_as_csv, name='get_dataset_stations_csv'),
+        path('node/<int:node_id>/stations/preview/', preview_node_stations_csv,
+             name='preview_node_stations_csv'),
+        path('node/<int:node_id>/stations/csv/', get_node_stations_as_csv, name='get_node_stations_csv'),
     ]
 
 

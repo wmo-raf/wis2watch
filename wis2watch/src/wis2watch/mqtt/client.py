@@ -45,12 +45,13 @@ class MQTTNodeClient:
     
     MAX_MESSAGE_TIMES_STORED = 1000
     
-    def __init__(self, node_id: int, broker_host: str, broker_port: int,
+    def __init__(self, node_id: int, source_id: int, broker_host: str, broker_port: int,
                  username: str = None, password: str = None, topics: list = None):
-        
+
         from wis2watch.core.models import WIS2Node
-        
+
         self.node_id = node_id
+        self.source_id = source_id
         self.broker_host = broker_host
         self.broker_port = broker_port
         self.username = username
@@ -262,6 +263,7 @@ class MQTTNodeClient:
             # --- 1. DB Batching Logic ---
             message_data = {
                 'node_id': self.node_id,
+                'source_id': self.source_id,
                 'topic': msg.topic,
                 'payload': payload,
                 'timestamp': current_time.isoformat()
