@@ -13,3 +13,8 @@ The five canonical triage roles, each label string equal to its name. See `docs/
 ### Domain docs
 
 Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Adding new features or fixing bugs
+
+**IMPORTANT**: When you work on a new feature or bug fix, create a git branch first. Then work on changes in that
+branch for the remainder of the session.

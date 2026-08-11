@@ -711,6 +711,116 @@ class HourlyRollup(TimeStampedModel):
         return f"{self.node_id} @ {self.hour}: {self.message_count}"
 
 
+class PropagationGapQuerySet(models.QuerySet):
+    def open(self):
+        """Gaps the world is still not known to have seen.
+
+        A gap closed by a late arrival stays on the record -- it is evidence of
+        how slow that path was -- but it is not something anyone should be sent
+        to investigate, so reading defaults to what is still missing.
+        """
+        return self.filter(resolved_at__isnull=True)
+
+
+class PropagationGap(models.Model):
+    """A notification a centre published that the world never saw.
+
+    This is the finding neither vantage point can make alone. The node's own
+    broker says the notification exists; the Global Broker, past a grace period
+    that absorbs ordinary latency, has never carried it. Matching is by the
+    notification's own UUID, which Global Brokers preserve when republishing.
+
+    A row per notification, not a count: "seventeen messages did not
+    propagate" cannot be investigated, while a UUID, a topic and a publication
+    time can be taken to the centre.
+
+    Recorded rather than derived on demand, because the evidence expires. Raw
+    messages are kept for a forensic window only and the rollups carry counts
+    rather than UUIDs, so a gap not written down while its rows still exist is
+    a finding that cannot be made again.
+
+    The origin broker record may be replaced by a later catalogue sync, and the
+    dataset may be deleted by hand; neither unmakes the observation, so both are
+    held loosely and the gap keeps the topic and the UUID it was found by.
+
+    Its own timestamps rather than the usual created and modified pair: a gap
+    is a statement about three instants that are not this row's history --
+    when the centre published, when this tool saw that, and when the world was
+    concluded not to have. ``detected_at`` is when the row was written, and is
+    the one a created stamp would have duplicated.
+    """
+
+    node = models.ForeignKey(
+        WIS2Node,
+        on_delete=models.CASCADE,
+        related_name="propagation_gaps",
+    )
+    origin_source = models.ForeignKey(
+        MessageSource,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="propagation_gaps",
+        help_text=_("The vantage point that saw the notification published"),
+    )
+    dataset = models.ForeignKey(
+        Dataset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="propagation_gaps",
+        help_text=_("Null where the topic belongs to no dataset the registry knows"),
+    )
+
+    notification_id = models.CharField(
+        max_length=255,
+        help_text=_("The notification's own UUID, as both vantage points carry it"),
+    )
+    topic = models.CharField(
+        max_length=1000,
+        help_text=_("Raw MQTT topic the notification was published on"),
+    )
+
+    published_at = models.DateTimeField(
+        help_text=_("The notification's own publication time"),
+    )
+    observed_at_origin = models.DateTimeField(
+        help_text=_("When this tool saw the notification at the node's own broker"),
+    )
+    detected_at = models.DateTimeField(
+        help_text=_("When the evaluation concluded the world had not seen it"),
+    )
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the notification was finally seen on the Global Broker"),
+    )
+
+    objects = PropagationGapQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-published_at"]
+        constraints = [
+            # A notification UUID is unique in WIS2, so a centre's gap is
+            # named once however many times the evaluation window is
+            # recomputed over it, and however many broker records the centre
+            # has had in the meantime.
+            models.UniqueConstraint(
+                fields=["node", "notification_id"],
+                name="unique_propagation_gap_per_notification",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["node", "-published_at"]),
+            models.Index(fields=["resolved_at"]),
+        ]
+        verbose_name = _("Propagation Gap")
+        verbose_name_plural = _("Propagation Gaps")
+
+    def __str__(self):
+        return f"{self.notification_id} published @ {self.published_at}"
+
+
 class SyncLog(models.Model):
     """
     One run of a synchronisation job, with its counts and any error.
