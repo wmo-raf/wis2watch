@@ -7,6 +7,11 @@ to nothing, and each absence is recorded rather than treated as a failure --
 a centre publishing without a catalogue record, a topic no dataset claims and
 a message carrying no station are all findings this tool exists to report.
 
+A station is the exception to resolving to nothing: one that names itself and
+that no registry declares is created here, along with the record that it was
+observed transmitting, because a station nobody declares is precisely the one
+worth asking a centre about.
+
 Only the message's own publication time is stored as ``time``. It is fixed for
 a given notification, which is what lets the same notification seen from two
 vantage points be matched, and what makes a redelivery a no-op.
@@ -15,12 +20,15 @@ vantage points be matched, and what makes a redelivery a no-op.
 import logging
 from dataclasses import dataclass
 
+from django.db.models import Q
+
 from ..core.interpretation import parse_notification, parse_topic
 from ..core.models import (
     Dataset,
     NodeLastSeen,
     NotificationMessage,
     Station,
+    StationSource,
     WIS2Node,
 )
 
@@ -114,11 +122,22 @@ class RegistryLookup:
         return None
 
     def station(self, wigos_id):
-        """The station an identifier names, or None if it is not known yet."""
+        """The station an identifier names, created if nothing declares it.
+
+        A station transmitting that no registry has heard of is the finding
+        this tool exists to make, so it is written down rather than dropped:
+        observation is one of the three sources a station can be known from,
+        and the only one that proves the station is alive.
+
+        Nothing is filled in beyond the identifier. What a station is called
+        and where it stands are OSCAR's and the node registry's to say; a
+        notification carries neither, and inventing them here would put words
+        in a source's mouth.
+        """
         if wigos_id not in self._stations:
-            self._stations[wigos_id] = Station.objects.filter(
+            self._stations[wigos_id], _ = Station.objects.get_or_create(
                 wigos_id=wigos_id
-            ).first()
+            )
 
         return self._stations[wigos_id]
 
@@ -138,10 +157,9 @@ def prepare_notification(source, topic, payload, lookup=None):
     lookup = lookup or RegistryLookup()
     parsed = parse_topic(topic)
 
-    # Attribution comes only from the message's own WIGOS station identifier,
-    # and only to a station already known. A transmitting station the registry
-    # has never heard of keeps its identifier on the row, so that the station
-    # sync can find it later and the gap is visible in the meantime.
+    # Attribution comes only from the message's own WIGOS station identifier.
+    # A station nothing declares is created rather than dropped: it is
+    # transmitting, which is the one thing a registry cannot tell us.
     station = (
         lookup.station(notification.wigos_station_id)
         if notification.is_attributed
@@ -212,6 +230,49 @@ def _record_last_seen(records):
             )
 
 
+def _record_observed_stations(records):
+    """Record each station a flush saw transmitting, and when it last did.
+
+    Per-station last-seen is what lets a single silent station be named rather
+    than a whole centre, and it is kept on the observation because that is the
+    only source that can speak to it: a registry declaring a station says
+    nothing about whether it has ever transmitted.
+
+    The node is the one whose topic carried the message, and may be none --
+    a centre with no catalogue record still has stations, and losing them
+    would hide exactly the traffic worth asking about.
+
+    As with a node's last-seen, time only moves forward: redeliveries and
+    messages that took the long way round say nothing new.
+    """
+    latest = {}
+
+    for record in records:
+        if record.station_id is None:
+            continue
+
+        seen = (record.station_id, record.node_id)
+
+        if seen not in latest or record.time > latest[seen]:
+            latest[seen] = record.time
+
+    for (station_id, node_id), seen_at in latest.items():
+        moved = StationSource.objects.filter(
+            Q(last_seen__lt=seen_at) | Q(last_seen__isnull=True),
+            station_id=station_id,
+            source_type=StationSource.OBSERVED,
+            node_id=node_id,
+        ).update(last_seen=seen_at)
+
+        if not moved:
+            StationSource.objects.get_or_create(
+                station_id=station_id,
+                source_type=StationSource.OBSERVED,
+                node_id=node_id,
+                defaults={"last_seen": seen_at},
+            )
+
+
 def store_notifications(source, received):
     """Store a flush of received ``(topic, payload)`` pairs.
 
@@ -250,5 +311,6 @@ def store_notifications(source, received):
     if records:
         _insert(records)
         _record_last_seen(records)
+        _record_observed_stations(records)
 
     return counts

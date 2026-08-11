@@ -9,9 +9,9 @@ from wagtail.admin import messages
 
 from .analysis import Staleness, default_volume_hours, node_overview
 from .forms import SyncNodeForm
-from .models import StationSource, WIS2Node
+from .models import StationSource, SyncLog, WIS2Node
+from .node_stations import sync_node_stations
 from .stations import node_stations_as_csv
-from .sync import sync_stations
 from .viewsets import WIS2NodeViewSet
 
 
@@ -127,13 +127,20 @@ def node_details(request, node_id):
 
             # Datasets come from the catalogue now, so syncing a node by hand
             # asks it only for its station registry.
-            result, error = sync_stations(node_id)
+            sync_log = sync_node_stations(get_object_or_404(WIS2Node, pk=node_id))
 
-            if error:
-                error = str(error)
-                messages.error(request, _("Error during synchronization: ") + error)
+            if sync_log is None:
+                messages.warning(request, _("This node advertises no station registry."))
+            elif sync_log.status == SyncLog.FAILED:
+                messages.error(
+                    request,
+                    _("Error during synchronization: ") + sync_log.error_message,
+                )
             else:
-                messages.success(request, _("Node synchronization completed successfully."))
+                messages.success(
+                    request,
+                    _("Station synchronization completed: ") + sync_log.summary,
+                )
         else:
             messages.error(request, _("Invalid form submission."))
 
