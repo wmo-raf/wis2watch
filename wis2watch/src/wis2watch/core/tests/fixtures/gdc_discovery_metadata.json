@@ -1,0 +1,1424 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "id": "urn:wmo:md:ke-meteo:synop-dataset-surface-observations",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "type": "Feature",
+   "time": {
+    "interval": [
+     "2025-10-14",
+     ".."
+    ],
+    "resolution": "PT1H"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       33.893568969666944,
+       5.506
+      ],
+      [
+       41.85508309264397,
+       5.506
+      ],
+      [
+       41.85508309264397,
+       -4.67677
+      ],
+      [
+       33.893568969666944,
+       -4.67677
+      ],
+      [
+       33.893568969666944,
+       5.506
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "type": "dataset",
+    "identifier": "urn:wmo:md:ke-meteo:synop-dataset-surface-observations",
+    "title": "Hourly synoptic observations from fixed-land stations (SYNOP) (ke-meteo)",
+    "description": "Kenya synops",
+    "keywords": [
+     "observations",
+     "temperature",
+     "visibility",
+     "precipitation",
+     "pressure",
+     "clouds",
+     "snow depth",
+     "evaporation",
+     "radiation",
+     "wind",
+     "total sunshine",
+     "humidity"
+    ],
+    "themes": [
+     {
+      "concepts": [
+       {
+        "id": "weather",
+        "title": "Weather"
+       }
+      ],
+      "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+     }
+    ],
+    "contacts": [
+     {
+      "organization": "Kenya Meteorological Service",
+      "emails": [
+       {
+        "value": "wis@meteo.go.ke"
+       }
+      ],
+      "addresses": [
+       {
+        "country": "KEN"
+       }
+      ],
+      "links": [
+       {
+        "rel": "about",
+        "href": "https://www.meteo.go.ke",
+        "type": "text/html"
+       }
+      ],
+      "roles": [
+       "host"
+      ]
+     }
+    ],
+    "created": "2025-10-14T04:34:19Z",
+    "updated": "2025-10-14T04:44:23Z",
+    "wmo:dataPolicy": "core",
+    "id": "urn:wmo:md:ke-meteo:synop-dataset-surface-observations",
+    "centre-id": "ke-meteo"
+   },
+   "links": [
+    {
+     "href": "mqtts://everyone:everyone@gb.wis.cma.cn:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop",
+     "filters": {
+      "wigos_station_identifier": {
+       "type": "string",
+       "title": "WIGOS Station Identifier",
+       "description": "Filter by WIGOS Station Identifier"
+      }
+     },
+     "title": "Notifications from China Meteorological Agency, Global Broker Service (cn-cma-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@globalbroker.meteo.fr:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop",
+     "filters": {
+      "wigos_station_identifier": {
+       "type": "string",
+       "title": "WIGOS Station Identifier",
+       "description": "Filter by WIGOS Station Identifier"
+      }
+     },
+     "title": "Notifications from Météo-France, Global Broker Service (fr-meteofrance-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@globalbroker.inmet.gov.br:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop",
+     "filters": {
+      "wigos_station_identifier": {
+       "type": "string",
+       "title": "WIGOS Station Identifier",
+       "description": "Filter by WIGOS Station Identifier"
+      }
+     },
+     "title": "Notifications from Instituto Nacional de Meteorologia (Brazil), Global Broker Service (br-inmet-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@wis2globalbroker.nws.noaa.gov:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop",
+     "filters": {
+      "wigos_station_identifier": {
+       "type": "string",
+       "title": "WIGOS Station Identifier",
+       "description": "Filter by WIGOS Station Identifier"
+      }
+     },
+     "title": "Notifications from National Oceanic and Atmospheric Administration, National Weather Service, Global Broker Service (us-noaa-nws-global-broker)"
+    },
+    {
+     "href": "http://wis.meteo.go.ke/data/metadata/urn:wmo:md:ke-meteo:synop-dataset-surface-observations.json",
+     "type": "application/geo+json",
+     "name": "urn:wmo:md:ke-meteo:synop-dataset-surface-observations",
+     "rel": "canonical",
+     "title": "urn:wmo:md:ke-meteo:synop-dataset-surface-observations"
+    }
+   ]
+  },
+  {
+   "id": "urn:wmo:md:cg-met:core.climate.surface-based-observations.climat",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "type": "Feature",
+   "time": {
+    "interval": [
+     "2025-01-04",
+     ".."
+    ]
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       11.093772820691925,
+       3.728196519379452
+      ],
+      [
+       18.45306521980993,
+       3.728196519379452
+      ],
+      [
+       18.45306521980993,
+       -5.037986748884791
+      ],
+      [
+       11.093772820691925,
+       -5.037986748884791
+      ],
+      [
+       11.093772820691925,
+       3.728196519379452
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "type": "dataset",
+    "identifier": "urn:wmo:md:cg-met:core.climate.surface-based-observations.climat",
+    "title": "Climat summary report from fixed-land stations (SYNOP) (cg-met)",
+    "description": "Climat summary report from fixed-land stations (SYNOP) (cg-met)",
+    "language": null,
+    "keywords": [
+     "PRESSURE",
+     "TEMPERATURE",
+     "VAP.T (HPa)",
+     "PRECIPITATION",
+     "SUNSHINE",
+     "WIND",
+     "VISIBILITY",
+     "WEATHER"
+    ],
+    "themes": [
+     {
+      "concepts": [
+       {
+        "id": "climate",
+        "title": "Climate"
+       }
+      ],
+      "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+     }
+    ],
+    "contacts": [
+     {
+      "organization": "Direction de la Météorologie Nationale",
+      "emails": [
+       {
+        "value": "sambafrancillylardin@gmail.com"
+       }
+      ],
+      "addresses": [
+       {
+        "country": "COG"
+       }
+      ],
+      "links": [
+       {
+        "rel": "about",
+        "href": "https://www.dirmet.cg",
+        "type": "text/html"
+       }
+      ],
+      "roles": [
+       "host"
+      ],
+      "phones": [
+       {
+        "value": "+242065456857"
+       }
+      ]
+     }
+    ],
+    "created": "2025-01-04T22:08:49Z",
+    "updated": "2025-01-04T22:17:29Z",
+    "wmo:dataPolicy": "core",
+    "wmo:topicHierarchy": "origin/a/wis2/cg-met/data/core/climate/surface-based-observations/climat",
+    "id": "urn:wmo:md:cg-met:core.climate.surface-based-observations.climat"
+   },
+   "links": [
+    {
+     "href": "mqtt://everyone:everyone@wis.dirmet.cg:1883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/cg-met/data/core/climate/surface-based-observations/climat",
+     "rel": "items",
+     "channel": "cache/a/wis2/cg-met/data/core/climate/surface-based-observations/climat",
+     "title": "Notifications"
+    },
+    {
+     "href": "mqtts://everyone:everyone@gb.wis.cma.cn:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/cg-met/data/core/climate/surface-based-observations/climat",
+     "rel": "items",
+     "channel": "cache/a/wis2/cg-met/data/core/climate/surface-based-observations/climat",
+     "title": "Notifications from China Meteorological Agency, Global Broker Service (cn-cma-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@globalbroker.meteo.fr:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/cg-met/data/core/climate/surface-based-observations/climat",
+     "rel": "items",
+     "channel": "cache/a/wis2/cg-met/data/core/climate/surface-based-observations/climat",
+     "title": "Notifications from Météo-France, Global Broker Service (fr-meteofrance-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@globalbroker.inmet.gov.br:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/cg-met/data/core/climate/surface-based-observations/climat",
+     "rel": "items",
+     "channel": "cache/a/wis2/cg-met/data/core/climate/surface-based-observations/climat",
+     "title": "Notifications from Instituto Nacional de Meteorologia (Brazil), Global Broker Service (br-inmet-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@wis2globalbroker.nws.noaa.gov:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/cg-met/data/core/climate/surface-based-observations/climat",
+     "rel": "items",
+     "channel": "cache/a/wis2/cg-met/data/core/climate/surface-based-observations/climat",
+     "title": "Notifications from National Oceanic and Atmospheric Administration, National Weather Service, Global Broker Service (us-noaa-nws-global-broker)"
+    }
+   ]
+  },
+  {
+   "id": "urn:wmo:md:sz-swazimet:surface-based-observations.synop",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "type": "Feature",
+   "time": {
+    "interval": [
+     "2024-05-15",
+     ".."
+    ],
+    "resolution": "P1H"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       30.67660851412964,
+       -25.66019052500895
+      ],
+      [
+       32.07166548028107,
+       -25.66019052500895
+      ],
+      [
+       32.07166548028107,
+       -27.285879408478998
+      ],
+      [
+       30.67660851412964,
+       -27.285879408478998
+      ],
+      [
+       30.67660851412964,
+       -25.66019052500895
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "type": "dataset",
+    "identifier": "urn:wmo:md:sz-swazimet:surface-based-observations.synop",
+    "title": "Hourly synoptic observations from fixed-land stations (SYNOP) (sz-swazimet)",
+    "description": "Hourly synoptic observations from fixed-land stations (SYNOP) in Eswatini",
+    "language": null,
+    "keywords": [
+     "observations",
+     "temperature",
+     "visibility",
+     "precipitation",
+     "pressure",
+     "clouds",
+     "snow depth",
+     "evaporation",
+     "radiation",
+     "wind",
+     "total sunshine",
+     "humidity"
+    ],
+    "themes": [
+     {
+      "concepts": [
+       {
+        "id": "weather",
+        "title": "Weather"
+       }
+      ],
+      "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+     }
+    ],
+    "contacts": [
+     {
+      "organization": "Swaziland Meteorological Service",
+      "emails": [
+       {
+        "value": "manyoniian@gmail.com"
+       }
+      ],
+      "addresses": [
+       {
+        "country": "SWZ"
+       }
+      ],
+      "links": [
+       {
+        "rel": "about",
+        "href": "http://www.swazimet.gov.sz",
+        "type": "text/html"
+       }
+      ],
+      "roles": [
+       "host"
+      ]
+     }
+    ],
+    "created": "2024-05-15T11:27:12Z",
+    "updated": "2024-05-15T14:18:44Z",
+    "wmo:dataPolicy": "core",
+    "wmo:topicHierarchy": "origin/a/wis2/sz-swazimet/data/core/weather/surface-based-observations/synop",
+    "id": "urn:wmo:md:sz-swazimet:surface-based-observations.synop",
+    "centre-id": "sz-swazimet"
+   },
+   "links": [
+    {
+     "href": "mqtts://everyone:everyone@gb.wis.cma.cn:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/sz-swazimet/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/sz-swazimet/data/core/weather/surface-based-observations/synop",
+     "title": "Notifications from China Meteorological Agency, Global Broker Service (cn-cma-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@globalbroker.meteo.fr:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/sz-swazimet/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/sz-swazimet/data/core/weather/surface-based-observations/synop",
+     "title": "Notifications from Météo-France, Global Broker Service (fr-meteofrance-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@globalbroker.inmet.gov.br:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/sz-swazimet/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/sz-swazimet/data/core/weather/surface-based-observations/synop",
+     "title": "Notifications from Instituto Nacional de Meteorologia (Brazil), Global Broker Service (br-inmet-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@wis2globalbroker.nws.noaa.gov:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/sz-swazimet/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/sz-swazimet/data/core/weather/surface-based-observations/synop",
+     "title": "Notifications from National Oceanic and Atmospheric Administration, National Weather Service, Global Broker Service (us-noaa-nws-global-broker)"
+    }
+   ]
+  },
+  {
+   "id": "urn:wmo:md:gh-gmet:urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "type": "Feature",
+   "time": {
+    "interval": [
+     "2025-11-12",
+     ".."
+    ]
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -3.244370083011262,
+       11.098340969278722
+      ],
+      [
+       1.0601216976049272,
+       11.098340969278722
+      ],
+      [
+       1.0601216976049272,
+       4.710462144383371
+      ],
+      [
+       -3.244370083011262,
+       4.710462144383371
+      ],
+      [
+       -3.244370083011262,
+       11.098340969278722
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "type": "dataset",
+    "identifier": "urn:wmo:md:gh-gmet:urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+    "title": "Hourly synoptic observations from fixed-land stations (SYNOP) (gh-gmet)",
+    "description": "Observations from automatic weather stations",
+    "keywords": [
+     "observations",
+     "temperature",
+     "visibility",
+     "precipitation",
+     "pressure",
+     "clouds",
+     "snow depth",
+     "evaporation",
+     "radiation",
+     "wind",
+     "total sunshine",
+     "humidity"
+    ],
+    "themes": [
+     {
+      "concepts": [
+       {
+        "id": "weather",
+        "title": "Weather"
+       }
+      ],
+      "scheme": "http://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+     }
+    ],
+    "contacts": [
+     {
+      "organization": "Ghana Meteorological Agency",
+      "emails": [
+       {
+        "value": "info@meteo.gov.gh"
+       }
+      ],
+      "addresses": [
+       {
+        "country": "GHA"
+       }
+      ],
+      "links": [
+       {
+        "rel": "about",
+        "href": "https://www.meteo.gov.gh/",
+        "type": "text/html"
+       }
+      ],
+      "roles": [
+       "host"
+      ],
+      "phones": [
+       {
+        "value": "+233303965563"
+       }
+      ]
+     }
+    ],
+    "created": "2025-11-12T11:30:22Z",
+    "updated": "2025-11-12T11:30:22Z",
+    "wmo:dataPolicy": "core",
+    "wmo:topicHierarchy": "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+    "id": "urn:wmo:md:gh-gmet:urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+    "centre-id": "gh-gmet"
+   },
+   "links": [
+    {
+     "href": "mqtts://everyone:everyone@gb.wis.cma.cn:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+     "title": "Notifications from China Meteorological Administration, Global Broker Service (cn-cma-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@globalbroker.meteo.fr:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+     "title": "Notifications from Météo-France, Global Broker Service (fr-meteofrance-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@globalbroker.inmet.gov.br:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+     "title": "Notifications from Instituto Nacional de Meteorologia (Brazil), Global Broker Service (br-inmet-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@wis2globalbroker.nws.noaa.gov:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+     "title": "Notifications from National Oceanic and Atmospheric Administration, National Weather Service, Global Broker Service (us-noaa-nws-global-broker)"
+    }
+   ]
+  },
+  {
+   "id": "urn:wmo:md:il-ims:weather.observations.temp",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "time": {
+    "interval": [
+     "T00Z",
+     "T12Z"
+    ],
+    "resolution": "PT12H"
+   },
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       34.95,
+       29.56
+      ],
+      [
+       35.75,
+       33.05
+      ],
+      [
+       35.01,
+       33.12
+      ],
+      [
+       34.26,
+       31.22
+      ],
+      [
+       34.95,
+       29.56
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "title": "Upper air weather observations",
+    "description": "Upper air observations measured by radiosonde stations in Israel",
+    "themes": [
+     {
+      "concepts": [
+       {
+        "id": "meteorology"
+       }
+      ],
+      "scheme": "http://wis.wmo.int/2012/codelists/WMOCodeLists#WMO_CategoryCode"
+     },
+     {
+      "concepts": [
+       {
+        "id": "weather",
+        "title": "Weather",
+        "url": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline/weather"
+       }
+      ],
+      "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+     }
+    ],
+    "contacts": [
+     {
+      "organization": "Israel Meteorological Service",
+      "phones": [
+       {
+        "value": "+972039403142"
+       }
+      ],
+      "emails": [
+       {
+        "value": "observer@ims.gov.il"
+       },
+       {
+        "value": "imsit@ims.gov.il"
+       }
+      ],
+      "links": [
+       {
+        "rel": "about",
+        "type": "text/html",
+        "href": "https://ims.gov.il/en"
+       }
+      ],
+      "contactInstructions": "email",
+      "roles": [
+       "producer",
+       "host"
+      ]
+     }
+    ],
+    "type": "dataset",
+    "created": "2024-12-30T10:30:00Z",
+    "updated": "2024-12-30T10:30:00Z",
+    "wmo:dataPolicy": "core"
+   },
+   "links": [
+    {
+     "rel": "stations",
+     "href": "https://ims.gov.il/en/stations",
+     "type": "text/html",
+     "title": "Stations associated with this dataset"
+    },
+    {
+     "rel": "data",
+     "href": "https://ims.gov.il/en/UpperLevelObservations",
+     "type": "text/html",
+     "hreflang": "en",
+     "title": "Raw data download (pdf/txt)",
+     "distribution": {
+      "availableFormats": [
+       {
+        "name": "txt"
+       }
+      ]
+     }
+    },
+    {
+     "rel": "items",
+     "href": "mqtts://everyone:everyone@wis2.dwd.de:8883",
+     "channel": "cache/a/wis2/il-ims/data/core/weather/surface-based-observations/temp",
+     "type": "application/geo+json",
+     "title": "Data notifications"
+    },
+    {
+     "rel": "preview",
+     "type": "image/png",
+     "title": "Browse graphic",
+     "href": "https://wis2.dwd.de/images/il-ims/ims_radiosonde.png"
+    },
+    {
+     "rel": "items",
+     "href": "mqtts://everyone:everyone@gb.wis.cma.cn:8883",
+     "channel": "cache/a/wis2/il-ims/data/core/weather/surface-based-observations/temp",
+     "type": "application/geo+json",
+     "title": "Notifications from China Meteorological Agency, Global Broker Service (cn-cma-global-broker)"
+    },
+    {
+     "rel": "items",
+     "href": "mqtts://everyone:everyone@globalbroker.meteo.fr:8883",
+     "channel": "cache/a/wis2/il-ims/data/core/weather/surface-based-observations/temp",
+     "type": "application/geo+json",
+     "title": "Notifications from Météo-France, Global Broker Service (fr-meteofrance-global-broker)"
+    },
+    {
+     "rel": "items",
+     "href": "mqtts://everyone:everyone@globalbroker.inmet.gov.br:8883",
+     "channel": "cache/a/wis2/il-ims/data/core/weather/surface-based-observations/temp",
+     "type": "application/geo+json",
+     "title": "Notifications from Instituto Nacional de Meteorologia (Brazil), Global Broker Service (br-inmet-global-broker)"
+    },
+    {
+     "rel": "items",
+     "href": "mqtts://everyone:everyone@wis2globalbroker.nws.noaa.gov:8883",
+     "channel": "cache/a/wis2/il-ims/data/core/weather/surface-based-observations/temp",
+     "type": "application/geo+json",
+     "title": "Notifications from National Oceanic and Atmospheric Administration, National Weather Service, Global Broker Service (us-noaa-nws-global-broker)"
+    }
+   ]
+  },
+  {
+   "id": "urn:wmo:md:int-eumetsat:met09:amv",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -22.0,
+       -67.5
+      ],
+      [
+       -22.0,
+       67.5
+      ],
+      [
+       113.0,
+       67.5
+      ],
+      [
+       113.0,
+       -67.5
+      ],
+      [
+       -22.0,
+       -67.5
+      ]
+     ]
+    ]
+   },
+   "time": {
+    "interval": [
+     "2017-02-01",
+     ".."
+    ],
+    "resolution": "PT15M"
+   },
+   "properties": {
+    "created": "2026-07-07T13:00:00Z",
+    "updated": "2026-07-07T13:00:00Z",
+    "type": "dataset",
+    "title": "Atmospheric Motion Vectors - MSG - Indian Ocean",
+    "description": "Atmospheric Motion Vectors at all heights below the tropopause, derived from 5 channels (Visual 0.8, Water Vapour 6.2, Water Vapour 7.3, Infrared 10.8 and the High Resolution Visual channel), all combined into one product. Vectors are derived by tracking the motion of clouds and other atmospheric constituents as water vapour patterns. The initial resolution is a 24 pixels grid (HRV 12 high res. pixels), but as the algorithm tries to adjust the position to the point of the maximum contrast (typically cloud edges), the end resolution varies. The height assignment of the AMVs is calculated using the Cross-Correlation Contribution (CCC) function to determine the pixels that contribute the most to the vectors. An AMV product contains between 30 000 and 50 000 vectors depending on the time of the day, and uses SEVIRI image data from Meteosat-8 and onwards.",
+    "status": {
+     "id": "operational",
+     "title": "Operational data are generated on a continous basis",
+     "url": "https://vocab.met.no/mmd/en/page/Operational_Status"
+    },
+    "keywords": [
+     "wind",
+     "numericalWeatherPrediction"
+    ],
+    "keywordsCodespace": "http://standards.iso.org/ittf/PubliclyAvailableStandards/ISO_19139_Schemas/resources/Codelist/gmxCodelists.xml#MD_KeywordTypeCode",
+    "language": "en",
+    "contacts": [
+     {
+      "name": "EUMETSAT",
+      "organization": "European Organisation for the Exploitation of Meteorological Satellites",
+      "phones": [
+       {
+        "value": "+4961518073770"
+       }
+      ],
+      "emails": [
+       {
+        "value": "ops@eumetsat.int"
+       }
+      ],
+      "addresses": [
+       {
+        "deliveryPoint": [
+         "EUMETSAT Allee 1"
+        ],
+        "city": "Darmstadt",
+        "postalCode": "64295",
+        "country": "Germany"
+       }
+      ],
+      "links": [
+       {
+        "href": "https://www.eumetsat.int",
+        "type": "text/html",
+        "rel": "about"
+       }
+      ],
+      "roles": [
+       "host",
+       "producer"
+      ],
+      "position": "Data Collection or Production Centre",
+      "hoursOfService": "0830h - 1715h CET/CEST",
+      "contactInstructions": "email"
+     }
+    ],
+    "themes": [
+     {
+      "concepts": [
+       {
+        "id": "meteorology"
+       },
+       {
+        "id": "satelliteObservation"
+       }
+      ],
+      "scheme": "https://wis.wmo.int/2012/codelists/WMOCodeLists.xml#WMO_CategoryCode#MD_KeywordTypeCode_theme"
+     },
+     {
+      "concepts": [
+       {
+        "id": "weather"
+       }
+      ],
+      "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+     },
+     {
+      "concepts": [
+       {
+        "id": "GlobalExchange"
+       }
+      ],
+      "scheme": "https://wis.wmo.int/2012/codelists/WMOCodeLists.xml#WMO_CategoryCode#MD_KeywordTypeCode_dataCentre"
+     }
+    ],
+    "formats": [
+     {
+      "name": "BUFR",
+      "mediaType": "application/bufr"
+     }
+    ],
+    "contactPoint": "https://www.eumetsat.int/contact-us",
+    "wmo:dataPolicy": "core",
+    "centre-id": "int-eumetsat"
+   },
+   "links": [
+    {
+     "rel": "data",
+     "type": "collection",
+     "title": "Atmospheric Motion Vectors - MSG - Indian Ocean",
+     "href": "https://user.eumetsat.int/catalogue/EO:EUM:DAT:MSG:AMV-IODC"
+    },
+    {
+     "rel": "items",
+     "channel": "cache/a/wis2/int-eumetsat/data/core/weather/space-based-observations/meteosat-9/seviri",
+     "href": "mqtts://example.org",
+     "type": "application/json",
+     "title": "Data notifications"
+    },
+    {
+     "rel": "search",
+     "type": "text/html",
+     "title": "EUMETSAT Datastore",
+     "href": "https://data.eumetsat.int/start",
+     "distribution": {
+      "availableFormats": [
+       {
+        "name": "BUFR",
+        "description": "The Binary Universal Form for the Representation of meteorological data (BUFR) is the World Meteorological Organizations (WMO) standard binary code for observational data. It is designed for efficient exchange and storage. Data producers can define proprietary table entries for local usage.",
+        "numberOfFiles": "24 per day",
+        "typicalFilesize": "2.5 MB",
+        "typicalFilename": "W_XX-EUMETSAT-Darmstadt,SING+LEV+SAT,MET09+AMV_C_EUMG_20260707113000_2.bin"
+       }
+      ]
+     }
+    },
+    {
+     "rel": "license",
+     "href": "https://user.eumetsat.int/dashboard",
+     "policy": "Free and unrestricted - CC-BY-4.0",
+     "policyId": "NoConditions"
+    }
+   ]
+  },
+  {
+   "id": "urn:wmo:md:us-cimss:dbnet.cris-fullch",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "time": null,
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -180,
+       -90
+      ],
+      [
+       -180,
+       90
+      ],
+      [
+       180,
+       90
+      ],
+      [
+       180,
+       -90
+      ],
+      [
+       -180,
+       -90
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "created": "2025-07-14T00:00:00Z",
+    "wmo:dataPolicy": "core",
+    "type": "dataset",
+    "title": "CrIS full channel set from NOAA DBRTN",
+    "description": "CrIS radiances with all channels in BUFR format; received and processed with low latency by NOAA DBRTN at SSEC, University of Wisconsin-Madison.",
+    "keywords": [
+     "wis2",
+     "global discovery catalogue",
+     "metadata",
+     "dbnet",
+     "dbrtn"
+    ],
+    "language": "en",
+    "themes": [
+     {
+      "concepts": [
+       {
+        "id": "weather",
+        "title": "Weather",
+        "url": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline/weather"
+       }
+      ],
+      "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+     }
+    ],
+    "contacts": [
+     {
+      "organization": "Space Science and Engineering Center, University of Wisconsin - Madison",
+      "phones": [
+       {
+        "value": "+116082620502"
+       }
+      ],
+      "emails": [
+       {
+        "value": "dcstaff@ssec.wisc.edu"
+       }
+      ],
+      "addresses": [
+       {
+        "deliveryPoint": [
+         "1225 W. Dayton St."
+        ],
+        "city": "Madison",
+        "state": "Wisconsin",
+        "postalCode": "53706",
+        "country": "United States"
+       }
+      ],
+      "links": [
+       {
+        "href": "https://ssec.wisc.edu/",
+        "rel": "about",
+        "type": "text/html",
+        "title": "SSEC Home Page"
+       }
+      ],
+      "contactInstructions": "email",
+      "roles": [
+       "producer"
+      ]
+     }
+    ],
+    "centre-id": "us-cimss"
+   },
+   "links": [
+    {
+     "rel": "items",
+     "href": "mqtts://everyone:everyone@wis2.dwd.de",
+     "channel": "cache/a/wis2/us-cimss/data/core/weather/space-based-observations/noaa-20/cris",
+     "type": "application/geo+json",
+     "title": "Data notifications"
+    },
+    {
+     "rel": "items",
+     "href": "mqtts://everyone:everyone@wis2.dwd.de",
+     "channel": "cache/a/wis2/us-cimss/data/core/weather/space-based-observations/noaa-21/cris",
+     "type": "application/geo+json",
+     "title": "Data notifications"
+    }
+   ]
+  },
+  {
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     [
+      [
+       6.623888888888889,
+       47.09444444444444
+      ],
+      [
+       18.514444444444443,
+       47.09444444444444
+      ],
+      [
+       18.514444444444443,
+       36.649166666666666
+      ],
+      [
+       6.623888888888889,
+       36.649166666666666
+      ],
+      [
+       6.623888888888889,
+       47.09444444444444
+      ]
+     ]
+    ],
+    "type": "Polygon"
+   },
+   "id": "urn:wmo:md:it-meteoam:observations.surface.synop-bufr",
+   "links": [
+    {
+     "href": "https://wis.meteoam.it/pilot",
+     "rel": "data",
+     "title": "",
+     "type": ""
+    },
+    {
+     "channel": "origin/a/wis2/it-meteoam/data/core/weather/surface-based-observations/synop",
+     "href": "",
+     "rel": "items",
+     "title": "",
+     "type": "application/geo+json"
+    }
+   ],
+   "properties": {
+    "contacts": [
+     {
+      "addresses": [
+       {
+        "administrativeArea": "",
+        "city": "Pratica di Mare",
+        "country": "Italy",
+        "deliveryPoint": [
+         ""
+        ],
+        "postalCode": ""
+       }
+      ],
+      "contactInstructions": "",
+      "emails": [
+       {
+        "value": "salvatore.salzano@aeronautica.difesa.it"
+       }
+      ],
+      "hoursOfService": "",
+      "links": [],
+      "name": "Salvatore Salzano",
+      "organization": "Meteoam Italy",
+      "phones": [],
+      "position": "",
+      "roles": [
+       "producer"
+      ]
+     }
+    ],
+    "created": "2025-10-23T13:11:02Z",
+    "description": "Surface Observations measured at the automatic and manual stations of Meteoam, the Italian Weather Service",
+    "identifier": "urn:wmo:md:it-meteoam:observations.surface.synop-bufr",
+    "keywords": [
+     "BUFR",
+     "synop",
+     "weather"
+    ],
+    "language": null,
+    "rights": "",
+    "themes": [
+     {
+      "concepts": [
+       {
+        "description": "",
+        "id": "weather",
+        "title": "Weather",
+        "url": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline/weather"
+       }
+      ],
+      "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline/weather"
+     }
+    ],
+    "title": "Synop observations in BUFR",
+    "type": "dataset",
+    "updated": "2026-07-30T06:46:58Z",
+    "wmo:dataPolicy": "core",
+    "centre-id": "it-meteoam"
+   },
+   "time": null,
+   "type": "Feature"
+  },
+  {
+   "id": "urn:wmo:md:fr-ifremer-argo:cor:msg:argo",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -180,
+       -90
+      ],
+      [
+       -180,
+       90
+      ],
+      [
+       180,
+       90
+      ],
+      [
+       180,
+       -90
+      ],
+      [
+       -180,
+       -90
+      ]
+     ]
+    ]
+   },
+   "time": {
+    "interval": [
+     "1997-01-01T00:00:00Z",
+     ".."
+    ],
+    "resolution": "PT15M"
+   },
+   "properties": {
+    "created": "2025-08-20T14:00:00Z",
+    "updated": "2025-08-20T14:00:00Z",
+    "type": "dataset",
+    "title": "Argo marine floats vertical profiles distributed by Coriolis",
+    "description": "Argo is an international program to observe the interior of the ocean with a fleet of profiling floats drifting in the deep ocean currents (https://argo.ucsd.edu). Argo GDAC is a dataset of 10 billion in situ ocean observations from 20 000 profiling floats (4.000 active) which started 25 years ago. Argo GDAC is a collection of 3 million NetCDF files. It is a major asset for ocean and climate science, a contributor to IOCCP reports. Argo data are available with a one click download https://doi.org/10.17882/42182",
+    "status": {
+     "id": "operational",
+     "title": "dataset is in 24/7 operation",
+     "url": "https://data-argo.ifremer.fr"
+    },
+    "keywords": [
+     "oceans"
+    ],
+    "keywordsCodespace": "http://standards.iso.org/ittf/PubliclyAvailableStandards/ISO_19139_Schemas/resources/Codelist/gmxCodelists.xml#MD_KeywordTypeCode",
+    "language": {
+     "code": "en"
+    },
+    "contacts": [
+     {
+      "name": "Coriolis Global Data Assembly Centre",
+      "organization": "Ifremer",
+      "phones": [
+       {
+        "value": "+33298224040"
+       }
+      ],
+      "emails": [
+       {
+        "value": "sismer@ifremer.fr"
+       }
+      ],
+      "addresses": [
+       {
+        "deliveryPoint": [
+         "1625 Route de Sainte Anne CS 10070"
+        ],
+        "city": "Plouzane",
+        "postalCode": "29280",
+        "country": "France"
+       }
+      ],
+      "links": [
+       {
+        "href": "https://www.ifremer.fr",
+        "rel": "about",
+        "type": "text/html"
+       },
+       {
+        "href": "https://co.ifremer.fr/co/etc/logo/logo-ifremer-blue.jpg",
+        "type": "image/svg+xml",
+        "rel": "preview"
+       }
+      ],
+      "roles": [
+       "host",
+       "producer"
+      ]
+     }
+    ],
+    "themes": [
+     {
+      "concepts": [
+       {
+        "id": "Oceanography"
+       }
+      ],
+      "scheme": "https://wis.wmo.int/2012/codelists/WMOCodeLists.xml#WMO_CategoryCode#MD_KeywordTypeCode_theme"
+     },
+     {
+      "concepts": [
+       {
+        "id": "drifting-ocean-profilers"
+       }
+      ],
+      "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline/ocean/surface-based-observations/drifting-ocean-profilers"
+     },
+     {
+      "concepts": [
+       {
+        "id": "GlobalExchange"
+       }
+      ],
+      "scheme": "https://wis.wmo.int/2012/codelists/WMOCodeLists.xml#WMO_CategoryCode#MD_KeywordTypeCode_dataCentre"
+     }
+    ],
+    "formats": [
+     {
+      "mediaType": "application/x-cor-hrit"
+     }
+    ],
+    "contactPoint": "http://en.data.ifremer.fr/data-Center/Contact",
+    "wmo:dataPolicy": "core",
+    "centre-id": "fr-ifremer-argo"
+   },
+   "links": [
+    {
+     "rel": "data",
+     "type": "collection",
+     "title": "Argo marine floats vertical profiles",
+     "href": "https://doi.org/10.17882/42182"
+    },
+    {
+     "rel": "items",
+     "channel": "origin/a/wis2/fr-ifremer-argo/data/core/ocean/surface-based-observations/drifting-ocean-profilers",
+     "href": "wss://mosquitto.ifremer.fr:443",
+     "type": "application/geo+json",
+     "title": "Data notifications"
+    },
+    {
+     "rel": "search",
+     "type": "text/html",
+     "title": "Coriolis GDAC",
+     "href": "https://dataselection.euro-argo.eu/",
+     "distribution": {
+      "availableFormats": [
+       {
+        "name": "native",
+        "description": "This is the Argo NetCDF format.",
+        "numberOfFiles": "350 per day",
+        "typicalFilesize": "680100",
+        "typicalFilename": "BR4903659_010.nc",
+        "iproductSamples": [
+         "https://data-argo.ifremer.fr/etc/bufr/202508/IOPX01_LFVX_200603.BU",
+         "https://data-argo.ifremer.fr/dac/coriolis/4903659/profiles/BR4903659_010.nc"
+        ],
+        "documentation": [
+         {
+          "rel": "canonical",
+          "title": "Manual on Codes Volume I.2 Part C, Attachment I, Examples of templates for the transmission in BUFR",
+          "type": "text/html",
+          "href": "https://community.wmo.int/en/activity-areas/wis/template-examples"
+         },
+         {
+          "rel": "canonical",
+          "title": "Argo NetCDF format and vocabularies",
+          "type": "text/html",
+          "href": "https://doi.org/10.13155/29825"
+         },
+         {
+          "rel": "canonical",
+          "title": "Argo data management documentation",
+          "type": "text/html",
+          "href": "http://www.argodatamgt.org/Documentation"
+         }
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "rel": "service",
+     "href": "https://doi.org/10.17882/42182",
+     "type": "text/html",
+     "title": "MSG IR 10.8"
+    },
+    {
+     "rel": "license",
+     "href": "https://creativecommons.org/licenses/by/4.0/",
+     "type": "text/html",
+     "title": "CC-BY"
+    },
+    {
+     "rel": "help",
+     "type": "text/html",
+     "title": "WMO Manual on Codes, Volume I.2 – International Codes",
+     "href": "https://library.wmo.int/idurl/4/35625"
+    },
+    {
+     "rel": "help",
+     "type": "text/html",
+     "title": "Argo NetCDF format",
+     "href": "https://dx.doi.org/10.13155/29825"
+    }
+   ],
+   "linkTemplates": [
+    {
+     "rel": "items",
+     "type": "text/html",
+     "title": "Argo floats dashboard",
+     "uriTemplate": "https://fleetmonitoring.euro-argo.eu/",
+     "sampleRequest": "https://fleetmonitoring.euro-argo.eu/dashboard?Status=Active&Variable=OXYGEN"
+    }
+   ]
+  }
+ ],
+ "numberMatched": 9,
+ "numberReturned": 9,
+ "links": [
+  {
+   "type": "application/geo+json",
+   "rel": "self",
+   "title": "This document as GeoJSON",
+   "href": "https://wis2-gdc.weather.gc.ca/collections/wis2-discovery-metadata/items?f=json&limit=600"
+  },
+  {
+   "rel": "alternate",
+   "type": "application/ld+json",
+   "title": "This document as RDF (JSON-LD)",
+   "href": "https://wis2-gdc.weather.gc.ca/collections/wis2-discovery-metadata/items?f=jsonld&limit=600"
+  },
+  {
+   "type": "text/html",
+   "rel": "alternate",
+   "title": "This document as HTML",
+   "href": "https://wis2-gdc.weather.gc.ca/collections/wis2-discovery-metadata/items?f=html&limit=600"
+  },
+  {
+   "type": "text/csv; charset=utf-8",
+   "rel": "alternate",
+   "title": "This document as CSV",
+   "href": "https://wis2-gdc.weather.gc.ca/collections/wis2-discovery-metadata/items?f=csv&limit=600"
+  },
+  {
+   "type": "application/json",
+   "title": "WIS2 discovery metadata",
+   "rel": "collection",
+   "href": "https://wis2-gdc.weather.gc.ca/collections/wis2-discovery-metadata"
+  }
+ ],
+ "timeStamp": "2026-08-11T10:38:50.762204Z"
+}

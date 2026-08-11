@@ -1,11 +1,10 @@
 import logging
-from datetime import datetime, timezone
 
 from celery import shared_task
 from django.core.cache import cache
 from django.db import transaction
-from django.utils import timezone as dj_timezone
 
+from ..core.interpretation import parse_notification
 from ..core.models import Dataset, NotificationMessage, Station
 
 logger = logging.getLogger(__name__)
@@ -183,73 +182,59 @@ def health_check_mqtt_clients():
         return None
 
 
-def _parse_datetime(value: str | None):
-    """Parse a WIS2 timestamp, returning None when it is absent or malformed."""
-    if not value:
-        return None
-
-    try:
-        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
-    except ValueError:
-        return None
-
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-
-
 def _prepare_notification_message(item: dict) -> NotificationMessage | None:
     """
-    Parse a received payload into an unsaved NotificationMessage.
+    Turn a received payload into an unsaved NotificationMessage.
 
-    Only the notification's own UUID is required. An unknown topic, an unknown
-    dataset and a missing station identifier are all recorded rather than
-    rejected -- unknown-topic traffic is a finding, not noise.
+    Reading the payload is the interpretation seam's job; this resolves what it
+    returns against the registry. An unknown topic, an unknown dataset and a
+    missing station identifier are all recorded rather than rejected --
+    unknown-topic traffic is a finding, not noise.
+
+    A message the seam cannot identify in time -- no notification UUID, or no
+    usable publication time -- is discarded, since the publication time
+    partitions the hypertable and takes part in the per-source uniqueness of a
+    notification.
 
     Args:
         item: {'node_id': int, 'source_id': int, 'topic': str,
                'payload': dict, 'timestamp': str}
     """
     payload = item['payload']
-    properties = payload.get('properties', {})
 
-    notification_id = payload.get('id')
-    if not notification_id:
-        logger.warning("Discarding message with no notification UUID")
+    notification = parse_notification(payload)
+    if notification is None:
+        notification_id = payload.get('id')
+        reason = "no usable pubtime" if notification_id else "no notification UUID"
+        logger.warning(f"Discarding message {notification_id or '<unidentified>'}: {reason}")
         return None
 
-    # The publication time partitions the hypertable and takes part in the
-    # per-source uniqueness of a notification, so it has to be a property of
-    # the notification itself. A receipt-time fallback would differ between
-    # redeliveries of the same notification and defeat that uniqueness, so a
-    # message with no usable pubtime is discarded rather than stored under a
-    # time we invented.
-    publication_time = _parse_datetime(properties.get('pubtime'))
-    if publication_time is None:
-        logger.warning(f"Discarding message {notification_id}: no usable pubtime")
-        return None
-
-    metadata_id = properties.get('metadata_id', '') or ''
-    dataset = Dataset.objects.filter(identifier=metadata_id).first() if metadata_id else None
+    dataset = (
+        Dataset.objects.filter(identifier=notification.metadata_id).first()
+        if notification.metadata_id
+        else None
+    )
 
     # Station attribution comes only from the message's own WIGOS station
     # identifier. A message without one is unattributed, never guessed at.
-    wigos_station_id = properties.get('wigos_station_identifier', '') or ''
-    station = Station.objects.filter(wigos_id=wigos_station_id).first() if wigos_station_id else None
-
-    links = payload.get('links', [])
-    canonical_link = next((link.get('href', '') for link in links if link.get('rel') == 'canonical'), '')
+    station = (
+        Station.objects.filter(wigos_id=notification.wigos_station_id).first()
+        if notification.is_attributed
+        else None
+    )
 
     return NotificationMessage(
         source_id=item['source_id'],
         node_id=item.get('node_id'),
         dataset=dataset,
         station=station,
-        notification_id=notification_id,
+        notification_id=notification.notification_id,
         topic=item.get('topic', ''),
-        wigos_station_id=wigos_station_id,
-        data_id=properties.get('data_id', '') or '',
-        metadata_id=metadata_id,
-        time=publication_time,
-        canonical_link=canonical_link,
+        wigos_station_id=notification.wigos_station_id,
+        data_id=notification.data_id,
+        metadata_id=notification.metadata_id,
+        time=notification.publication_time,
+        canonical_link=notification.canonical_link,
         raw_json=payload
     )
 
