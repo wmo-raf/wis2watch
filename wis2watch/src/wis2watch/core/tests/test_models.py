@@ -57,6 +57,17 @@ class NodeIdentityTests(TestCase):
         with self.assertRaises(IntegrityError):
             make_node(centre_id="ke-kmd", country="UG")
 
+    def test_centre_id_is_normalised_on_save(self):
+        node = make_node(centre_id="  KE-KMD ")
+
+        self.assertEqual(node.centre_id, "ke-kmd")
+
+    def test_a_differently_cased_centre_id_is_the_same_node(self):
+        make_node(centre_id="ke-kmd")
+
+        with self.assertRaises(IntegrityError):
+            make_node(centre_id="KE-KMD")
+
 
 class MessageSourceTests(TestCase):
     def test_a_node_has_at_most_one_origin_broker(self):
@@ -236,3 +247,40 @@ class SyncLogTests(TestCase):
 
         self.assertIsNone(log.node)
         self.assertEqual(log.catalogue, catalogue)
+
+
+class WritingCatalogueTests(TestCase):
+    """Exactly one catalogue may write the registry."""
+
+    def make_catalogue(self, centre_id, **kwargs):
+        kwargs.setdefault("name", centre_id)
+        kwargs.setdefault("base_url", f"https://{centre_id}.example.test")
+
+        return GlobalDiscoveryCatalogue.objects.create(centre_id=centre_id, **kwargs)
+
+    def test_designating_a_writer_stands_the_previous_one_down(self):
+        first = self.make_catalogue("ca-eccc-msc-gdc", is_writer=True)
+
+        self.make_catalogue("cn-cma-gdc", is_writer=True)
+        first.refresh_from_db()
+
+        self.assertFalse(first.is_writer)
+        self.assertEqual(
+            GlobalDiscoveryCatalogue.objects.filter(is_writer=True).count(), 1
+        )
+
+    def test_a_reading_catalogue_leaves_the_writer_alone(self):
+        writer = self.make_catalogue("ca-eccc-msc-gdc", is_writer=True)
+
+        self.make_catalogue("cn-cma-gdc")
+        writer.refresh_from_db()
+
+        self.assertTrue(writer.is_writer)
+
+    def test_re_saving_the_writer_leaves_it_writing(self):
+        writer = self.make_catalogue("ca-eccc-msc-gdc", is_writer=True)
+
+        writer.save()
+        writer.refresh_from_db()
+
+        self.assertTrue(writer.is_writer)
