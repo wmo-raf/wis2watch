@@ -7,8 +7,8 @@ from wis2watch.core.models import WIS2Node
 
 @api_view()
 @permission_classes([IsAuthenticated])
-def mqtt_nodes_api(request):
-    """API endpoint to get all nodes with their details including country center points"""
+def nodes_api(request):
+    """Every registered node, with what the monitoring map needs to place it."""
     nodes = WIS2Node.objects.prefetch_related("message_sources").all()
 
     nodes_list = []
@@ -23,8 +23,8 @@ def mqtt_nodes_api(request):
             'country_code': node.country.code if node.country else '',
             'centre_id': node.centre_id,
             'status': node.status,
-            'mqtt_host': origin_source.host if origin_source else '',
-            'mqtt_port': origin_source.port if origin_source else None,
+            'broker_host': origin_source.host if origin_source else '',
+            'broker_port': origin_source.port if origin_source else None,
             'center_point': center_point,
         })
 

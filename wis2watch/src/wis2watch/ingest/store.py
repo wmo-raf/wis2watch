@@ -66,9 +66,9 @@ class RegistryLookup:
     def node(self, centre_id):
         """The centre as a registered node, or None.
 
-        A centre publishing without a catalogue record is exactly what the
-        wildcard sweep is meant to surface, so its traffic is kept rather than
-        refused.
+        A centre publishing without a catalogue record is a finding in its own
+        right, so its traffic is kept rather than refused; the row carries the
+        raw topic, which is what makes the gap investigable later.
         """
         if centre_id not in self._nodes:
             self._nodes[centre_id] = WIS2Node.objects.filter(

@@ -9,9 +9,10 @@ because there is only ever one owner.
 
 The loop does two things. It drains what the listeners received and stores it,
 which keeps every database write on this thread and leaves the network loops
-free. And, less often, it recomputes the subscriptions from the registry and
-tells each listener the difference -- which is how a catalogue sync widens
-coverage without the process being restarted.
+free. And, less often, it re-reads the registry: both which brokers to be
+connected to and which centres to ask them for. Neither is fixed at startup,
+which is how a catalogue sync widens coverage, and how a broker added in the
+admin starts being watched, without the process being restarted.
 
 Everything the loop decides comes from the registry, so a restart resumes from
 the registry too; there is no state in this process worth recovering.
@@ -59,11 +60,24 @@ def refresh_seconds():
 class Supervisor:
     """Owns the broker connections and the loop that services them."""
 
-    def __init__(self):
+    def __init__(self, make_listener=BrokerListener):
+        """
+        Args:
+            make_listener: how a ``MessageSource`` becomes a connection.
+                Injected so that the loop can be driven -- and its
+                registry-following tested -- without opening one.
+        """
+        self._make_listener = make_listener
         self._listeners = {}
         self._stopping = threading.Event()
         self._subscriptions = None
         self._reachability = {}
+        self._until_refresh = 0.0
+
+    @property
+    def listeners(self):
+        """The connections currently held, keyed by message source."""
+        return dict(self._listeners)
 
     # -- lifecycle -------------------------------------------------------
 
@@ -74,20 +88,32 @@ class Supervisor:
 
         logger.info("Ingestion supervisor running with %s connections", len(self._listeners))
 
-        elapsed = 0.0
-
         while not self._stopping.is_set():
-            if elapsed <= 0:
-                self.refresh_subscriptions()
-                elapsed = refresh_seconds()
-
+            self.tick()
             self._stopping.wait(TICK_SECONDS)
-            elapsed -= TICK_SECONDS
+
+        self.shutdown()
+
+    def tick(self):
+        """One pass of the loop: re-read the registry if due, then service it.
+
+        Nothing is allowed to escape. The connections live in this process's
+        memory, so an exception reaching ``run`` would cost every listener its
+        buffer and leave the region unwatched until the container came back --
+        a heavy price for what is typically one transient database error. The
+        failure is logged and the next tick retries.
+        """
+        try:
+            if self._until_refresh <= 0:
+                self.refresh_from_registry()
+                self._until_refresh = refresh_seconds()
 
             self.drain_listeners()
             self.record_reachability()
+        except Exception:
+            logger.exception("Ingestion tick failed; the connections are left running")
 
-        self.shutdown()
+        self._until_refresh -= TICK_SECONDS
 
     def stop(self):
         """Ask the loop to finish the tick it is on and shut down."""
@@ -121,23 +147,86 @@ class Supervisor:
     # -- connections -----------------------------------------------------
 
     def start_listeners(self):
-        """Connect to every Global Broker the registry knows about."""
+        """Connect to every Global Broker the registry knows about.
+
+        Seeding happens here rather than on every refresh because it is a
+        create-only convenience for a fresh deployment; once the record exists
+        the admin owns it, and re-checking each minute would only cost a query.
+        """
         ensure_global_broker_source()
 
-        sources = list(active_global_broker_sources())
+        self._connect_to(active_global_broker_sources())
 
-        if not sources:
+        if not self._listeners:
             logger.warning(
                 "No active Global Broker is configured; nothing will be ingested"
             )
 
+    def refresh_from_registry(self):
+        """Bring the connections, and what they carry, in line with the registry.
+
+        Connections first, so that a broker added since the last pass is told
+        the current filters in the same pass rather than sitting connected and
+        carrying nothing until the next one.
+        """
+        close_old_connections()
+
+        self.refresh_connections()
+        self.refresh_subscriptions()
+
+    def refresh_connections(self):
+        """Connect to the brokers the registry has gained, drop the ones it lost.
+
+        Which brokers to watch is re-read rather than fixed at startup, so a
+        Global Broker added in the admin -- or one deactivated -- takes effect
+        on the running process, exactly as a newly synced centre does.
+        """
+        sources = list(active_global_broker_sources())
+        wanted = {source.pk for source in sources}
+
+        for source_id in set(self._listeners) - wanted:
+            self._disconnect(source_id)
+
+        self._connect_to(sources)
+
+    def _connect_to(self, sources):
+        """Open a connection for each source not already held.
+
+        Sources already connected are skipped rather than reconnected, so that
+        a refresh costs a healthy connection nothing: rebuilding one would drop
+        its subscriptions and its buffer to no purpose.
+        """
         for source in sources:
-            listener = BrokerListener(source, decode=decode_payload)
+            if source.pk in self._listeners:
+                continue
+
+            listener = self._make_listener(source, decode=decode_payload)
             self._listeners[source.pk] = listener
             listener.start()
 
+    def _disconnect(self, source_id):
+        """Close a connection the registry no longer wants.
+
+        What it already received is stored on the way out. A broker being
+        deactivated says nothing about the messages it had already delivered,
+        and dropping them would lose real observations to an admin edit.
+
+        The listener is let go only once that store has succeeded. Dropping it
+        first would put its buffer out of reach if the write failed, turning a
+        transient database error into lost messages.
+        """
+        listener = self._listeners[source_id]
+
+        listener.stop()
+        self._store_received(listener)
+
+        del self._listeners[source_id]
+        self._reachability.pop(source_id, None)
+
+        logger.info("%s is no longer active in the registry; disconnected", listener.name)
+
     def refresh_subscriptions(self):
-        """Bring every connection in line with the registry as it stands now."""
+        """Tell every connection which centres to carry, as the registry has them."""
         close_old_connections()
 
         subscriptions = global_broker_subscriptions()
@@ -187,25 +276,29 @@ class Supervisor:
 
     def drain_listeners(self):
         """Store everything the connections have received since the last tick."""
-        for source_id, listener in self._listeners.items():
-            received = listener.drain()
+        for listener in list(self._listeners.values()):
+            self._store_received(listener)
 
-            if not received:
-                continue
+    def _store_received(self, listener):
+        """Empty one connection's buffer into the database."""
+        received = listener.drain()
 
-            close_old_connections()
+        if not received:
+            return
 
-            source = MessageSource.objects.filter(pk=source_id).first()
-            if source is None:
-                logger.warning(
-                    "Message source %s has gone; dropping %s received messages",
-                    source_id,
-                    len(received),
-                )
-                continue
+        close_old_connections()
 
-            counts = store_notifications(source, received)
+        source = MessageSource.objects.filter(pk=listener.source_id).first()
+        if source is None:
+            logger.warning(
+                "Message source %s has gone; dropping %s received messages",
+                listener.source_id,
+                len(received),
+            )
+            return
 
-            logger.info("Ingested from %s: %s", listener.name, counts.summary)
+        counts = store_notifications(source, received)
 
-            broadcast_sample(received)
+        logger.info("Ingested from %s: %s", listener.name, counts.summary)
+
+        broadcast_sample(received)

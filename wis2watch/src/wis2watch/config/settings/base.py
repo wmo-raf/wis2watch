@@ -290,9 +290,9 @@ WIS2WATCH_GLOBAL_BROKER_URL = env.str(
     "mqtts://everyone:everyone@globalbroker.meteo.fr:8883",
 )
 
-# How often the ingestion process recomputes its subscriptions from the
-# registry, in seconds. This is what lets a catalogue sync widen coverage
-# without restarting the process.
+# How often the ingestion process re-reads the registry -- both the brokers it
+# connects to and the centres it asks them for -- in seconds. This is what lets
+# a catalogue sync widen coverage without restarting the process.
 WIS2WATCH_SUBSCRIPTION_REFRESH_SECONDS = env.int(
     "WIS2WATCH_SUBSCRIPTION_REFRESH_SECONDS", 60
 )

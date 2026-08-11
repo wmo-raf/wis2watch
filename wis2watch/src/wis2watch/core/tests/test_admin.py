@@ -29,6 +29,13 @@ class AdminSmokeTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_the_monitoring_map_loads(self):
+        """The map renders a template and reverses the nodes API to feed it."""
+        response = self.client.get(reverse("ingest_map"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("mqtt-nodes", response.context["nodes_api_url"])
+
     def test_the_configuration_listings_load(self):
         for viewset in (WIS2NodeViewSet(), MessageSourceViewSet(), GlobalDiscoveryCatalogueViewSet()):
             with self.subTest(viewset=viewset.model.__name__):
