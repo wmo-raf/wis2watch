@@ -35,7 +35,7 @@ from .notifications import (
 )
 from .oscar import OscarStation, extract_oscar_station, extract_oscar_stations
 from .timestamps import parse_timestamp
-from .topics import CACHE, ORIGIN, ParsedTopic, parse_topic
+from .topics import CACHE, ORIGIN, ParsedTopic, parse_topic, subscription_topic
 
 __all__ = [
     "BrokerConnection",
@@ -62,4 +62,5 @@ __all__ = [
     "parse_timestamp",
     "parse_topic",
     "station_attribution",
+    "subscription_topic",
 ]

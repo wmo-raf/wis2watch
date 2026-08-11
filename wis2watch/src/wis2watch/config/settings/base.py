@@ -79,7 +79,7 @@ INSTALLED_APPS = [
     "wis2watch.home",
     "wis2watch.core",
     "wis2watch.api",
-    "wis2watch.mqtt",
+    "wis2watch.ingest",
     "wis2watch.ws",
     "wis2watch.monitoring",
 ]
@@ -283,6 +283,20 @@ CHANNEL_LAYERS = {
 # the whole of Africa -- see wis2watch.core.countries for the default list.
 WIS2WATCH_MONITORED_COUNTRIES = env.list("WIS2WATCH_MONITORED_COUNTRIES", default=[])
 
+# The Global Broker the ingestion process subscribes to. Seeded as a message
+# source on first run; thereafter the admin owns the record.
+WIS2WATCH_GLOBAL_BROKER_URL = env.str(
+    "WIS2WATCH_GLOBAL_BROKER_URL",
+    "mqtts://everyone:everyone@globalbroker.meteo.fr:8883",
+)
+
+# How often the ingestion process recomputes its subscriptions from the
+# registry, in seconds. This is what lets a catalogue sync widen coverage
+# without restarting the process.
+WIS2WATCH_SUBSCRIPTION_REFRESH_SECONDS = env.int(
+    "WIS2WATCH_SUBSCRIPTION_REFRESH_SECONDS", 60
+)
+
 WIS2WATCH_LOG_LEVEL = env.str("WIS2WATCH_LOG_LEVEL", "INFO")
 WIS2WATCH_DATABASE_LOG_LEVEL = env.str("WIS2WATCH_DATABASE_LOG_LEVEL", "ERROR")
 
@@ -320,15 +334,10 @@ VUE_FRONTEND_DEV_SERVER_URL = 'http://localhost:5173'
 VUE_FRONTEND_DEV_SERVER_PATH = '/static/vue/src'
 VUE_FRONTEND_STATIC_PATH = 'vue'
 
+# Scheduled work is sync, rollup, cleanup and mail only. Broker connections are
+# stateful and long-lived, and belong to the ingestion supervisor rather than to
+# a task queue -- see wis2watch.ingest.supervisor.
 CELERY_BEAT_SCHEDULE = {
-    'monitor-all-active-nodes': {
-        'task': 'wis2watch.mqtt.tasks.monitor_all_active_nodes',
-        'schedule': 300.0,  # Every 5 minutes
-    },
-    'cleanup-stale-mqtt-locks': {
-        'task': 'wis2watch.mqtt.tasks.cleanup_stale_mqtt_locks',
-        'schedule': 600.0,  # Every 10 minutes
-    },
     'sync-catalogues': {
         'task': 'wis2watch.core.tasks.run_sync_catalogues',
         'schedule': 21600.0,  # Every 6 hours

@@ -26,6 +26,8 @@ x-backend-variables: &backend-variables
   MIGRATE_ON_STARTUP: ${MIGRATE_ON_STARTUP:-true}
   COLLECT_STATICFILES_ON_STARTUP: ${COLLECT_STATICFILES_ON_STARTUP:-true}
   REDIS_URL: redis://wis2watch_redis:6379/0
+  WIS2WATCH_GLOBAL_BROKER_URL: ${WIS2WATCH_GLOBAL_BROKER_URL:-mqtts://everyone:everyone@globalbroker.meteo.fr:8883}
+  WIS2WATCH_MONITORED_COUNTRIES: ${WIS2WATCH_MONITORED_COUNTRIES:-}
 
 services:
   wis2watch_db:
@@ -122,6 +124,36 @@ services:
       - ${WIS2WATCH_STATIC_VOLUME:-./docker/static}:/wis2watch/app/src/wis2watch/static
       - ${WIS2WATCH_MEDIA_VOLUME:-./docker/media}:/wis2watch/app/src/wis2watch/media
       - ${WIS2WATCH_BACKUP_VOLUME:-./docker/backup}:/wis2watch/app/src/wis2watch/backup
+
+  # Owns every long-lived broker connection. Deliberately single-replica:
+  # exactly one owner is what makes double ingestion impossible without any
+  # distributed locking. Do not scale this service.
+  wis2watch_ingest:
+    container_name: wis2watch_ingest
+    image: wis2watch
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - UID=${UID}
+        - GID=${GID}
+        - DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX=${DOCKER_COMPOSE_WAIT_PLATFORM_SUFFIX:-}
+    restart: always
+    init: true
+    command: ingest
+    scale: 1
+    environment:
+      <<: *backend-variables
+      DJANGO_CONTEXT: "ingest"
+      MIGRATE_ON_STARTUP: "false"
+      COLLECT_STATICFILES_ON_STARTUP: "false"
+      # Waits for the database and Redis only. Ingestion must not depend on the
+      # web container being up: the point of a dedicated service is that broker
+      # traffic keeps being captured while the rest of the stack is restarting.
+      WAIT_HOSTS: wis2watch_db:5432,wis2watch_redis:6379
+    depends_on:
+      - wis2watch_db
+      - wis2watch_redis
 
   wis2watch_web_proxy:
     container_name: wis2watch_web_proxy

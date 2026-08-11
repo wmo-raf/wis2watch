@@ -1,135 +1,98 @@
+"""The live feed, as a WebSocket.
+
+The feed is read-only. Which brokers are connected is derived from the
+registry by the ingestion supervisor, so there is nothing here to start or
+stop: a centre is watched because it is in the registry, and the way to change
+that is to change the registry.
+"""
+
 import json
 
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
-from django.core.cache import cache
+
+from wis2watch.ingest.broadcast import FEED_GROUP
 
 
-class MQTTStatusConsumer(AsyncWebsocketConsumer):
+class IngestFeedConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        await self.channel_layer.group_add("mqtt_status", self.channel_name)
+        await self.channel_layer.group_add(FEED_GROUP, self.channel_name)
         await self.accept()
-        
-        # Send initial status
-        status = await self.get_mqtt_status()
+
         await self.send(text_data=json.dumps({
             'type': 'status',
-            'data': status
+            'data': await self.get_ingest_status()
         }))
-    
+
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard("mqtt_status", self.channel_name)
-    
+        await self.channel_layer.group_discard(FEED_GROUP, self.channel_name)
+
     async def receive(self, text_data):
-        """Handle incoming WebSocket messages"""
+        """Handle incoming WebSocket messages."""
         try:
-            data = json.loads(text_data)
-            action = data.get('action')
-            node_id = data.get('node_id')
-            
-            if action == 'start':
-                await self.start_node(node_id)
-                await self.send(text_data=json.dumps({
-                    'type': 'action_result',
-                    'action': 'start',
-                    'node_id': node_id,
-                    'status': 'queued'
-                }))
-            
-            elif action == 'stop':
-                await self.stop_node(node_id)
-                await self.send(text_data=json.dumps({
-                    'type': 'action_result',
-                    'action': 'stop',
-                    'node_id': node_id,
-                    'status': 'queued'
-                }))
-            
-            elif action == 'restart':
-                await self.restart_node(node_id)
-                await self.send(text_data=json.dumps({
-                    'type': 'action_result',
-                    'action': 'restart',
-                    'node_id': node_id,
-                    'status': 'queued'
-                }))
-            
-            elif action == 'get_status':
-                status = await self.get_mqtt_status()
+            action = json.loads(text_data).get('action')
+
+            if action == 'get_status':
                 await self.send(text_data=json.dumps({
                     'type': 'status',
-                    'data': status
+                    'data': await self.get_ingest_status()
                 }))
-        
+            else:
+                await self.send(text_data=json.dumps({
+                    'type': 'error',
+                    'error': (
+                        f"Unsupported action: {action}. Broker connections follow "
+                        f"the registry and are not controlled from here."
+                    )
+                }))
+
         except Exception as e:
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'error': str(e)
             }))
-    
+
     async def status_update(self, event):
-        """Handle status update messages from group"""
+        """Handle status update messages from group."""
         await self.send(text_data=json.dumps({
             'type': 'status_update',
             'data': event['status']
         }))
-    
+
     async def message_received(self, event):
-        """Handle message received notifications"""
-        
+        """Handle a message the ingestion supervisor put on the feed."""
         payload = event['payload']
-        
+
         await self.send(text_data=json.dumps({
             'type': 'message',
             'data': {
-                'node_id': event['node_id'],
+                'centre_id': event['centre_id'],
                 'topic': event['topic'],
                 'timestamp': event['timestamp'],
                 "geometry": payload.get('geometry'),
             }
         }))
-    
+
     @database_sync_to_async
-    def get_mqtt_status(self):
-        """Get status from cache instead of direct service"""
-        from wis2watch.core.models import WIS2Node
-        
-        status = {}
-        active_nodes = WIS2Node.objects.all()
-        
-        for node in active_nodes:
-            cache_key = f"mqtt_node_{node.id}_status"
-            node_status = cache.get(cache_key)
-            
-            if node_status:
-                status[node.id] = node_status
-            else:
-                status[node.id] = {
-                    'node_id': node.id,
-                    'status': 'unknown',
-                    'last_update': None,
-                    'error': None
-                }
-        
-        return status
-    
-    @database_sync_to_async
-    def start_node(self, node_id):
-        """Queue start task in Celery"""
-        from wis2watch.mqtt.tasks import start_mqtt_monitoring
-        start_mqtt_monitoring.delay(int(node_id))
-        return True
-    
-    @database_sync_to_async
-    def stop_node(self, node_id):
-        """Queue stop task in Celery"""
-        from wis2watch.mqtt.tasks import stop_mqtt_monitoring
-        stop_mqtt_monitoring.delay(int(node_id))
-        return True
-    
-    @database_sync_to_async
-    def restart_node(self, node_id):
-        """Queue restart task in Celery"""
-        from wis2watch.mqtt.tasks import restart_mqtt_monitoring
-        restart_mqtt_monitoring.delay(int(node_id))
-        return True
+    def get_ingest_status(self):
+        """How each broker connection is faring, as the supervisor last left it."""
+        from wis2watch.core.models import MessageSource
+
+        sources = MessageSource.objects.filter(is_active=True).select_related("node")
+
+        return {
+            source.id: {
+                'source_id': source.id,
+                'name': source.name,
+                'source_type': source.source_type,
+                'centre_id': source.owning_centre_id,
+                'is_reachable': source.is_reachable,
+                'last_connected_at': (
+                    source.last_connected_at.isoformat()
+                    if source.last_connected_at
+                    else None
+                ),
+                'last_error': source.last_error,
+            }
+            for source in sources
+        }

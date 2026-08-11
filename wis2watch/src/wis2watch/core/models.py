@@ -203,10 +203,6 @@ class WIS2Node(TimeStampedModel):
     def get_topics(self):
         return list(self.datasets.values_list("wmo_topic_hierarchy", flat=True))
 
-    @property
-    def lock_key(self):
-        return f"mqtt_node_{self.id}_lock"
-
 
 class MessageSource(TimeStampedModel):
     """
@@ -296,6 +292,19 @@ class MessageSource(TimeStampedModel):
 
     def __str__(self):
         return f"{self.name} ({self.get_source_type_display()})"
+
+    @property
+    def owning_centre_id(self):
+        """The centre this source belongs to, or an empty string.
+
+        A Global Broker names its own centre; an origin broker's centre is the
+        node it belongs to. Resolving that here keeps callers from walking the
+        node relation and guessing which of the two applies.
+        """
+        if self.centre_id:
+            return self.centre_id
+
+        return self.node.centre_id if self.node_id else ""
 
 
 @register_snippet

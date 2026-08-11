@@ -1,7 +1,7 @@
 from django.apps import AppConfig
 
 
-class MqttConfig(AppConfig):
+class IngestConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'wis2watch.mqtt'
-    label = 'wis2watchmqtt'
+    name = 'wis2watch.ingest'
+    label = 'wis2watchingest'

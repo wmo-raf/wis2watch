@@ -29,6 +29,9 @@ gunicorn            : Start WIS2Watch django using a prod ready gunicorn server:
                          * Binds to 0.0.0.0
 celery-worker       : Start the celery worker queue which runs important async tasks
 celery-beat         : Start the celery beat service used to schedule periodic jobs
+ingest              : Start the WIS2 ingestion supervisor, which owns every
+                      long-lived broker connection. Run exactly one of these:
+                      single ownership is what removes the need for locking.
 
 DEV COMMANDS:
 django-dev      : Start a normal WIS2Watch backend django development server, performs
@@ -47,9 +50,6 @@ run_setup_commands_if_configured(){
     echo "python /wis2watch/app/src/wis2watch/manage.py collectstatic --noinput"
     /wis2watch/app/src/wis2watch/manage.py collectstatic --noinput
   fi
-
-  # Trigger monitoring immediately
-  /wis2watch/app/src/wis2watch/manage.py ensure_monitoring
 }
 
 start_celery_worker() {
@@ -144,6 +144,9 @@ celery-worker)
     ;;
 celery-beat)
     exec celery -A wis2watch beat -l "${WIS2WATCH_CELERY_BEAT_DEBUG_LEVEL}" -S django_celery_beat.schedulers:DatabaseScheduler "${@:2}"
+    ;;
+ingest)
+    exec python3 /wis2watch/app/src/wis2watch/manage.py run_ingest "${@:2}"
     ;;
 *)
     echo "Command given was $*"

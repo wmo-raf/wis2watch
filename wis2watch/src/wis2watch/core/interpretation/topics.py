@@ -19,6 +19,9 @@ STANDARD_SEGMENT = ("a", "wis2")
 ORIGIN = "origin"
 CACHE = "cache"
 
+#: The MQTT wildcard matching a centre's whole hierarchy, however deep.
+MULTI_LEVEL_WILDCARD = "#"
+
 
 @dataclass(frozen=True)
 class ParsedTopic:
@@ -54,6 +57,23 @@ class ParsedTopic:
             centre_id=self.centre_id,
             hierarchy=self.hierarchy,
         )
+
+
+def subscription_topic(centre_id, prefix=ORIGIN):
+    """The topic filter covering everything one centre publishes, or None.
+
+    Subscribing per centre rather than under a single ``#`` is what keeps a
+    Global Broker connection to the monitored region: the broker carries the
+    whole world, and a wildcard would ingest all of it.
+    """
+    if not centre_id or not centre_id.strip():
+        return None
+
+    return "/".join(
+        (prefix,)
+        + STANDARD_SEGMENT
+        + (centre_id.strip().lower(), MULTI_LEVEL_WILDCARD)
+    )
 
 
 def parse_topic(topic):

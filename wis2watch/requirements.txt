@@ -19,5 +19,8 @@ gunicorn==23.0.0
 uvicorn[standard]==0.38.0
 wagtail-font-awesome-svg==2.0
 paho-mqtt==2.1.0
+# Named explicitly by the ingest client as its TLS trust store, so it is a
+# direct dependency rather than one inherited from requests.
+certifi==2025.10.5
 channels-redis==4.3.0
 django-vue-utils==0.1.8

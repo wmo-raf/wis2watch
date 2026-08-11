@@ -3,10 +3,12 @@
 from django.test import override_settings
 
 from wis2watch.core.interpretation import (
+    CACHE,
     centre_id_prefix,
     is_monitored_centre_id,
     monitored_country_code_for_centre_id,
     parse_topic,
+    subscription_topic,
 )
 
 from .support import NoNetworkTestCase, load_json_fixture, load_jsonl_fixture
@@ -65,6 +67,45 @@ class ParseTopicTests(NoNetworkTestCase):
         self.assertIsNone(parse_topic("some/other/thing"))
         self.assertIsNone(parse_topic(""))
         self.assertIsNone(parse_topic(None))
+
+
+class SubscriptionTopicTests(NoNetworkTestCase):
+    """One topic filter per centre, so the region is ingested and not the world."""
+
+    def test_a_centre_subscribes_to_everything_it_publishes(self):
+        self.assertEqual(
+            subscription_topic("ke-meteo"), "origin/a/wis2/ke-meteo/#"
+        )
+
+    def test_the_cache_prefix_is_subscribed_separately(self):
+        self.assertEqual(
+            subscription_topic("ke-meteo", prefix=CACHE), "cache/a/wis2/ke-meteo/#"
+        )
+
+    def test_a_centre_id_is_normalised_the_way_a_parsed_topic_is(self):
+        self.assertEqual(
+            subscription_topic("  KE-Meteo "), "origin/a/wis2/ke-meteo/#"
+        )
+
+    def test_a_filter_matches_the_topics_that_centre_really_publishes(self):
+        captured = load_jsonl_fixture("global_broker_notifications.jsonl")
+        origin_topics = [
+            m["topic"] for m in captured if parse_topic(m["topic"]).is_origin
+        ]
+
+        subscribed = subscription_topic("ke-meteo").removesuffix("#")
+
+        matched = {t for t in origin_topics if t.startswith(subscribed)}
+
+        self.assertEqual(
+            matched,
+            {"origin/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop"},
+        )
+
+    def test_no_centre_is_no_filter(self):
+        self.assertIsNone(subscription_topic(""))
+        self.assertIsNone(subscription_topic(None))
+        self.assertIsNone(subscription_topic("   "))
 
 
 class CapturedTopicTests(NoNetworkTestCase):
