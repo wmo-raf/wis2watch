@@ -1,0 +1,159 @@
+{% extends "wagtailadmin/generic/base.html" %}
+
+{% load i18n wagtailadmin_tags %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .overview-filters {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+
+        .overview-filter {
+            padding: 4px 12px;
+            border-radius: 3px;
+            border: 1px solid #ddd;
+            color: #333;
+            text-decoration: none;
+            font-size: 0.9em;
+        }
+
+        .overview-filter.selected {
+            background: #333;
+            border-color: #333;
+            color: #fff;
+        }
+
+        .overview-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+        }
+
+        .overview-table th {
+            background: #f5f5f5;
+            padding: 10px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid #ddd;
+            font-size: 0.9em;
+        }
+
+        .overview-table td {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            font-size: 0.9em;
+        }
+
+        .overview-table td.numeric,
+        .overview-table th.numeric {
+            text-align: right;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 3px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+
+        .badge-active {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge-stale {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .badge-never_seen {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 50px;
+            color: #999;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <div class="overview-filters">
+        <span>{% trans "Staleness" %}:</span>
+        <a class="overview-filter {% if not staleness %}selected{% endif %}"
+           href="?order={{ order }}">{% trans "All" %}</a>
+        {% for value, label in staleness_choices %}
+            <a class="overview-filter {% if staleness == value %}selected{% endif %}"
+               href="?staleness={{ value }}&order={{ order }}">{{ label }}</a>
+        {% endfor %}
+
+        <span>{% trans "Order" %}:</span>
+        <a class="overview-filter {% if order == 'staleness' %}selected{% endif %}"
+           href="?staleness={{ staleness|default_if_none:'' }}&order=staleness">
+            {% trans "Most stale first" %}
+        </a>
+        <a class="overview-filter {% if order == 'centre' %}selected{% endif %}"
+           href="?staleness={{ staleness|default_if_none:'' }}&order=centre">
+            {% trans "Centre ID" %}
+        </a>
+    </div>
+
+    {% if rows %}
+        <table class="listing overview-table">
+            <thead>
+            <tr>
+                <th>{% trans "Centre" %}</th>
+                <th>{% trans "Country" %}</th>
+                <th>{% trans "Last seen" %}</th>
+                <th>{% trans "Quiet for" %}</th>
+                <th class="numeric"
+                    title="{% trans 'Notifications from this centre seen at the Global Broker' %}">
+                    {% blocktrans %}Global Broker ({{ volume_hours }}h){% endblocktrans %}
+                </th>
+                <th class="numeric">{% trans "Datasets" %}</th>
+                <th class="numeric">{% trans "Stations" %}</th>
+                <th>{% trans "Status" %}</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for row in rows %}
+                <tr>
+                    <td>
+                        <a href="{% url 'node_details' row.node_id %}">
+                            <code>{{ row.centre_id }}</code>
+                        </a>
+                    </td>
+                    <td>{{ row.country_name|default:"—" }}</td>
+                    <td>{{ row.last_seen_at|date:"Y-m-d H:i"|default:"—" }}</td>
+                    <td>
+                        {% if row.last_seen_at %}
+                            {% blocktrans with hours=row.hours_since_last_seen|floatformat:1 %}{{ hours }}h{% endblocktrans %}
+                        {% else %}
+                            {% trans "never heard from" %}
+                        {% endif %}
+                    </td>
+                    <td class="numeric">{{ row.recent_message_count }}</td>
+                    <td class="numeric">{{ row.dataset_count }}</td>
+                    <td class="numeric">{{ row.station_count }}</td>
+                    <td>
+                        <span class="badge badge-{{ row.staleness }}">{{ row.staleness_label }}</span>
+                    </td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <div class="empty-state">
+            <p>{% trans "No centres to show" %}</p>
+        </div>
+    {% endif %}
+{% endblock %}

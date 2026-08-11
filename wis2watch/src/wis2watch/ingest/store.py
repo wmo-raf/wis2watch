@@ -16,7 +16,13 @@ import logging
 from dataclasses import dataclass
 
 from ..core.interpretation import parse_notification, parse_topic
-from ..core.models import Dataset, NotificationMessage, Station, WIS2Node
+from ..core.models import (
+    Dataset,
+    NodeLastSeen,
+    NotificationMessage,
+    Station,
+    WIS2Node,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -169,6 +175,43 @@ def _insert(records):
     NotificationMessage.objects.bulk_create(records, ignore_conflicts=True)
 
 
+def _record_last_seen(records):
+    """Move each node's last-seen up to the latest message it just published.
+
+    Maintaining this on ingest is what keeps the headline question -- which
+    centres have gone quiet -- an indexed lookup per node rather than a scan
+    of a hypertable that grows with the region's traffic.
+
+    Time only moves forward. Brokers redeliver, a sweep runs alongside the
+    per-centre subscriptions, and a message can arrive after a later one; none
+    of that is news about when a centre was last publishing, so an older time
+    is stepped over rather than written.
+
+    A flush is a handful of centres however many messages it carries, so this
+    costs a query or two per centre, not per message.
+    """
+    latest = {}
+
+    for record in records:
+        if record.node_id is None:
+            continue
+
+        seen_before = latest.get(record.node_id)
+
+        if seen_before is None or record.time > seen_before:
+            latest[record.node_id] = record.time
+
+    for node_id, seen_at in latest.items():
+        moved = NodeLastSeen.objects.filter(
+            node_id=node_id, last_message_at__lt=seen_at
+        ).update(last_message_at=seen_at)
+
+        if not moved:
+            NodeLastSeen.objects.get_or_create(
+                node_id=node_id, defaults={"last_message_at": seen_at}
+            )
+
+
 def store_notifications(source, received):
     """Store a flush of received ``(topic, payload)`` pairs.
 
@@ -206,5 +249,6 @@ def store_notifications(source, received):
 
     if records:
         _insert(records)
+        _record_last_seen(records)
 
     return counts

@@ -297,6 +297,25 @@ WIS2WATCH_SUBSCRIPTION_REFRESH_SECONDS = env.int(
     "WIS2WATCH_SUBSCRIPTION_REFRESH_SECONDS", 60
 )
 
+# How long raw notification messages are kept, in days. Deliberately short:
+# raw messages answer "what went wrong recently", while the permanent record of
+# the region lives in the hourly rollups, which are never expired.
+WIS2WATCH_RAW_RETENTION_DAYS = env.int("WIS2WATCH_RAW_RETENTION_DAYS", 14)
+
+# How far back each scheduled rollup run recomputes, in hours. Counts are
+# derived from stored rows, so recomputing costs nothing but query time and a
+# missed run corrects itself.
+WIS2WATCH_ROLLUP_WINDOW_HOURS = env.int("WIS2WATCH_ROLLUP_WINDOW_HOURS", 48)
+
+# How long a centre may be quiet before the node overview calls it stale. A
+# flat threshold for sorting the table; judging silence against each dataset's
+# own learned cadence is a separate and more careful question.
+WIS2WATCH_STALE_AFTER_HOURS = env.int("WIS2WATCH_STALE_AFTER_HOURS", 24)
+
+# How many hourly buckets of traffic the node overview reports as recent
+# volume, ending with the hour in progress.
+WIS2WATCH_VOLUME_WINDOW_HOURS = env.int("WIS2WATCH_VOLUME_WINDOW_HOURS", 24)
+
 WIS2WATCH_LOG_LEVEL = env.str("WIS2WATCH_LOG_LEVEL", "INFO")
 WIS2WATCH_DATABASE_LOG_LEVEL = env.str("WIS2WATCH_DATABASE_LOG_LEVEL", "ERROR")
 
@@ -345,5 +364,13 @@ CELERY_BEAT_SCHEDULE = {
     'sync-node-stations': {
         'task': 'wis2watch.core.tasks.run_sync_all_node_stations',
         'schedule': 3600.0,  # Every hour
+    },
+    'update-rollups': {
+        'task': 'wis2watch.core.tasks.run_update_rollups',
+        'schedule': 900.0,  # Every 15 minutes
+    },
+    'expire-raw-messages': {
+        'task': 'wis2watch.core.tasks.run_expire_raw_messages',
+        'schedule': 86400.0,  # Daily
     },
 }

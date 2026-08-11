@@ -1,4 +1,4 @@
-"""Support for the interpretation tests: fixtures, and a network guard.
+"""Support for the tests: fixtures, instants, and a network guard.
 
 The interpretation seam is pure by construction, so its tests must never reach
 the network. ``NoNetworkTestCase`` enforces that rather than trusting it: any
@@ -8,6 +8,7 @@ attempt to open a socket during a test fails the test.
 import json
 import os
 import socket
+from datetime import datetime, timezone
 from unittest import mock
 
 from django.test import SimpleTestCase
@@ -30,6 +31,15 @@ def load_jsonl_fixture(name):
     """A committed JSON Lines fixture, one captured record per line."""
     with open(fixture_path(name)) as handle:
         return [json.loads(line) for line in handle if line.strip()]
+
+
+def at(stamp):
+    """A UTC instant, written the way the assertions read.
+
+    Everything the analysis seam buckets, compares and expires is in UTC, so
+    the tests say so explicitly rather than leaning on the active timezone.
+    """
+    return datetime.fromisoformat(stamp).replace(tzinfo=timezone.utc)
 
 
 class NetworkAccessInTest(AssertionError):

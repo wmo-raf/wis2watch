@@ -1,10 +1,12 @@
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone as dj_timezone
 
 from wis2watch.core.models import (
     GlobalDiscoveryCatalogue,
     MessageSource,
+    NodeLastSeen,
     Station,
     StationSource,
     WIS2Node,
@@ -97,6 +99,43 @@ class AdminSmokeTests(TestCase):
 
         self.assertEqual(response.status_code, 302)
         self.assertTrue(GlobalDiscoveryCatalogue.objects.filter(is_writer=True).exists())
+
+
+class NodeOverviewViewTests(TestCase):
+    """The headline screen, rendered from the findings the analysis returns."""
+
+    def setUp(self):
+        self.client.force_login(
+            get_user_model().objects.create_superuser("diagnostician", password="s3cret")
+        )
+        self.quiet = WIS2Node.objects.create(centre_id="dj-anm", name="Djibouti")
+        self.talking = WIS2Node.objects.create(centre_id="ke-kmd", name="Kenya Met")
+        NodeLastSeen.objects.create(
+            node=self.talking, last_message_at=dj_timezone.now()
+        )
+
+    def test_the_overview_lists_every_centre(self):
+        response = self.client.get(reverse("node_overview"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "dj-anm")
+        self.assertContains(response, "ke-kmd")
+
+    def test_a_centre_never_heard_from_says_so_rather_than_showing_a_number(self):
+        response = self.client.get(reverse("node_overview"))
+
+        self.assertContains(response, "never heard from")
+
+    def test_the_staleness_asked_for_reaches_the_findings(self):
+        """What the analysis does with it is its own tests' business."""
+        response = self.client.get(reverse("node_overview"), {"staleness": "never_seen"})
+
+        self.assertEqual([row.centre_id for row in response.context["rows"]], ["dj-anm"])
+
+    def test_the_order_asked_for_reaches_the_findings(self):
+        response = self.client.get(reverse("node_overview"), {"order": "centre"})
+
+        self.assertEqual(response.context["order"], "centre")
 
 
 class NodeDetailViewTests(TestCase):

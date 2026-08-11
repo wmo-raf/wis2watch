@@ -574,6 +574,136 @@ class NotificationMessage(TimescaleModel, TimeStampedModel):
         return f"{self.notification_id} @ {self.time}"
 
 
+class NodeLastSeen(TimeStampedModel):
+    """When a node was last heard from, maintained as messages are stored.
+
+    The headline question -- which centres have gone quiet -- is asked of every
+    node at once, and answering it from the time series would mean scanning a
+    hypertable that grows with the region's traffic. Maintaining the answer on
+    ingest turns it into one indexed row per node.
+
+    The time held is the notification's own publication time, and it only ever
+    moves forward: a redelivery, or a message that took the long way round,
+    says nothing new about when the centre was last publishing.
+
+    One row per node, not per node and source. "When did this centre last
+    publish" is a question about the centre; which vantage point saw it is a
+    propagation question, and the raw rows carry the source for that.
+    """
+
+    node = models.OneToOneField(
+        WIS2Node,
+        on_delete=models.CASCADE,
+        related_name="last_seen",
+    )
+    last_message_at = models.DateTimeField(
+        db_index=True,
+        help_text=_("Publication time of the most recent message seen from this node"),
+    )
+
+    class Meta:
+        ordering = ["-last_message_at"]
+        verbose_name = _("Node Last Seen")
+        verbose_name_plural = _("Node Last Seen")
+
+    def __str__(self):
+        return f"{self.node.centre_id} @ {self.last_message_at}"
+
+
+#: What an hourly rollup counts separately. Named once, because the count is
+#: only meaningful against its grain: the constraint that keeps a bucket
+#: unique and the query that derives it have to agree, and they are written in
+#: different modules.
+ROLLUP_GRAIN = ("hour", "source", "node", "dataset", "station")
+
+
+class HourlyRollup(TimeStampedModel):
+    """How many notifications one node published in one UTC hour.
+
+    Raw messages are kept for a forensic window only, so the history of the
+    region lives here instead: rollups are never expired, and are the only
+    thing that still knows what a centre was doing last year.
+
+    Counts are derived from stored rows rather than incremented on receipt.
+    A notification can be delivered more than once -- a wildcard sweep runs
+    alongside the per-centre subscriptions -- and per-source uniqueness makes
+    that harmless for storage, while a receive-time counter would silently
+    count it twice.
+
+    The source takes part in the grain for the same reason. The same
+    notification observed at a node's own broker and at the Global Broker is
+    two rows on purpose, and summing them into one count would double every
+    number the moment origin ingestion is switched on. Deriving per source and
+    choosing a vantage point when reading keeps the counts meaning something.
+
+    The hour is the start of a UTC hour, taken from the notification's own
+    publication time.
+
+    A dataset or station deleted outright takes its name off the counts it
+    earned, which then join the unclaimed bucket for that hour; where that
+    bucket already exists the delete is refused rather than allowed to
+    duplicate it. Catalogue syncs mark datasets deleted rather than removing
+    them, so this is the hand-deletion case, and a loud refusal is the right
+    end of it while the history is still worth keeping.
+    """
+
+    hour = models.DateTimeField(
+        db_index=True,
+        help_text=_("Start of the UTC hour this count covers"),
+    )
+    source = models.ForeignKey(
+        MessageSource,
+        on_delete=models.CASCADE,
+        related_name="rollups",
+        help_text=_("The vantage point these messages were observed from"),
+    )
+    node = models.ForeignKey(
+        WIS2Node,
+        on_delete=models.CASCADE,
+        related_name="rollups",
+    )
+    dataset = models.ForeignKey(
+        Dataset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rollups",
+        help_text=_("Null for traffic on a topic no dataset claims"),
+    )
+    station = models.ForeignKey(
+        Station,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="rollups",
+        help_text=_("Null for messages carrying no known station"),
+    )
+
+    message_count = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        ordering = ["-hour"]
+        constraints = [
+            # ``nulls_distinct=False`` is what makes this a usable key: a
+            # dataset or station of None is a real bucket -- unclaimed topics
+            # and unattributed messages -- and Postgres's default would let one
+            # be inserted twice over.
+            models.UniqueConstraint(
+                fields=ROLLUP_GRAIN,
+                name="unique_rollup_per_hour_and_grain",
+                nulls_distinct=False,
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["node", "-hour"]),
+        ]
+        verbose_name = _("Hourly Rollup")
+        verbose_name_plural = _("Hourly Rollups")
+
+    def __str__(self):
+        return f"{self.node_id} @ {self.hour}: {self.message_count}"
+
+
 class SyncLog(models.Model):
     """
     One run of a synchronisation job, with its counts and any error.
