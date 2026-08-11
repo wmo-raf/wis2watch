@@ -25,16 +25,23 @@ from wis2watch.ingest.client import (
     BrokerListener,
 )
 
+#: A ceiling of the order an origin broker is given: long enough that a dead
+#: broker is retried a handful of times a day rather than constantly.
+LONG_CEILING = 3600
+
 
 class FakeReasonCode:
-    """What paho hands a callback to say how a connection ended up."""
+    """What paho hands a callback to say how a connection ended up.
+
+    Deliberately truthy whatever it says, exactly as paho's own is: it defines
+    no ``__bool__``, so ``if reason_code:`` is true even for a clean
+    disconnection. A fake that was falsy on success would hide every place
+    that mistakes truthiness for failure.
+    """
 
     def __init__(self, is_failure=False, text="Success"):
         self.is_failure = is_failure
         self._text = text
-
-    def __bool__(self):
-        return self.is_failure
 
     def __str__(self):
         return self._text
@@ -109,14 +116,14 @@ class ClientConstructionTests(SimpleTestCase):
     indistinguishable from a region that has simply gone quiet.
     """
 
-    def build(self, **source_kwargs):
+    def build(self, listener_kwargs=None, **source_kwargs):
         source = FakeSource()
 
         for field, value in source_kwargs.items():
             setattr(source, field, value)
 
         with mock.patch("paho.mqtt.client.Client") as client_class:
-            BrokerListener(source, decode=decode)
+            BrokerListener(source, decode=decode, **(listener_kwargs or {}))
 
         return client_class.return_value
 
@@ -146,6 +153,14 @@ class ClientConstructionTests(SimpleTestCase):
 
         client.reconnect_delay_set.assert_called_once_with(
             min_delay=RECONNECT_MIN_DELAY, max_delay=RECONNECT_MAX_DELAY
+        )
+
+    def test_the_backoff_ceiling_can_be_raised_for_a_broker_expected_to_be_dead(self):
+        """Origin brokers are given a long ceiling; the caller decides."""
+        client = self.build(listener_kwargs={"reconnect_max_delay": LONG_CEILING})
+
+        client.reconnect_delay_set.assert_called_once_with(
+            min_delay=RECONNECT_MIN_DELAY, max_delay=LONG_CEILING
         )
 
 
@@ -279,6 +294,77 @@ class ReconnectTests(ListenerTestCase):
         self.assertFalse(self.listener.is_connected)
         self.assertEqual(self.listener.failed_attempts, 2)
         self.assertIn("broker.example.int:8883", self.listener.last_error)
+
+    def test_a_clean_disconnect_records_no_error(self):
+        """What is shown as a centre's last error must be an actual error."""
+        self.connect()
+
+        self.disconnect(SUCCESS)
+
+        self.assertFalse(self.listener.is_connected)
+        self.assertEqual(self.listener.last_error, "")
+
+    def test_a_broker_that_keeps_refusing_the_connection_is_not_logged_again(self):
+        """Bad credentials are as permanent as a dead host, and as quiet."""
+        with self.assertLogs("wis2watch.ingest.client", level="WARNING") as logged:
+            self.connect(REFUSED)
+            self.connect(REFUSED)
+            self.connect(REFUSED)
+
+        self.assertEqual(len(logged.records), 1)
+        self.assertEqual(self.listener.last_error, "Not authorized")
+
+    def test_a_broker_that_keeps_dropping_the_connection_is_not_logged_again(self):
+        with self.assertLogs("wis2watch.ingest.client", level="WARNING") as logged:
+            self.disconnect()
+            self.disconnect()
+            self.disconnect()
+
+        self.assertEqual(len(logged.records), 1)
+
+    def test_a_drop_after_a_healthy_connection_is_logged(self):
+        """A connection that was working and stopped is news, every time."""
+        self.connect()
+        self.disconnect()
+        self.connect()
+
+        with self.assertLogs("wis2watch.ingest.client", level="WARNING") as logged:
+            self.disconnect()
+
+        self.assertEqual(len(logged.records), 1)
+
+    def test_a_broker_that_stays_unreachable_says_the_same_thing_every_time(self):
+        """What is recorded must not churn while nothing about it has changed.
+
+        The supervisor persists this, and writes when it changes. A message
+        that counted the attempts would mean a row write per attempt, for a
+        broker whose state has not moved at all.
+        """
+        self.listener._on_connect_fail(self.client, None)
+        first = self.listener.last_error
+
+        self.listener._on_connect_fail(self.client, None)
+
+        self.assertEqual(self.listener.last_error, first)
+
+    def test_a_broker_that_stays_unreachable_is_not_logged_again(self):
+        """Dozens of dead origin brokers must not drown the log."""
+        with self.assertLogs("wis2watch.ingest.client", level="WARNING") as logged:
+            self.listener._on_connect_fail(self.client, None)
+            self.listener._on_connect_fail(self.client, None)
+            self.listener._on_connect_fail(self.client, None)
+
+        self.assertEqual(len(logged.records), 1)
+
+    def test_a_broker_that_goes_unreachable_again_is_logged_again(self):
+        """Silence is only earned by a failure that is already known about."""
+        self.listener._on_connect_fail(self.client, None)
+        self.connect()
+
+        with self.assertLogs("wis2watch.ingest.client", level="WARNING") as logged:
+            self.listener._on_connect_fail(self.client, None)
+
+        self.assertEqual(len(logged.records), 1)
 
     def test_connecting_clears_an_earlier_failure(self):
         self.listener._on_connect_fail(self.client, None)

@@ -27,7 +27,12 @@ logger = logging.getLogger(__name__)
 #: failure mode, rather than silent loss.
 QOS = 1
 
-#: Bounds on paho's own reconnect backoff, in seconds.
+#: Bounds on paho's own reconnect backoff, in seconds. Paho doubles the delay
+#: after each failed attempt until it reaches the ceiling, so the ceiling is
+#: what decides how often a broker that is simply dead is knocked on. The
+#: default suits a broker expected to answer; a caller connecting to one that
+#: probably will not -- a node's own broker, firewalled to the Global Broker --
+#: passes a far longer one.
 RECONNECT_MIN_DELAY = 1
 RECONNECT_MAX_DELAY = 120
 
@@ -43,13 +48,16 @@ MAX_BUFFERED_MESSAGES = 20000
 class BrokerListener:
     """A connection to one broker, buffering what it receives."""
 
-    def __init__(self, source, decode):
+    def __init__(self, source, decode, reconnect_max_delay=RECONNECT_MAX_DELAY):
         """
         Args:
             source: the ``MessageSource`` this connection observes from.
             decode: how a raw payload becomes a structure, so that a broker
                 sending something that is not JSON is this class's problem
                 rather than the store's.
+            reconnect_max_delay: how long the backoff between attempts may
+                grow to, in seconds. Whether this broker is expected to answer
+                is the caller's knowledge, not the connection's.
         """
         self.source_id = source.pk
         self.name = source.name
@@ -68,9 +76,9 @@ class BrokerListener:
         self.started_at = None
         self.failed_attempts = 0
 
-        self._client = self._build_client(source)
+        self._client = self._build_client(source, reconnect_max_delay)
 
-    def _build_client(self, source):
+    def _build_client(self, source, reconnect_max_delay):
         client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
             client_id=f"wis2watch-{source.pk}",
@@ -88,7 +96,7 @@ class BrokerListener:
             client.tls_set(ca_certs=certifi.where())
 
         client.reconnect_delay_set(
-            min_delay=RECONNECT_MIN_DELAY, max_delay=RECONNECT_MAX_DELAY
+            min_delay=RECONNECT_MIN_DELAY, max_delay=reconnect_max_delay
         )
 
         client.on_connect = self._on_connect
@@ -121,9 +129,9 @@ class BrokerListener:
 
     def _on_connect(self, client, userdata, connect_flags, reason_code, properties):
         if reason_code.is_failure:
-            self.is_connected = False
-            self.last_error = str(reason_code)
-            logger.warning("Could not connect to %s: %s", self.name, reason_code)
+            # Credentials the broker will not accept are as permanent as a dead
+            # host, and are counted and quietened the same way.
+            self._record_not_connected(str(reason_code))
             return
 
         self.is_connected = True
@@ -146,24 +154,52 @@ class BrokerListener:
         an unreachable broker -- or one whose certificate does not verify --
         would sit silently disconnected and look like a quiet region.
         """
-        self.is_connected = False
-        self.failed_attempts += 1
-        self.last_error = (
-            f"Could not reach {self.host}:{self.port} "
-            f"({self.failed_attempts} attempts)"
-        )
-
-        logger.warning("Connection attempt to %s failed", self.name)
+        self._record_not_connected(f"Could not reach {self.host}:{self.port}")
 
     def _on_disconnect(
         self, client, userdata, disconnect_flags, reason_code, properties
     ):
+        """The connection has ended, whether or not anything went wrong.
+
+        The reason code is asked whether it is a failure rather than tested
+        for truth: paho's reason codes are truthy even when they say the
+        disconnection was normal, and recording "Success" as a centre's last
+        error would put a fault on the overview where there was none.
+        """
+        self._record_not_connected(str(reason_code) if reason_code.is_failure else "")
+
+    def _record_not_connected(self, cause):
+        """Note that this connection is not carrying traffic, and say so once.
+
+        Every way a connection can stop carrying comes through here -- refused,
+        unreachable, dropped -- so that they are counted together and spoken
+        about at the same volume. The cause is empty when nothing went wrong.
+
+        What is recorded says nothing about how many attempts have failed: the
+        supervisor persists this and writes when it changes, so an attempt
+        count would mean a row write per attempt about a broker whose state
+        has not moved.
+
+        Only the first failure of a run is logged. Dozens of origin brokers
+        are expected to be permanently unreachable -- refused, unresolvable or
+        firewalled -- and their saying so every time is not news; that they are
+        unreachable at all is recorded state, which is the point.
+        """
         self.is_connected = False
+        self.failed_attempts += 1
+        self.last_error = cause
 
-        if reason_code:
-            self.last_error = str(reason_code)
-
-        logger.warning("Disconnected from %s: %s", self.name, reason_code)
+        if self.failed_attempts == 1:
+            logger.warning(
+                "%s is not carrying traffic: %s", self.name, cause or "disconnected"
+            )
+        else:
+            logger.debug(
+                "%s is still not carrying traffic after %s attempts: %s",
+                self.name,
+                self.failed_attempts,
+                cause or "disconnected",
+            )
 
     # -- subscriptions ---------------------------------------------------
 

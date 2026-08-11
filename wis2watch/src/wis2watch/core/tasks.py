@@ -6,7 +6,8 @@ from django.core.management import call_command
 
 from wis2watch.config.celery import app
 from .catalogue import sync_catalogues
-from .cleanup import cleanup_old_notification_messages
+from .retention import expire_raw_messages
+from .rollups import update_rollups
 from .sync import sync_stations
 
 logger = get_task_logger(__name__)
@@ -79,5 +80,29 @@ def run_sync_all_node_stations():
 
 
 @shared_task
-def run_cleanup_old_notification_messages(days=90):
-    return cleanup_old_notification_messages(days=days)
+def run_update_rollups():
+    """Bring the hourly rollups up to date with what has been stored.
+
+    Counts are derived from stored rows, so this is safe to run as often as
+    the schedule likes: it recomputes a trailing window rather than adding to
+    what is already there.
+    """
+    counts = update_rollups()
+
+    logger.info("[ROLLUPS] %s", counts.summary)
+
+    return counts.summary
+
+
+@shared_task
+def run_expire_raw_messages():
+    """Drop raw messages past the forensic window.
+
+    Whatever is about to go is rolled up first, so the region's history
+    survives the messages it was taken from.
+    """
+    counts = expire_raw_messages()
+
+    logger.info("[RETENTION] %s", counts.summary)
+
+    return counts.summary

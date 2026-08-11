@@ -7,11 +7,40 @@ from django.urls import reverse_lazy
 from django.utils.translation import gettext as _
 from wagtail.admin import messages
 
+from .analysis import Staleness, default_volume_hours, node_overview
 from .forms import SyncNodeForm
 from .models import StationSource, WIS2Node
 from .stations import node_stations_as_csv
 from .sync import sync_stations
 from .viewsets import WIS2NodeViewSet
+
+
+def node_overview_table(request):
+    """The state of the region on one screen.
+
+    The findings are computed whole and then rendered; the view's only job is
+    to read what was asked for off the query string, so that "sorted by
+    staleness" means the same thing here as it does anywhere else it is asked.
+    """
+    staleness = request.GET.get("staleness") or None
+    order = request.GET.get("order") or "staleness"
+
+    rows = node_overview(staleness=staleness, order=order)
+
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": "", "label": _("Overview")},
+        ],
+        "page_title": _("Node overview"),
+        "rows": rows,
+        "volume_hours": default_volume_hours(),
+        "staleness": staleness,
+        "order": order,
+        "staleness_choices": Staleness.CHOICES,
+    }
+
+    return render(request, 'wis2watchcore/node_overview.html', context)
 
 
 def preview_node_stations_csv(request, node_id):

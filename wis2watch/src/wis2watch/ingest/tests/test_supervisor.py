@@ -22,7 +22,9 @@ from wis2watch.core.models import (
     NotificationMessage,
     WIS2Node,
 )
-from wis2watch.core.tests.support import load_jsonl_fixture
+from wis2watch.core.tests.support import load_jsonl_fixture, origin_broker
+from wis2watch.ingest.client import RECONNECT_MAX_DELAY
+from wis2watch.ingest.store import store_notifications
 from wis2watch.ingest.supervisor import Supervisor
 
 CAPTURE = "global_broker_notifications.jsonl"
@@ -41,10 +43,12 @@ def captured_messages(limit=None):
 class FakeListener:
     """A connection that records what it was asked, and never opens one."""
 
-    def __init__(self, source, decode):
+    def __init__(self, source, decode, reconnect_max_delay=None):
         self.source_id = source.pk
         self.name = source.name
+        self.host = source.host
         self.decode = decode
+        self.reconnect_max_delay = reconnect_max_delay
 
         self.started = False
         self.stopped = False
@@ -78,13 +82,48 @@ class RecordingListeners:
     def __init__(self):
         self.made = {}
 
-    def __call__(self, source, decode):
-        listener = FakeListener(source, decode)
+    def __call__(self, source, decode, reconnect_max_delay=None):
+        listener = FakeListener(source, decode, reconnect_max_delay)
         self.made[source.pk] = listener
         return listener
 
     def __getitem__(self, source):
         return self.made[getattr(source, "pk", source)]
+
+
+class BreakingListeners:
+    """A factory that cannot open a connection to one particular broker.
+
+    A node's own broker is described by catalogue data, so a host that does
+    not resolve is only ever a payload away -- and the process must carry on
+    connecting to everything else when one of them cannot be opened at all.
+    """
+
+    def __init__(self, listeners, unopenable):
+        self._listeners = listeners
+        self._unopenable = unopenable
+
+    def __call__(self, source, decode, reconnect_max_delay=None):
+        if source.pk == self._unopenable:
+            raise RuntimeError("that host does not resolve")
+
+        return self._listeners(source, decode, reconnect_max_delay)
+
+    def opens_again(self):
+        """Whatever was wrong with that broker has been put right."""
+        self._unopenable = None
+
+
+def only_this_source_fails(source_id):
+    """A store that fails for one source and stores for every other."""
+
+    def store(source, received):
+        if source.pk == source_id:
+            raise RuntimeError("the database went away")
+
+        return store_notifications(source, received)
+
+    return store
 
 
 @override_settings(
@@ -117,9 +156,22 @@ class SupervisorTestCase(TestCase):
     def node(self, centre_id):
         return WIS2Node.objects.create(centre_id=centre_id, name=centre_id)
 
+    def origin_broker(self, centre_id, **kwargs):
+        """A new node with a broker of its own, as a catalogue sync leaves it."""
+        return origin_broker(self.node(centre_id), **kwargs)
+
     def connected_sources(self):
         """The sources the supervisor currently holds a connection for."""
         return sorted(self.supervisor.listeners)
+
+    def is_connected(self, source):
+        """Whether the supervisor holds a connection to one source.
+
+        Asked source by source, because a test that seeds no Global Broker
+        gets the one settings configure seeded for it, and that connection is
+        beside the point of anything asked about a node's own broker.
+        """
+        return source.pk in self.supervisor.listeners
 
 
 class ConnectionsFollowTheRegistryTests(SupervisorTestCase):
@@ -340,6 +392,218 @@ class SubscriptionsFollowTheRegistryTests(SupervisorTestCase):
         self.assertEqual(self.listeners[broker].subscriptions, ())
 
 
+class OriginBrokersFollowTheRegistryTests(SupervisorTestCase):
+    """Every monitored node's own broker is connected, alongside the world's."""
+
+    def test_every_node_with_a_broker_of_its_own_is_connected(self):
+        ke = self.origin_broker("ke-meteo")
+        dj = self.origin_broker("dj-anm")
+
+        self.supervisor.start_listeners()
+
+        self.assertTrue(self.is_connected(ke))
+        self.assertTrue(self.is_connected(dj))
+        self.assertTrue(self.listeners[ke].started)
+        self.assertTrue(self.listeners[dj].started)
+
+    def test_a_node_broker_is_asked_for_its_own_centre_only(self):
+        origin = self.origin_broker("ke-meteo")
+        self.node("dj-anm")
+
+        self.supervisor.start_listeners()
+        self.supervisor.refresh_from_registry()
+
+        self.assertEqual(
+            self.listeners[origin].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+        )
+
+    def test_a_node_broker_a_sync_added_is_connected_without_a_restart(self):
+        self.broker()
+        self.supervisor.start_listeners()
+
+        origin = self.origin_broker("ke-meteo")
+        self.supervisor.refresh_from_registry()
+
+        self.assertTrue(self.listeners[origin].started)
+        self.assertEqual(
+            self.listeners[origin].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+        )
+
+    def test_a_node_broker_removed_from_the_registry_is_disconnected(self):
+        origin = self.origin_broker("ke-meteo")
+        self.supervisor.start_listeners()
+
+        MessageSource.objects.filter(pk=origin.pk).update(is_active=False)
+        self.supervisor.refresh_from_registry()
+
+        self.assertFalse(self.is_connected(origin))
+        self.assertTrue(self.listeners[origin].stopped)
+
+    def test_both_vantage_points_are_held_at_once(self):
+        broker = self.broker()
+        origin = self.origin_broker("ke-meteo")
+
+        self.supervisor.start_listeners()
+        self.supervisor.refresh_from_registry()
+
+        self.assertEqual(self.connected_sources(), sorted([broker.pk, origin.pk]))
+        self.assertEqual(
+            self.listeners[broker].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+        )
+        self.assertEqual(
+            self.listeners[origin].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+        )
+
+    def test_a_broker_a_sync_has_moved_is_connected_at_its_new_address(self):
+        """A held connection must not go on knocking on the old host."""
+        origin = self.origin_broker("ke-meteo")
+        self.supervisor.start_listeners()
+        opened_at_first = self.listeners[origin]
+
+        MessageSource.objects.filter(pk=origin.pk).update(host="moved.example.int")
+        self.supervisor.refresh_from_registry()
+
+        self.assertTrue(opened_at_first.stopped)
+        self.assertIsNot(self.supervisor.listeners[origin.pk], opened_at_first)
+        self.assertEqual(self.listeners[origin].host, "moved.example.int")
+
+    def test_a_broker_the_registry_has_not_moved_keeps_its_connection(self):
+        origin = self.origin_broker("ke-meteo")
+        self.supervisor.start_listeners()
+        listener = self.listeners[origin]
+
+        self.supervisor.refresh_from_registry()
+
+        self.assertIs(self.supervisor.listeners[origin.pk], listener)
+        self.assertFalse(listener.stopped)
+
+    @override_settings(WIS2WATCH_ORIGIN_RECONNECT_MAX_SECONDS=3600)
+    def test_a_node_broker_backs_off_to_a_long_ceiling(self):
+        """Dozens of dead brokers must not be knocked on every two minutes."""
+        origin = self.origin_broker("ke-meteo")
+
+        self.supervisor.start_listeners()
+
+        self.assertEqual(self.listeners[origin].reconnect_max_delay, 3600)
+
+    @override_settings(WIS2WATCH_ORIGIN_RECONNECT_MAX_SECONDS=3600)
+    def test_the_global_broker_is_not_given_the_long_ceiling(self):
+        """The Global Broker is expected to answer, and is retried like it."""
+        broker = self.broker()
+
+        self.supervisor.start_listeners()
+
+        self.assertEqual(self.listeners[broker].reconnect_max_delay, RECONNECT_MAX_DELAY)
+
+
+class OriginChurnIsolationTests(SupervisorTestCase):
+    """The Global Broker connection is the one that must never be disturbed."""
+
+    def test_a_registry_of_node_brokers_that_cannot_be_read_leaves_the_world_watched(
+        self,
+    ):
+        broker = self.broker()
+        self.node("ke-meteo")
+
+        with mock.patch(
+            "wis2watch.ingest.supervisor.active_origin_broker_sources",
+            side_effect=RuntimeError("the database went away"),
+        ):
+            self.supervisor.start_listeners()
+            self.supervisor.refresh_from_registry()
+
+        self.assertEqual(self.connected_sources(), [broker.pk])
+        self.assertEqual(
+            self.listeners[broker].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+        )
+
+    def test_a_node_broker_that_cannot_be_opened_does_not_cost_the_others(self):
+        broker = self.broker()
+        unopenable = self.origin_broker("ke-meteo")
+        other = self.origin_broker("dj-anm")
+
+        factory = BreakingListeners(self.listeners, unopenable.pk)
+        self.supervisor = Supervisor(make_listener=factory)
+        self.supervisor.start_listeners()
+
+        self.assertEqual(self.connected_sources(), sorted([broker.pk, other.pk]))
+
+    def test_a_node_broker_that_could_not_be_opened_is_tried_again(self):
+        unopenable = self.origin_broker("ke-meteo")
+
+        factory = BreakingListeners(self.listeners, unopenable.pk)
+        self.supervisor = Supervisor(make_listener=factory)
+        self.supervisor.start_listeners()
+
+        factory.opens_again()
+        self.supervisor.refresh_from_registry()
+
+        self.assertTrue(self.is_connected(unopenable))
+
+    def test_a_node_broker_whose_messages_cannot_be_stored_does_not_cost_the_world(
+        self,
+    ):
+        broker = self.broker()
+        origin = self.origin_broker("ke-meteo")
+        self.supervisor.start_listeners()
+        self.listeners[broker].received = captured_messages(limit=2)
+        self.listeners[origin].received = captured_messages(limit=2)
+
+        with mock.patch(
+            "wis2watch.ingest.supervisor.store_notifications",
+            side_effect=only_this_source_fails(origin.pk),
+        ):
+            self.supervisor.drain_listeners()
+
+        self.assertEqual(
+            NotificationMessage.objects.filter(source=broker).count(), 2
+        )
+
+    def test_deactivating_the_global_broker_leaves_the_node_brokers_connected(self):
+        broker = self.broker()
+        origin = self.origin_broker("ke-meteo")
+        self.supervisor.start_listeners()
+
+        MessageSource.objects.filter(pk=broker.pk).update(is_active=False)
+        self.supervisor.refresh_from_registry()
+
+        self.assertEqual(self.connected_sources(), [origin.pk])
+        self.assertFalse(self.listeners[origin].stopped)
+
+
+class OriginMessageTests(SupervisorTestCase):
+    """What a node publishes is recorded separately from what the world saw."""
+
+    def test_messages_from_a_node_broker_are_stored_against_that_broker(self):
+        origin = self.origin_broker("ke-meteo")
+        self.supervisor.start_listeners()
+        self.listeners[origin].received = captured_messages(limit=2)
+
+        self.supervisor.drain_listeners()
+
+        self.assertEqual(
+            list(NotificationMessage.objects.values_list("source", flat=True)),
+            [origin.pk, origin.pk],
+        )
+
+    def test_the_same_notification_seen_at_both_vantage_points_is_kept_twice(self):
+        """Propagation is a comparison, so neither observation may overwrite
+        the other."""
+        broker = self.broker()
+        origin = self.origin_broker("ke-meteo")
+        self.supervisor.start_listeners()
+        self.listeners[broker].received = captured_messages(limit=1)
+        self.listeners[origin].received = captured_messages(limit=1)
+
+        self.supervisor.drain_listeners()
+
+        self.assertEqual(NotificationMessage.objects.filter(source=broker).count(), 1)
+        self.assertEqual(NotificationMessage.objects.filter(source=origin).count(), 1)
+        self.assertEqual(
+            NotificationMessage.objects.values("notification_id").distinct().count(), 1
+        )
+
+
 class DrainTests(SupervisorTestCase):
     """What the connections received is stored on the supervisor's thread."""
 
@@ -424,6 +688,50 @@ class ReachabilityTests(SupervisorTestCase):
         broker.refresh_from_db()
 
         self.assertEqual(broker.last_error, "sentinel")
+
+    def test_a_connection_that_has_not_answered_yet_is_left_as_unattempted(self):
+        """Neither reachable nor not: saying either would be a guess."""
+        broker = self.broker()
+        self.supervisor.start_listeners()
+        listener = self.listeners[broker]
+        listener.is_connected = False
+        listener.last_error = ""
+
+        self.supervisor.record_reachability()
+        broker.refresh_from_db()
+
+        self.assertIsNone(broker.is_reachable)
+
+    def test_a_node_broker_that_never_answers_is_recorded_against_its_node(self):
+        origin = self.origin_broker("ke-meteo")
+        self.supervisor.start_listeners()
+        listener = self.listeners[origin]
+        listener.is_connected = False
+        listener.last_error = "Could not reach wis.ke-meteo.example.int:1883"
+
+        self.supervisor.record_reachability()
+        origin.refresh_from_db()
+
+        self.assertFalse(origin.is_reachable)
+        self.assertEqual(
+            origin.last_error, "Could not reach wis.ke-meteo.example.int:1883"
+        )
+        self.assertEqual(origin.node.centre_id, "ke-meteo")
+
+    def test_a_broker_that_stays_unreachable_is_written_once(self):
+        """Dozens of dead brokers must not cost a row write each per tick."""
+        origin = self.origin_broker("ke-meteo")
+        self.supervisor.start_listeners()
+        listener = self.listeners[origin]
+        listener.is_connected = False
+        listener.last_error = "Could not reach wis.ke-meteo.example.int:1883"
+        self.supervisor.record_reachability()
+
+        MessageSource.objects.filter(pk=origin.pk).update(last_error="sentinel")
+        self.supervisor.record_reachability()
+        origin.refresh_from_db()
+
+        self.assertEqual(origin.last_error, "sentinel")
 
     def test_a_connection_that_drops_is_recorded_again(self):
         broker = self.broker()

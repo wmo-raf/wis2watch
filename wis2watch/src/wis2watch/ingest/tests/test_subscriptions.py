@@ -9,10 +9,13 @@ confidently wrong answer rather than an exception.
 from django.test import TestCase, override_settings
 
 from wis2watch.core.models import MessageSource, WIS2Node
+from wis2watch.core.tests.support import origin_broker
 from wis2watch.ingest.subscriptions import (
     active_global_broker_sources,
+    active_origin_broker_sources,
     ensure_global_broker_source,
     global_broker_subscriptions,
+    origin_broker_subscriptions,
 )
 
 METEO_FRANCE = "mqtts://everyone:everyone@globalbroker.meteo.fr:8883"
@@ -138,3 +141,80 @@ class ActiveGlobalBrokerTests(TestCase):
         )
 
         self.assertEqual(list(active_global_broker_sources()), [])
+
+
+def broker_for(centre_id, **kwargs):
+    """A new node with a broker of its own, as a catalogue sync leaves it."""
+    return origin_broker(node(centre_id), **kwargs)
+
+
+class OriginBrokerSourceTests(TestCase):
+    """Every monitored node's own broker is attempted, reachable or not."""
+
+    def test_each_node_with_a_broker_of_its_own_is_included(self):
+        ke = broker_for("ke-meteo")
+        dj = broker_for("dj-anm")
+
+        self.assertEqual(
+            sorted(source.pk for source in active_origin_broker_sources()),
+            sorted([ke.pk, dj.pk]),
+        )
+
+    def test_a_node_with_no_broker_of_its_own_contributes_nothing(self):
+        node("ke-meteo")
+
+        self.assertEqual(list(active_origin_broker_sources()), [])
+
+    def test_a_broker_known_to_be_unreachable_is_still_attempted(self):
+        """Unreachable is the finding, not a reason to stop looking."""
+        unreachable = broker_for(
+            "ke-meteo", is_reachable=False, last_error="Could not reach it"
+        )
+
+        self.assertEqual(
+            [source.pk for source in active_origin_broker_sources()], [unreachable.pk]
+        )
+
+    def test_a_broker_deactivated_in_the_admin_is_not_attempted(self):
+        broker_for("ke-meteo", is_active=False)
+
+        self.assertEqual(list(active_origin_broker_sources()), [])
+
+    def test_the_global_broker_is_not_an_origin_broker(self):
+        MessageSource.objects.create(
+            name="Global Broker",
+            source_type=MessageSource.GLOBAL_BROKER,
+            host="globalbroker.example.int",
+        )
+
+        self.assertEqual(list(active_origin_broker_sources()), [])
+
+
+class OriginBrokerSubscriptionTests(TestCase):
+    """A node's own broker is asked for its own centre and nothing else."""
+
+    def test_a_node_broker_carries_only_its_own_centre(self):
+        source = broker_for("ke-meteo")
+
+        self.assertEqual(
+            origin_broker_subscriptions(source), ("origin/a/wis2/ke-meteo/#",)
+        )
+
+    def test_the_centre_comes_from_the_node_when_the_broker_names_none(self):
+        source = broker_for("ke-meteo")
+        source.centre_id = ""
+        source.save()
+
+        self.assertEqual(
+            origin_broker_subscriptions(source), ("origin/a/wis2/ke-meteo/#",)
+        )
+
+    def test_a_broker_belonging_to_no_centre_is_asked_for_nothing(self):
+        """Better to carry nothing than to subscribe to the whole broker."""
+        source = MessageSource.objects.create(
+            name="orphan",
+            source_type=MessageSource.ORIGIN_BROKER,
+            host="wis.example.int",
+        )
+
+        self.assertEqual(origin_broker_subscriptions(source), ())

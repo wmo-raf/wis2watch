@@ -17,6 +17,7 @@ from django.utils import timezone as dj_timezone
 from wis2watch.core.models import (
     Dataset,
     MessageSource,
+    NodeLastSeen,
     NotificationMessage,
     Station,
     WIS2Node,
@@ -318,3 +319,99 @@ class BatchTests(StoreTestCase):
 
         self.assertEqual(counts.accepted, 0)
         self.assertEqual(NotificationMessage.objects.count(), 0)
+
+
+class LastSeenTests(StoreTestCase):
+    """Last-seen is maintained here so the headline query never scans.
+
+    It is the notification's own publication time, and it only ever moves
+    forward: brokers redeliver, and a message that took the long way round
+    says nothing new about when the centre was last publishing.
+    """
+
+    def published_at(self, pubtime, topic=KE_TOPIC, notification_id=None):
+        """A captured message re-stamped with a publication time."""
+        payload = message_on(topic)["payload"]
+        payload = dict(
+            payload,
+            id=notification_id or f"{payload['id']}-{pubtime}",
+            properties=dict(payload["properties"], pubtime=pubtime),
+        )
+
+        return (topic, payload)
+
+    def last_seen_of(self, node):
+        return NodeLastSeen.objects.get(node=node).last_message_at.isoformat()
+
+    def test_storing_a_message_records_when_its_centre_was_last_heard_from(self):
+        store_notifications(self.source, [self.published_at("2026-08-11T10:00:00Z")])
+
+        self.assertEqual(self.last_seen_of(self.node), "2026-08-11T10:00:00+00:00")
+
+    def test_a_later_message_moves_last_seen_forward(self):
+        store_notifications(self.source, [self.published_at("2026-08-11T10:00:00Z")])
+        store_notifications(self.source, [self.published_at("2026-08-11T11:30:00Z")])
+
+        self.assertEqual(self.last_seen_of(self.node), "2026-08-11T11:30:00+00:00")
+
+    def test_an_older_message_does_not_move_last_seen_backwards(self):
+        store_notifications(self.source, [self.published_at("2026-08-11T11:30:00Z")])
+        store_notifications(self.source, [self.published_at("2026-08-11T10:00:00Z")])
+
+        self.assertEqual(self.last_seen_of(self.node), "2026-08-11T11:30:00+00:00")
+
+    def test_a_flush_records_the_latest_message_it_carried(self):
+        store_notifications(
+            self.source,
+            [
+                self.published_at("2026-08-11T10:00:00Z"),
+                self.published_at("2026-08-11T12:15:00Z"),
+                self.published_at("2026-08-11T11:00:00Z"),
+            ],
+        )
+
+        self.assertEqual(self.last_seen_of(self.node), "2026-08-11T12:15:00+00:00")
+
+    def test_each_centre_in_a_flush_gets_its_own_last_seen(self):
+        djibouti_topic = "origin/a/wis2/dj-anm/data/recommended/weather/aviation/taf"
+        djibouti = WIS2Node.objects.create(centre_id="dj-anm", name="Djibouti")
+
+        store_notifications(
+            self.source,
+            [
+                self.published_at("2026-08-11T10:00:00Z"),
+                self.published_at("2026-08-11T09:00:00Z", topic=djibouti_topic),
+            ],
+        )
+
+        self.assertEqual(self.last_seen_of(self.node), "2026-08-11T10:00:00+00:00")
+        self.assertEqual(self.last_seen_of(djibouti), "2026-08-11T09:00:00+00:00")
+
+    def test_a_centre_the_registry_does_not_know_records_no_last_seen(self):
+        """There is no node to answer for, and the traffic is still stored."""
+        message = message_on("origin/a/wis2/dj-anm/data/recommended/weather/aviation/taf")
+
+        store_notifications(self.source, [(message["topic"], message["payload"])])
+
+        self.assertEqual(NodeLastSeen.objects.count(), 0)
+        self.assertEqual(NotificationMessage.objects.count(), 1)
+
+    def test_the_same_message_seen_from_another_vantage_point_changes_nothing(self):
+        origin = MessageSource.objects.create(
+            name="ke-meteo origin broker",
+            source_type=MessageSource.ORIGIN_BROKER,
+            node=self.node,
+            host="wis.meteo.example.int",
+        )
+        received = [self.published_at("2026-08-11T10:00:00Z")]
+
+        store_notifications(self.source, received)
+        store_notifications(origin, received)
+
+        self.assertEqual(NodeLastSeen.objects.count(), 1)
+        self.assertEqual(self.last_seen_of(self.node), "2026-08-11T10:00:00+00:00")
+
+    def test_a_message_that_cannot_be_stored_records_nothing(self):
+        store_notifications(self.source, [(KE_TOPIC, {"id": None})])
+
+        self.assertEqual(NodeLastSeen.objects.count(), 0)
