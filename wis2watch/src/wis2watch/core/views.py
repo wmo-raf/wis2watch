@@ -9,9 +9,9 @@ from wagtail.admin import messages
 
 from .analysis import Staleness, default_volume_hours, node_overview
 from .forms import SyncNodeForm
-from .models import StationSource, WIS2Node
+from .models import StationSource, SyncLog, WIS2Node
+from .node_stations import sync_node_stations
 from .stations import node_stations_as_csv
-from .sync import sync_stations
 from .viewsets import WIS2NodeViewSet
 
 
@@ -120,24 +120,30 @@ def node_details(request, node_id):
         HttpResponse: Rendered page with node details.
     """
 
+    node = get_object_or_404(WIS2Node, pk=node_id)
+
     if request.method == "POST":
         form = SyncNodeForm(request.POST)
         if form.is_valid():
-            node_id = form.cleaned_data['node_id']
-
             # Datasets come from the catalogue now, so syncing a node by hand
-            # asks it only for its station registry.
-            result, error = sync_stations(node_id)
+            # asks it only for its station registry. The node is the page's
+            # own; the form carries its id so a stray post cannot sync another.
+            sync_log = sync_node_stations(node)
 
-            if error:
-                error = str(error)
-                messages.error(request, _("Error during synchronization: ") + error)
+            if sync_log is None:
+                messages.warning(request, _("This node advertises no station registry."))
+            elif sync_log.status == SyncLog.FAILED:
+                messages.error(
+                    request,
+                    _("Error during synchronization: ") + sync_log.error_message,
+                )
             else:
-                messages.success(request, _("Node synchronization completed successfully."))
+                messages.success(
+                    request,
+                    _("Station synchronization completed: ") + sync_log.summary,
+                )
         else:
             messages.error(request, _("Invalid form submission."))
-
-    node = get_object_or_404(WIS2Node, pk=node_id)
 
     nodes_index_url_name = WIS2NodeViewSet().get_url_name("index")
     nodes_index_url = reverse_lazy(nodes_index_url_name)
@@ -148,7 +154,9 @@ def node_details(request, node_id):
         {"url": "", "label": node.name},
     ]
 
-    station_declarations = StationSource.objects.declared_by_node_registry(node)
+    station_declarations = StationSource.objects.declared_by_node_registry(
+        node
+    ).with_last_transmitted()
 
     context = {
         "breadcrumbs_items": breadcrumbs_items,

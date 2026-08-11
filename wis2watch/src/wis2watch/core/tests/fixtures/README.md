@@ -5,7 +5,8 @@ interpretation tests never touch the network. They double as documentation of
 what these sources actually return, which is repeatedly not what their schemas
 suggest.
 
-All three were captured on **2026-08-11**.
+The first three were captured on **2026-08-11**, the node station registry on
+**2026-08-12**.
 
 ## `global_broker_notifications.jsonl`
 
@@ -69,6 +70,28 @@ Covered: every operational status OSCAR reports for the territory
 (`operational`, `partlyOperational`, `closed`, `unknown`), stations carrying
 more than one WIGOS identifier, a station with no elevation, and one with an
 elevation of zero.
+
+## `node_stations_gh_gmet.json`
+
+Ghana's own station registry
+(`https://wis2.meteo.gov.gh/oapi/collections/stations/items`), which is what a
+wis2box node publishes about the stations it operates. The envelope is as
+returned; the feature list is a nine-station subset of the 39 available, with
+`numberMatched`/`numberReturned` set to that subset.
+
+Covered: stations the operator gives a traditional identifier and stations it
+does not (32 of the 39 leave it empty), a station on the Greenwich meridian
+whose longitude is `0.0`, stations declaring no `topic` property, and the
+`barometer_height` the station CSV export reports.
+
+Every station in the registry carries a WIGOS station identifier and a
+three-dimensional position, so the skipped and unpositioned cases are asserted
+against hand-written features rather than captured ones.
+
+A registry longer than the page size links to its next page under `rel: next`,
+the same as a Global Discovery Catalogue does; this capture fits on one page
+and so carries no such link. The default page size of a station endpoint is
+routinely ten, which is why the fetch asks for more.
 
 ## Refreshing a fixture
 

@@ -20,6 +20,7 @@ from wis2watch.core.models import (
     NodeLastSeen,
     NotificationMessage,
     Station,
+    StationSource,
     WIS2Node,
 )
 from wis2watch.core.tests.support import load_jsonl_fixture
@@ -45,6 +46,22 @@ def message_on(topic):
             return message
 
     raise AssertionError(f"no captured message on {topic}")
+
+
+def published_at(pubtime, topic=KE_TOPIC, notification_id=None):
+    """A captured message re-stamped with a publication time.
+
+    The UUID moves with the time by default, so that two stampings of one
+    capture are two notifications rather than a redelivery of one.
+    """
+    payload = message_on(topic)["payload"]
+    payload = dict(
+        payload,
+        id=notification_id or f"{payload['id']}-{pubtime}",
+        properties=dict(payload["properties"], pubtime=pubtime),
+    )
+
+    return (topic, payload)
 
 
 def store_one(source, topic, payload):
@@ -191,10 +208,11 @@ class StationAttributionTests(StoreTestCase):
         self.assertEqual(record.station, station)
         self.assertEqual(record.wigos_station_id, KE_STATION)
 
-    def test_a_station_the_registry_does_not_know_is_still_recorded_by_identifier(self):
+    def test_a_station_the_registry_does_not_know_is_created_from_the_message(self):
+        """A transmitting station is never invisible, declared or not."""
         record = self.store(KE_TOPIC)
 
-        self.assertIsNone(record.station)
+        self.assertEqual(record.station, Station.objects.get(wigos_id=KE_STATION))
         self.assertEqual(record.wigos_station_id, KE_STATION)
 
     def test_a_message_carrying_no_station_is_unattributed(self):
@@ -216,6 +234,149 @@ class StationAttributionTests(StoreTestCase):
 
         self.assertEqual(record.wigos_station_id, "")
         self.assertTrue(record.data_id)
+
+
+class ObservedStationTests(StoreTestCase):
+    """A station observed transmitting is recorded as one of the three sources.
+
+    Observation is provenance in its own right: a station transmitting that
+    nobody declares is the finding, so the ingest writes what it saw rather
+    than waiting for a registry to agree that the station exists.
+    """
+
+    def observation(self, wigos_id=KE_STATION, **naming):
+        return StationSource.objects.get(
+            station__wigos_id=wigos_id,
+            source_type=StationSource.OBSERVED,
+            **{"node": self.node, **naming},
+        )
+
+    def test_a_transmitting_station_records_that_it_was_observed(self):
+        self.store(KE_TOPIC)
+
+        self.assertEqual(self.observation().station.wigos_id, KE_STATION)
+
+    def test_an_observation_carries_no_naming_of_its_own(self):
+        """Nothing in a notification names a station beyond its identifier."""
+        self.store(KE_TOPIC)
+
+        self.assertEqual(self.observation().local_name, "")
+        self.assertEqual(self.observation().local_id, "")
+
+    def test_a_station_the_node_already_declares_gains_a_second_source(self):
+        station = Station.objects.create(wigos_id=KE_STATION, name="Wajir")
+        StationSource.objects.create(
+            station=station,
+            source_type=StationSource.NODE_REGISTRY,
+            node=self.node,
+            local_name="WAJIR",
+        )
+
+        self.store(KE_TOPIC)
+
+        self.assertEqual(station.sources.count(), 2)
+        self.assertEqual(Station.objects.get(wigos_id=KE_STATION).name, "Wajir")
+
+    def test_a_station_transmitting_from_an_unregistered_centre_is_still_recorded(self):
+        """The centre is unknown, which is no reason to lose the station."""
+        topic = "origin/a/wis2/dj-anm/data/recommended/weather/aviation/taf"
+        payload = dict(
+            message_on(topic)["payload"],
+            properties=dict(
+                message_on(topic)["payload"]["properties"],
+                wigos_station_identifier="0-262-0-63125",
+            ),
+        )
+
+        record = store_one(self.source, topic, payload)
+
+        self.assertEqual(record.station.wigos_id, "0-262-0-63125")
+        self.assertIsNone(self.observation("0-262-0-63125", node=None).node)
+
+    def test_a_message_carrying_no_station_observes_nothing(self):
+        message = message_on("origin/a/wis2/dj-anm/data/recommended/weather/aviation/taf")
+
+        store_one(self.source, message["topic"], message["payload"])
+
+        self.assertEqual(Station.objects.count(), 0)
+        self.assertEqual(StationSource.objects.count(), 0)
+
+
+class StationLastSeenTests(StoreTestCase):
+    """Per-station last-seen, so a single silent station can be named.
+
+    As with a node's, it is the notification's own publication time and only
+    ever moves forward: a redelivery says nothing new about when the station
+    was last transmitting.
+    """
+
+    def last_seen_of(self, wigos_id=KE_STATION):
+        return (
+            StationSource.objects.get(
+                station__wigos_id=wigos_id, source_type=StationSource.OBSERVED
+            )
+            .last_seen.isoformat()
+        )
+
+    def test_observing_a_station_records_when_it_last_transmitted(self):
+        store_notifications(self.source, [published_at("2026-08-11T10:00:00Z")])
+
+        self.assertEqual(self.last_seen_of(), "2026-08-11T10:00:00+00:00")
+
+    def test_a_later_message_moves_the_station_forward(self):
+        store_notifications(self.source, [published_at("2026-08-11T10:00:00Z")])
+        store_notifications(self.source, [published_at("2026-08-11T11:30:00Z")])
+
+        self.assertEqual(self.last_seen_of(), "2026-08-11T11:30:00+00:00")
+
+    def test_an_older_message_does_not_move_the_station_backwards(self):
+        store_notifications(self.source, [published_at("2026-08-11T11:30:00Z")])
+        store_notifications(self.source, [published_at("2026-08-11T10:00:00Z")])
+
+        self.assertEqual(self.last_seen_of(), "2026-08-11T11:30:00+00:00")
+
+    def test_a_flush_records_the_latest_message_the_station_sent(self):
+        store_notifications(
+            self.source,
+            [
+                published_at("2026-08-11T10:00:00Z"),
+                published_at("2026-08-11T12:15:00Z"),
+                published_at("2026-08-11T11:00:00Z"),
+            ],
+        )
+
+        self.assertEqual(self.last_seen_of(), "2026-08-11T12:15:00+00:00")
+        self.assertEqual(StationSource.objects.count(), 1)
+
+    def test_a_station_already_declared_by_the_node_gets_its_own_observed_time(self):
+        """A registry declaration says nothing about when anything transmitted."""
+        station = Station.objects.create(wigos_id=KE_STATION)
+        declared = StationSource.objects.create(
+            station=station,
+            source_type=StationSource.NODE_REGISTRY,
+            node=self.node,
+        )
+
+        store_notifications(self.source, [published_at("2026-08-11T10:00:00Z")])
+        declared.refresh_from_db()
+
+        self.assertEqual(self.last_seen_of(), "2026-08-11T10:00:00+00:00")
+        self.assertIsNone(declared.last_seen)
+
+    def test_the_same_message_seen_from_another_vantage_point_changes_nothing(self):
+        origin = MessageSource.objects.create(
+            name="ke-meteo origin broker",
+            source_type=MessageSource.ORIGIN_BROKER,
+            node=self.node,
+            host="wis.meteo.example.int",
+        )
+        received = [published_at("2026-08-11T10:00:00Z")]
+
+        store_notifications(self.source, received)
+        store_notifications(origin, received)
+
+        self.assertEqual(StationSource.objects.count(), 1)
+        self.assertEqual(self.last_seen_of(), "2026-08-11T10:00:00+00:00")
 
 
 class UnusableMessageTests(StoreTestCase):
@@ -329,34 +490,23 @@ class LastSeenTests(StoreTestCase):
     says nothing new about when the centre was last publishing.
     """
 
-    def published_at(self, pubtime, topic=KE_TOPIC, notification_id=None):
-        """A captured message re-stamped with a publication time."""
-        payload = message_on(topic)["payload"]
-        payload = dict(
-            payload,
-            id=notification_id or f"{payload['id']}-{pubtime}",
-            properties=dict(payload["properties"], pubtime=pubtime),
-        )
-
-        return (topic, payload)
-
     def last_seen_of(self, node):
         return NodeLastSeen.objects.get(node=node).last_message_at.isoformat()
 
     def test_storing_a_message_records_when_its_centre_was_last_heard_from(self):
-        store_notifications(self.source, [self.published_at("2026-08-11T10:00:00Z")])
+        store_notifications(self.source, [published_at("2026-08-11T10:00:00Z")])
 
         self.assertEqual(self.last_seen_of(self.node), "2026-08-11T10:00:00+00:00")
 
     def test_a_later_message_moves_last_seen_forward(self):
-        store_notifications(self.source, [self.published_at("2026-08-11T10:00:00Z")])
-        store_notifications(self.source, [self.published_at("2026-08-11T11:30:00Z")])
+        store_notifications(self.source, [published_at("2026-08-11T10:00:00Z")])
+        store_notifications(self.source, [published_at("2026-08-11T11:30:00Z")])
 
         self.assertEqual(self.last_seen_of(self.node), "2026-08-11T11:30:00+00:00")
 
     def test_an_older_message_does_not_move_last_seen_backwards(self):
-        store_notifications(self.source, [self.published_at("2026-08-11T11:30:00Z")])
-        store_notifications(self.source, [self.published_at("2026-08-11T10:00:00Z")])
+        store_notifications(self.source, [published_at("2026-08-11T11:30:00Z")])
+        store_notifications(self.source, [published_at("2026-08-11T10:00:00Z")])
 
         self.assertEqual(self.last_seen_of(self.node), "2026-08-11T11:30:00+00:00")
 
@@ -364,9 +514,9 @@ class LastSeenTests(StoreTestCase):
         store_notifications(
             self.source,
             [
-                self.published_at("2026-08-11T10:00:00Z"),
-                self.published_at("2026-08-11T12:15:00Z"),
-                self.published_at("2026-08-11T11:00:00Z"),
+                published_at("2026-08-11T10:00:00Z"),
+                published_at("2026-08-11T12:15:00Z"),
+                published_at("2026-08-11T11:00:00Z"),
             ],
         )
 
@@ -379,8 +529,8 @@ class LastSeenTests(StoreTestCase):
         store_notifications(
             self.source,
             [
-                self.published_at("2026-08-11T10:00:00Z"),
-                self.published_at("2026-08-11T09:00:00Z", topic=djibouti_topic),
+                published_at("2026-08-11T10:00:00Z"),
+                published_at("2026-08-11T09:00:00Z", topic=djibouti_topic),
             ],
         )
 
@@ -403,7 +553,7 @@ class LastSeenTests(StoreTestCase):
             node=self.node,
             host="wis.meteo.example.int",
         )
-        received = [self.published_at("2026-08-11T10:00:00Z")]
+        received = [published_at("2026-08-11T10:00:00Z")]
 
         store_notifications(self.source, received)
         store_notifications(origin, received)

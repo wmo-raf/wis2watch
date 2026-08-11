@@ -1,192 +1,115 @@
-"""Synchronisation against a node's own endpoints.
+"""What every synchronisation run does the same way.
 
-Nodes and datasets are no longer read from here: the Global Discovery
-Catalogue is the sole writer of the registry, and lives in
-:mod:`wis2watch.core.catalogue`. What a node is still asked directly is its
-station registry, which no catalogue carries.
+Every sync WIS2Watch runs -- the registry from a Global Discovery Catalogue,
+the stations a node's own registry declares -- reads an OGC API Features
+collection page by page and writes what it can. Two things are therefore said
+once, here, rather than once per sync:
+
+- **How a collection is read.** Page after page, following the server's own
+  ``next`` link, with a ceiling so that links which cycle cannot spin.
+- **What became of the records.** The same four counts, and a run that stepped
+  over a record it could not store succeeded only partly. That is what keeps
+  two sync logs comparable when they are read side by side on a node's page.
+
+What differs between the syncs -- which URL, which credentials, how long to
+wait -- stays with the sync that knows it.
 """
 
-import logging
+from dataclasses import dataclass
 
 import requests
-from django.contrib.gis.geos import Point
 from django.utils import timezone as dj_timezone
 
-logger = logging.getLogger(__name__)
+from .interpretation import next_page_url
+from .models import SyncLog
+
+CREATED = "created"
+UPDATED = "updated"
+ERRORED = "errored"
+
+#: A ceiling on paging, so a collection whose ``next`` links cycle cannot spin.
+MAX_PAGES = 50
+
+FETCH_TIMEOUT = 60
 
 
-def sync_stations(node_id):
+class PagingDidNotTerminate(Exception):
+    """Raised when a collection never stops offering another page.
+
+    A run that stopped at the ceiling has read part of a collection, and has no
+    way to know how much of it. That is a failed run rather than a short one:
+    reporting it as a success would leave a half-read registry indistinguishable
+    from a centre that really has only these stations.
     """
-    Fetch and sync stations declared by a WIS2 node's own station registry.
 
-    Each station resolves to the canonical Station keyed on its WIGOS station
-    identifier, and the node's declaration of it is recorded as provenance.
 
-    Args:
-        node_id: ID of the WIS2Node
+def fetch_pages(url, params=None, verify=True, timeout=FETCH_TIMEOUT, read_from=""):
+    """Every page of an OGC API Features collection, exactly as returned.
+
+    Paging follows the server's own ``next`` link rather than an offset we
+    compute, since that link already carries whatever query it needs to resume.
+    Only the first request supplies parameters.
+
+    ``read_from`` names what is being read, for the failure raised when the
+    collection never stops offering another page.
     """
-
-    from .models import WIS2Node, Station, StationSource, SyncLog
-
-    try:
-        node = WIS2Node.objects.get(id=node_id)
-        logger.info(f"Starting stations sync for {node.name}")
-
-        # Create sync log
-        sync_log = SyncLog.objects.create(
-            node=node,
-            sync_type=SyncLog.NODE_STATIONS,
-            status=SyncLog.FAILED
-        )
-
-        # Fetch stations
+    for _ in range(MAX_PAGES):
         response = requests.get(
-            node.stations_url,
-            timeout=30,
-            headers={'Accept': 'application/json'},
-            verify=node.verify_ssl,
+            url,
+            params=params,
+            timeout=timeout,
+            headers={"Accept": "application/json"},
+            verify=verify,
         )
         response.raise_for_status()
+        payload = response.json()
 
-        data = response.json()
-        features = data.get('features', [])
+        yield payload
 
-        stats = {
-            'found': len(features),
-            'created': 0,
-            'updated': 0,
-            'deleted': 0
-        }
+        url = next_page_url(payload)
+        if not url:
+            return
 
-        for feature in features:
-            try:
-                properties = feature.get('properties', {})
-                geometry = feature.get('geometry', {})
+        params = None
 
-                wigos_id = properties.get('wigos_station_identifier')
-                if not wigos_id:
-                    logger.warning(f"Station missing WIGOS ID: {feature}")
-                    continue
+    raise PagingDidNotTerminate(
+        f"stopped paging {read_from} after {MAX_PAGES} pages; "
+        "its next links do not terminate"
+    )
 
-                # Parse coordinates (lon, lat, altitude)
-                location = None
-                coords = geometry.get('coordinates', [])
-                if len(coords) >= 2:
-                    lon, lat = coords[0], coords[1]
-                    alt = coords[2] if len(coords) >= 3 else 0
-                    location = Point(lon, lat, alt, srid=4326)
 
-                defaults = {
-                    'name': properties.get('name', ''),
-                    'facility_type': properties.get('facility_type', ''),
-                    'territory': properties.get('territory_name', ''),
-                    'wmo_region': properties.get('wmo_region', ''),
-                }
+@dataclass
+class SyncCounts:
+    """What became of the records a run read.
 
-                if location:
-                    defaults['location'] = location
+    ``found`` is what the source offered that the run had any business with;
+    the rest is what became of it.
+    """
 
-                station, _station_created = Station.objects.update_or_create(
-                    wigos_id=wigos_id, defaults=defaults
-                )
+    found: int = 0
+    created: int = 0
+    updated: int = 0
+    errored: int = 0
 
-                # Record that this node declares the station. The counts track
-                # declarations rather than canonical stations, so a station
-                # another node already created still counts as new here.
-                _declaration, declared = StationSource.objects.update_or_create(
-                    station=station,
-                    source_type=StationSource.NODE_REGISTRY,
-                    node=node,
-                    defaults={
-                        'local_name': properties.get('name', ''),
-                        'local_id': properties.get('traditional_station_identifier', ''),
-                        'raw_json': feature,
-                        'last_seen': dj_timezone.now(),
-                    }
-                )
+    def record(self, outcome):
+        """Count one record's outcome: ``CREATED``, ``UPDATED`` or ``ERRORED``,
+        each of which names the field it counts into."""
+        setattr(self, outcome, getattr(self, outcome) + 1)
 
-                if declared:
-                    stats['created'] += 1
-                    logger.info(f"Node {node.centre_id} now declares station: {wigos_id}")
-                else:
-                    stats['updated'] += 1
-                    logger.info(f"Updated station declaration: {wigos_id}")
+    @property
+    def status(self):
+        """A run that stepped over records succeeded only partly."""
+        return SyncLog.PARTIAL if self.errored else SyncLog.SUCCESS
 
-            except Exception as e:
-                logger.error(f"Error processing station {e}")
-                continue
-
-        # Update sync log
-        sync_log.status = SyncLog.SUCCESS
-        sync_log.items_found = stats['found']
-        sync_log.items_created = stats['created']
-        sync_log.items_updated = stats['updated']
-        sync_log.items_deleted = stats['deleted']
+    def close(self, sync_log, status, error_message=""):
+        """Close a sync log off with these counts."""
+        sync_log.status = status
+        sync_log.error_message = error_message
+        sync_log.items_found = self.found
+        sync_log.items_created = self.created
+        sync_log.items_updated = self.updated
+        sync_log.items_errored = self.errored
         sync_log.completed_at = dj_timezone.now()
         sync_log.save()
 
-        logger.info(
-            f"Stations sync completed for {node.name}: "
-            f"Found={stats['found']}, Created={stats['created']}, "
-            f"Updated={stats['updated']}"
-        )
-
-        return stats, None
-
-    except Exception as e:
-        logger.error(f"Error syncing stations for node {node_id}: {e}")
-
-        # Update sync log
-        try:
-            if 'sync_log' in locals():
-                sync_log.status = SyncLog.FAILED
-                sync_log.error_message = str(e)
-                sync_log.completed_at = dj_timezone.now()
-                sync_log.save()
-            return None, e
-        except Exception as e:
-            return None, e
-
-
-def health_check_nodes():
-    """
-    Perform health checks on all active nodes.
-    """
-
-    from .models import WIS2Node
-
-    nodes = WIS2Node.objects.all()
-    results = []
-
-    for node in nodes:
-        try:
-            # Try to fetch discovery metadata endpoint
-            response = requests.get(
-                node.discovery_metadata_url,
-                timeout=10,
-                headers={'Accept': 'application/json'},
-                verify=node.verify_ssl,
-            )
-
-            if response.status_code == 200:
-                node.status = 'active'
-                node.last_check = dj_timezone.now()
-                node.last_error = ''
-                results.append({'node': node.name, 'status': 'healthy'})
-            else:
-                node.status = 'error'
-                node.last_error = f"HTTP {response.status_code}"
-                results.append({'node': node.name, 'status': 'unhealthy'})
-
-            node.save()
-
-        except Exception as e:
-            node.status = 'error'
-            node.last_error = str(e)
-            node.last_check = dj_timezone.now()
-            node.save()
-            results.append({'node': node.name, 'status': 'error', 'error': str(e)})
-
-    logger.info(f"Health check completed for {len(results)} nodes")
-
-    return results
+        return sync_log

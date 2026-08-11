@@ -1,3 +1,5 @@
+from unittest import mock
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from django.urls import reverse
@@ -9,6 +11,7 @@ from wis2watch.core.models import (
     NodeLastSeen,
     Station,
     StationSource,
+    SyncLog,
     WIS2Node,
 )
 from wis2watch.core.viewsets import (
@@ -16,6 +19,8 @@ from wis2watch.core.viewsets import (
     MessageSourceViewSet,
     WIS2NodeViewSet,
 )
+
+from .support import at
 
 
 class AdminSmokeTests(TestCase):
@@ -193,6 +198,25 @@ class NodeDetailViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "0-404-0-KE001")
 
+    def test_a_declared_station_that_has_never_transmitted_says_so(self):
+        """The declaration is confirmed hourly; only the observation is news."""
+        response = self.client.get(reverse("node_details", args=[self.node.id]))
+
+        self.assertContains(response, "Never")
+
+    def test_a_declared_station_shows_when_it_last_transmitted(self):
+        StationSource.objects.create(
+            station=Station.objects.get(wigos_id="0-404-0-KE001"),
+            source_type=StationSource.OBSERVED,
+            node=self.node,
+            last_seen=at("2026-08-11T10:45:00"),
+        )
+
+        response = self.client.get(reverse("node_details", args=[self.node.id]))
+
+        self.assertContains(response, "2026-08-11 10:45:00")
+        self.assertNotContains(response, "Never")
+
     def test_the_station_csv_preview_loads(self):
         response = self.client.get(reverse("preview_node_stations_csv", args=[self.node.id]))
 
@@ -210,3 +234,30 @@ class NodeDetailViewTests(TestCase):
         self.assertIn("0-404-0-KE001", rows[1])
         self.assertIn("Nairobi JKIA", rows[1])
         self.assertIn("63740", rows[1])
+
+    def test_syncing_a_node_by_hand_asks_it_for_its_stations(self):
+        """Datasets come from the catalogue; a node is asked only for stations."""
+        with mock.patch("wis2watch.core.views.sync_node_stations") as sync:
+            sync.return_value = SyncLog(
+                node=self.node,
+                sync_type=SyncLog.NODE_STATIONS,
+                status=SyncLog.SUCCESS,
+            )
+
+            response = self.client.post(
+                reverse("node_details", args=[self.node.id]), {"node_id": self.node.id}
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(sync.call_args.args[0], self.node)
+
+    def test_a_node_that_advertises_no_station_registry_says_so(self):
+        self.node.stations_url = ""
+        self.node.node_type = "other"
+        self.node.save()
+
+        response = self.client.post(
+            reverse("node_details", args=[self.node.id]), {"node_id": self.node.id}
+        )
+
+        self.assertContains(response, "advertises no station registry")

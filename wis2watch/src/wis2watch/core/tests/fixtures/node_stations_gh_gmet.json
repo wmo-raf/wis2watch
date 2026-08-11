@@ -1,0 +1,284 @@
+{
+ "type": "FeatureCollection",
+ "numberMatched": 9,
+ "numberReturned": 9,
+ "features": [
+  {
+   "id": "0-288-0-65487",
+   "type": "Feature",
+   "properties": {
+    "name": "Fumbisi Baasa",
+    "wigos_station_identifier": "0-288-0-65487",
+    "traditional_station_identifier": "",
+    "barometer_height": 165.2,
+    "facility_type": "landFixed",
+    "territory_name": "GHA",
+    "wmo_region": "africa",
+    "url": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65487",
+    "topic": "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+    "topics": [
+     "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop"
+    ],
+    "status": "operational",
+    "id": "0-288-0-65487"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -1.2927,
+     10.4195,
+     164.0
+    ]
+   }
+  },
+  {
+   "id": "0-20000-0-65457",
+   "type": "Feature",
+   "properties": {
+    "name": "AKIM ODA",
+    "wigos_station_identifier": "0-20000-0-65457",
+    "traditional_station_identifier": "65457",
+    "barometer_height": 139.4,
+    "facility_type": "landFixed",
+    "territory_name": "GHA",
+    "wmo_region": "africa",
+    "url": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-20000-0-65457",
+    "topic": "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+    "topics": [
+     "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop"
+    ],
+    "status": "operational",
+    "id": "0-20000-0-65457"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -0.9833333333,
+     5.9333333333,
+     139.4
+    ]
+   }
+  },
+  {
+   "id": "0-20000-0-65445",
+   "type": "Feature",
+   "properties": {
+    "name": "SEFWI BEKWAI",
+    "wigos_station_identifier": "0-20000-0-65445",
+    "traditional_station_identifier": "65445",
+    "barometer_height": 172.0,
+    "facility_type": "landFixed",
+    "territory_name": "GHA",
+    "wmo_region": "africa",
+    "url": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-20000-0-65445",
+    "topic": "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+    "topics": [
+     "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop"
+    ],
+    "status": "operational",
+    "id": "0-20000-0-65445"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -2.3333333333,
+     6.2,
+     170.8
+    ]
+   }
+  },
+  {
+   "id": "0-288-0-65471",
+   "type": "Feature",
+   "properties": {
+    "name": "SUHUM",
+    "wigos_station_identifier": "0-288-0-65471",
+    "traditional_station_identifier": "65471",
+    "facility_type": "landFixed",
+    "territory_name": "GHA",
+    "barometer_height": 191.2,
+    "wmo_region": "africa",
+    "url": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65471",
+    "topics": [
+     "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop"
+    ],
+    "status": "operational",
+    "id": "0-288-0-65471"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -0.4531895,
+     6.0355832,
+     190
+    ]
+   }
+  },
+  {
+   "id": "0-288-0-65476",
+   "type": "Feature",
+   "properties": {
+    "name": "Tema",
+    "wigos_station_identifier": "0-288-0-65476",
+    "traditional_station_identifier": "",
+    "barometer_height": 13.2,
+    "facility_type": "landFixed",
+    "territory_name": "GHA",
+    "wmo_region": "africa",
+    "url": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65476",
+    "topic": "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+    "topics": [
+     "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop"
+    ],
+    "status": "operational",
+    "id": "0-288-0-65476"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     0.0,
+     5.62,
+     12.2
+    ]
+   }
+  },
+  {
+   "id": "0-288-0-65450",
+   "type": "Feature",
+   "properties": {
+    "name": "ABETIFI",
+    "wigos_station_identifier": "0-288-0-65450",
+    "traditional_station_identifier": "65450",
+    "facility_type": "landFixed",
+    "territory_name": "GHA",
+    "barometer_height": 595.9,
+    "wmo_region": "africa",
+    "url": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65450",
+    "topics": [
+     "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop"
+    ],
+    "status": "operational",
+    "id": "0-288-0-65450"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -0.75,
+     6.66667,
+     594.7
+    ]
+   }
+  },
+  {
+   "id": "0-288-0-65492",
+   "type": "Feature",
+   "properties": {
+    "name": "Dormaa-Aboabo",
+    "wigos_station_identifier": "0-288-0-65492",
+    "traditional_station_identifier": "",
+    "barometer_height": 76.2,
+    "facility_type": "landFixed",
+    "territory_name": "GHA",
+    "wmo_region": "africa",
+    "url": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65492",
+    "topic": "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+    "topics": [
+     "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop"
+    ],
+    "status": "operational",
+    "id": "0-288-0-65492"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -2.8054,
+     7.2153,
+     75.0
+    ]
+   }
+  },
+  {
+   "id": "0-288-0-65495",
+   "type": "Feature",
+   "properties": {
+    "name": "Anloga",
+    "wigos_station_identifier": "0-288-0-65495",
+    "traditional_station_identifier": "",
+    "barometer_height": 58.2,
+    "facility_type": "landFixed",
+    "territory_name": "GHA",
+    "wmo_region": "africa",
+    "url": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65495",
+    "topic": "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+    "topics": [
+     "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop"
+    ],
+    "status": "operational",
+    "id": "0-288-0-65495"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     0.8973,
+     5.7947,
+     57.0
+    ]
+   }
+  },
+  {
+   "id": "0-288-0-65478",
+   "type": "Feature",
+   "properties": {
+    "name": "Jirapa",
+    "wigos_station_identifier": "0-288-0-65478",
+    "traditional_station_identifier": "",
+    "barometer_height": 304.2,
+    "facility_type": "landFixed",
+    "territory_name": "GHA",
+    "wmo_region": "africa",
+    "url": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65478",
+    "topic": "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop",
+    "topics": [
+     "origin/a/wis2/gh-gmet/data/core/weather/surface-based-observations/synop"
+    ],
+    "status": "operational",
+    "id": "0-288-0-65478"
+   },
+   "geometry": {
+    "type": "Point",
+    "coordinates": [
+     -2.7194,
+     10.5346,
+     303.0
+    ]
+   }
+  }
+ ],
+ "links": [
+  {
+   "type": "application/geo+json",
+   "rel": "self",
+   "title": "This document as GeoJSON",
+   "href": "https://wis2.meteo.gov.gh/oapi/collections/stations/items?f=json&limit=500"
+  },
+  {
+   "rel": "alternate",
+   "type": "application/ld+json",
+   "title": "This document as RDF (JSON-LD)",
+   "href": "https://wis2.meteo.gov.gh/oapi/collections/stations/items?f=jsonld&limit=500"
+  },
+  {
+   "type": "text/html",
+   "rel": "alternate",
+   "title": "This document as HTML",
+   "href": "https://wis2.meteo.gov.gh/oapi/collections/stations/items?f=html&limit=500"
+  },
+  {
+   "type": "application/json",
+   "title": "Stations",
+   "rel": "collection",
+   "href": "https://wis2.meteo.gov.gh/oapi/collections/stations"
+  }
+ ],
+ "timeStamp": "2026-08-11T20:54:23.880475Z"
+}

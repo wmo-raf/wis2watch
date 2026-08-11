@@ -6,10 +6,10 @@ from django.core.management import call_command
 
 from wis2watch.config.celery import app
 from .catalogue import sync_catalogues
+from .node_stations import sync_node_stations
 from .propagation import evaluate_propagation
 from .retention import expire_raw_messages
 from .rollups import update_rollups
-from .sync import sync_stations
 
 logger = get_task_logger(__name__)
 
@@ -50,34 +50,47 @@ def run_sync_catalogues():
     return [log.id for log in logs]
 
 
-@shared_task(bind=True, max_retries=3)
-def run_sync_stations(self, node_id):
-    stats, exc = sync_stations(node_id)
-    
-    if not stats and exc:
-        logger.error(f"[STATION SYNC] No stats returned for node {node_id}. Retrying...")
-        
-        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
-    
-    return stats
+@shared_task
+def run_sync_node_stations(node_id):
+    """Ask one node what stations it declares.
+
+    Failures are diagnostic state rather than task failures: a node that cannot
+    be reached is recorded on its own sync log, and the next scheduled run asks
+    again. Retrying here would only duplicate the schedule.
+    """
+    from .models import WIS2Node
+
+    sync_log = sync_node_stations(WIS2Node.objects.get(id=node_id))
+
+    if sync_log is None:
+        return None
+
+    logger.info("[STATION SYNC] %s: %s", sync_log.node.centre_id, sync_log.summary)
+
+    return sync_log.id
 
 
 @shared_task
 def run_sync_all_node_stations():
-    """
-    Trigger a station registry sync for every node.
-    Should be run periodically (e.g., every hour).
+    """Ask every node for its stations, so new ones need no manual trigger.
+
+    One task per node rather than one run over all of them: each is an HTTP
+    fetch against a different centre, and many African nodes are slow or
+    unreachable from outside. Fanning out keeps one of those from holding up
+    the rest of the region.
     """
     from .models import WIS2Node
 
-    nodes = WIS2Node.objects.all()
+    node_ids = list(
+        WIS2Node.objects.exclude(stations_url="").values_list("id", flat=True)
+    )
 
-    logger.info(f"Starting station sync for {nodes.count()} nodes")
+    logger.info("[STATION SYNC] queueing %s nodes", len(node_ids))
 
-    for node in nodes:
-        run_sync_stations.delay(node.id)
+    for node_id in node_ids:
+        run_sync_node_stations.delay(node_id)
 
-    logger.info("Station sync tasks queued for all nodes")
+    return node_ids
 
 
 @shared_task
