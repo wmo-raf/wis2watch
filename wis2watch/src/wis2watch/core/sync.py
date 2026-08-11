@@ -253,10 +253,14 @@ def sync_stations(node_id):
                 if location:
                     defaults['location'] = location
 
-                station, created = Station.objects.update_or_create(wigos_id=wigos_id, defaults=defaults)
+                station, _station_created = Station.objects.update_or_create(
+                    wigos_id=wigos_id, defaults=defaults
+                )
 
-                # Record that this node declares the station
-                StationSource.objects.update_or_create(
+                # Record that this node declares the station. The counts track
+                # declarations rather than canonical stations, so a station
+                # another node already created still counts as new here.
+                _declaration, declared = StationSource.objects.update_or_create(
                     station=station,
                     source_type=StationSource.NODE_REGISTRY,
                     node=node,
@@ -268,12 +272,12 @@ def sync_stations(node_id):
                     }
                 )
 
-                if created:
+                if declared:
                     stats['created'] += 1
-                    logger.info(f"Created station: {wigos_id}")
+                    logger.info(f"Node {node.centre_id} now declares station: {wigos_id}")
                 else:
                     stats['updated'] += 1
-                    logger.info(f"Updated station: {wigos_id}")
+                    logger.info(f"Updated station declaration: {wigos_id}")
 
             except Exception as e:
                 logger.error(f"Error processing station {e}")

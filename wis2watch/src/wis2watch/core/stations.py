@@ -27,12 +27,7 @@ def node_stations_as_csv(node, output_file):
     ]
     writer.writerow(header)
 
-    declarations = StationSource.objects.filter(
-        node=node,
-        source_type=StationSource.NODE_REGISTRY,
-    ).select_related("station").order_by("station__name")
-
-    for declaration in declarations:
+    for declaration in StationSource.objects.declared_by_node_registry(node):
         station = declaration.station
         location = station.location
         properties = (declaration.raw_json or {}).get("properties", {})

@@ -217,13 +217,15 @@ def _prepare_notification_message(item: dict) -> NotificationMessage | None:
         return None
 
     # The publication time partitions the hypertable and takes part in the
-    # per-source uniqueness of a notification, so it must be stable across
-    # redeliveries. Falling back to the receipt time keeps a notification that
-    # omits pubtime storable, since the batch carries a fixed receipt time.
+    # per-source uniqueness of a notification, so it has to be a property of
+    # the notification itself. A receipt-time fallback would differ between
+    # redeliveries of the same notification and defeat that uniqueness, so a
+    # message with no usable pubtime is discarded rather than stored under a
+    # time we invented.
     publication_time = _parse_datetime(properties.get('pubtime'))
     if publication_time is None:
-        publication_time = _parse_datetime(item.get('timestamp')) or dj_timezone.now()
-        logger.warning(f"Message {notification_id} has no usable pubtime; using receipt time")
+        logger.warning(f"Discarding message {notification_id}: no usable pubtime")
+        return None
 
     metadata_id = properties.get('metadata_id', '') or ''
     dataset = Dataset.objects.filter(identifier=metadata_id).first() if metadata_id else None

@@ -81,6 +81,25 @@ class MessageSourceTests(TestCase):
 
         self.assertIsNone(source.node)
 
+    def test_a_node_may_hold_more_than_one_kind_of_source(self):
+        node = make_node()
+        make_source(
+            name="KMD origin",
+            source_type=MessageSource.ORIGIN_BROKER,
+            host="broker.kmd.test",
+            node=node,
+        )
+
+        make_source(
+            name="Global broker feed for KMD",
+            source_type=MessageSource.GLOBAL_BROKER,
+            host="globalbroker.example.test",
+            node=node,
+        )
+
+        self.assertEqual(node.message_sources.count(), 2)
+        self.assertEqual(node.origin_source.host, "broker.kmd.test")
+
 
 class NotificationMessageTests(TestCase):
     def setUp(self):

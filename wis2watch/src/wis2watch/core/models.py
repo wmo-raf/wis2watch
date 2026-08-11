@@ -265,10 +265,13 @@ class MessageSource(TimeStampedModel):
     class Meta:
         ordering = ["source_type", "name"]
         constraints = [
+            # A node has one broker of any given kind. The source type takes
+            # part so that a node can later gain a second vantage point (a
+            # cache feed, say) without a schema change.
             models.UniqueConstraint(
-                fields=["node"],
+                fields=["node", "source_type"],
                 condition=models.Q(node__isnull=False),
-                name="unique_broker_per_node",
+                name="unique_source_type_per_node",
             ),
         ]
         verbose_name = _("Message Source")
@@ -378,6 +381,16 @@ class Station(TimeStampedModel):
         return f"{self.name or self.wigos_id} ({self.wigos_id})"
 
 
+class StationSourceQuerySet(models.QuerySet):
+    def declared_by_node_registry(self, node):
+        """A node's own registry declarations, ready to list or export."""
+        return (
+            self.filter(node=node, source_type=StationSource.NODE_REGISTRY)
+            .select_related("station")
+            .order_by("station__name")
+        )
+
+
 class StationSource(TimeStampedModel):
     """
     One source's declaration of a station.
@@ -421,6 +434,8 @@ class StationSource(TimeStampedModel):
     raw_json = models.JSONField(null=True, blank=True)
     first_seen = models.DateTimeField(default=dj_timezone.now)
     last_seen = models.DateTimeField(null=True, blank=True)
+
+    objects = StationSourceQuerySet.as_manager()
 
     class Meta:
         ordering = ["station", "source_type"]

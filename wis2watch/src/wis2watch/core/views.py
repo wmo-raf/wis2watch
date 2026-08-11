@@ -117,10 +117,7 @@ def node_details(request, node_id):
         {"url": "", "label": node.name},
     ]
 
-    station_declarations = StationSource.objects.filter(
-        node=node,
-        source_type=StationSource.NODE_REGISTRY,
-    ).select_related("station").order_by("station__name")
+    station_declarations = StationSource.objects.declared_by_node_registry(node)
 
     context = {
         "breadcrumbs_items": breadcrumbs_items,
