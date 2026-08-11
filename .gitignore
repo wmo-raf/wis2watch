@@ -178,3 +178,4 @@ wis2watch/src/wis2watch/static
 wis2watch/src/wis2watch/media
 
 backup/
+.claude/settings.local.json
