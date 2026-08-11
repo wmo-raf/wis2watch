@@ -6,6 +6,7 @@ from django.core.management import call_command
 
 from wis2watch.config.celery import app
 from .catalogue import sync_catalogues
+from .propagation import evaluate_propagation
 from .retention import expire_raw_messages
 from .rollups import update_rollups
 from .sync import sync_stations
@@ -90,6 +91,22 @@ def run_update_rollups():
     counts = update_rollups()
 
     logger.info("[ROLLUPS] %s", counts.summary)
+
+    return counts.summary
+
+
+@shared_task
+def run_evaluate_propagation():
+    """Record what the centres published and the world never saw.
+
+    Runs well inside the forensic window and re-examines a trailing one, so a
+    missed run costs nothing: the gaps are found by the next. It has to run at
+    all, though -- once the raw messages expire the evidence is gone, and the
+    finding cannot be made again.
+    """
+    counts = evaluate_propagation()
+
+    logger.info("[PROPAGATION] %s", counts.summary)
 
     return counts.summary
 

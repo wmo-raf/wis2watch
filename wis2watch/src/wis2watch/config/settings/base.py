@@ -315,6 +315,21 @@ WIS2WATCH_RAW_RETENTION_DAYS = env.int("WIS2WATCH_RAW_RETENTION_DAYS", 14)
 # missed run corrects itself.
 WIS2WATCH_ROLLUP_WINDOW_HOURS = env.int("WIS2WATCH_ROLLUP_WINDOW_HOURS", 48)
 
+# How long a notification published at a node's own broker is given to appear
+# on the Global Broker before its absence is recorded as a propagation gap, in
+# minutes. Long enough to absorb ordinary propagation latency: reporting normal
+# delay as loss would make the finding worthless.
+WIS2WATCH_PROPAGATION_GRACE_MINUTES = env.int(
+    "WIS2WATCH_PROPAGATION_GRACE_MINUTES", 15
+)
+
+# How far back each propagation evaluation re-examines, in hours. Clamped to
+# the raw retention window in any case, beyond which the rows that would prove
+# a notification did arrive are gone too.
+WIS2WATCH_PROPAGATION_WINDOW_HOURS = env.int(
+    "WIS2WATCH_PROPAGATION_WINDOW_HOURS", 48
+)
+
 # How long a centre may be quiet before the node overview calls it stale. A
 # flat threshold for sorting the table; judging silence against each dataset's
 # own learned cadence is a separate and more careful question.
@@ -375,6 +390,10 @@ CELERY_BEAT_SCHEDULE = {
     },
     'update-rollups': {
         'task': 'wis2watch.core.tasks.run_update_rollups',
+        'schedule': 900.0,  # Every 15 minutes
+    },
+    'evaluate-propagation': {
+        'task': 'wis2watch.core.tasks.run_evaluate_propagation',
         'schedule': 900.0,  # Every 15 minutes
     },
     'expire-raw-messages': {
