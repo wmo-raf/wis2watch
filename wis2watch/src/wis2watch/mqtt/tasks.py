@@ -1,13 +1,11 @@
 import logging
-from datetime import datetime, timezone
 
 from celery import shared_task
 from django.core.cache import cache
 from django.db import transaction
-from django.utils import timezone as dj_timezone
 
-from ..core.models import StationMQTTMessageLog, Station, Dataset
-from ..core.sync import sync_metadata
+from ..core.interpretation import parse_notification
+from ..core.models import Dataset, NotificationMessage, Station
 
 logger = logging.getLogger(__name__)
 
@@ -103,12 +101,16 @@ def monitor_all_active_nodes():
     Checks GLOBAL state (Redis Locks) to prevent duplicate tasks across workers.
     Run this every 5 minutes.
     """
-    from wis2watch.core.models import WIS2Node
-    
+    from wis2watch.core.models import MessageSource, WIS2Node
+
     logger.info("Checking all active nodes for monitoring status")
-    
+
     try:
-        active_nodes = WIS2Node.objects.all()
+        # Only nodes with a reachable-in-principle origin broker can be monitored
+        active_nodes = WIS2Node.objects.filter(
+            message_sources__source_type=MessageSource.ORIGIN_BROKER,
+            message_sources__is_active=True,
+        ).distinct()
         logger.info(f"Found {active_nodes.count()} nodes")
         
         started_count = 0
@@ -180,104 +182,83 @@ def health_check_mqtt_clients():
         return None
 
 
-def _prepare_observation_record(node_id: int, payload: dict) -> StationMQTTMessageLog | None:
+def _prepare_notification_message(item: dict) -> NotificationMessage | None:
     """
-    Helper function to parse payload and prepare a StationMQTTMessageLog instance.
-    Returns None if validation fails or required objects (Station/Dataset) are missing.
-    Does NOT save the record to the database.
+    Turn a received payload into an unsaved NotificationMessage.
+
+    Reading the payload is the interpretation seam's job; this resolves what it
+    returns against the registry. An unknown topic, an unknown dataset and a
+    missing station identifier are all recorded rather than rejected --
+    unknown-topic traffic is a finding, not noise.
+
+    A message the seam cannot identify in time -- no notification UUID, or no
+    usable publication time -- is discarded, since the publication time
+    partitions the hypertable and takes part in the per-source uniqueness of a
+    notification.
+
+    Args:
+        item: {'node_id': int, 'source_id': int, 'topic': str,
+               'payload': dict, 'timestamp': str}
     """
-    # [cite_start]1. Extract IDs [cite: 865, 866, 867]
-    message_id = payload.get('id')
-    properties = payload.get('properties', {})
-    wigos_id = properties.get('wigos_station_identifier')
-    metadata_id = properties.get('metadata_id')
-    
-    if not message_id or not wigos_id or not metadata_id:
-        logger.warning(
-            f"Message missing required fields (ID: {message_id}, WIGOS: {wigos_id}, Metadata: {metadata_id})")
+    payload = item['payload']
+
+    notification = parse_notification(payload)
+    if notification is None:
+        notification_id = payload.get('id')
+        reason = "no usable pubtime" if notification_id else "no notification UUID"
+        logger.warning(f"Discarding message {notification_id or '<unidentified>'}: {reason}")
         return None
-    
-    # [cite_start]2. Find Station (with Sync Fallback) [cite: 868-872]
-    try:
-        station = Station.objects.get(wigos_id=wigos_id)
-    except Station.DoesNotExist:
-        # Attempt metadata sync if station missing
-        try:
-            logger.info(f"Station {wigos_id} missing. Triggering sync for node {node_id}...")
-            sync_metadata(node_id)
-            station = Station.objects.get(wigos_id=wigos_id)
-        except Station.DoesNotExist:
-            logger.error(f"Station {wigos_id} not found even after metadata sync.")
-            return None
-        except Exception as e:
-            logger.error(f"Error during metadata sync resolution: {e}")
-            raise e  # Let the caller handle retry logic
-    
-    # [cite_start]3. Find Dataset [cite: 872-873]
-    try:
-        dataset = Dataset.objects.get(identifier=metadata_id)
-    except Dataset.DoesNotExist:
-        logger.warning(f"Dataset not found for metadata_id {metadata_id}")
-        return None
-    
-    # [cite_start]4. Parse Timestamps [cite: 874-878]
-    observation_datetime = None
-    publish_datetime = dj_timezone.now()
-    
-    try:
-        if dt_str := properties.get('datetime'):
-            dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
-            observation_datetime = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-        
-        if pubtime_str := properties.get('pubtime'):
-            pt = datetime.fromisoformat(pubtime_str.replace('Z', '+00:00'))
-            publish_datetime = pt if pt.tzinfo else pt.replace(tzinfo=timezone.utc)
-    except ValueError as e:
-        logger.warning(f"Error parsing timestamps for message {message_id}: {e}")
-        # Continue with defaults if possible, or return None if critical
-    
-    # [cite_start]5. Extract Link [cite: 879]
-    links = payload.get('links', [])
-    canonical_link = next((link.get('href', '') for link in links if link.get('rel') == 'canonical'), '')
-    
-    # [cite_start]6. Instantiate Object (Unsaved) [cite: 880]
-    return StationMQTTMessageLog(
-        station=station,
+
+    dataset = (
+        Dataset.objects.filter(identifier=notification.metadata_id).first()
+        if notification.metadata_id
+        else None
+    )
+
+    # Station attribution comes only from the message's own WIGOS station
+    # identifier. A message without one is unattributed, never guessed at.
+    station = (
+        Station.objects.filter(wigos_id=notification.wigos_station_id).first()
+        if notification.is_attributed
+        else None
+    )
+
+    return NotificationMessage(
+        source_id=item['source_id'],
+        node_id=item.get('node_id'),
         dataset=dataset,
-        message_id=message_id,
-        data_id=properties.get('data_id', ''),
-        time=observation_datetime,
-        publish_datetime=publish_datetime,
-        canonical_link=canonical_link,
+        station=station,
+        notification_id=notification.notification_id,
+        topic=item.get('topic', ''),
+        wigos_station_id=notification.wigos_station_id,
+        data_id=notification.data_id,
+        metadata_id=notification.metadata_id,
+        time=notification.publication_time,
+        canonical_link=notification.canonical_link,
         raw_json=payload
     )
 
 
 @shared_task(bind=True, max_retries=3)
-def process_mqtt_message(self, node_id: int, topic: str, payload: dict, timestamp: str):
+def process_mqtt_message(self, node_id: int, source_id: int, topic: str, payload: dict, timestamp: str):
     """
     Process a single MQTT message.
     """
     try:
-        record = _prepare_observation_record(node_id, payload)
-        
+        record = _prepare_notification_message({
+            'node_id': node_id,
+            'source_id': source_id,
+            'topic': topic,
+            'payload': payload,
+            'timestamp': timestamp,
+        })
+
         if record:
-            # [cite_start]Atomic get_or_create logic to prevent duplicates [cite: 880]
-            # Since _prepare returns an instance, we use its attributes for the lookup
-            StationMQTTMessageLog.objects.get_or_create(
-                message_id=record.message_id,
-                station=record.station,
-                defaults={
-                    'dataset': record.dataset,
-                    'data_id': record.data_id,
-                    'time': record.time,
-                    'publish_datetime': record.publish_datetime,
-                    'canonical_link': record.canonical_link,
-                    'raw_json': record.raw_json
-                }
-            )
-            logger.info(f"Stored observation: {record.message_id}")
-    
+            # The unique constraint on (source, notification UUID, time) makes
+            # a redelivered notification a no-op rather than a duplicate row.
+            NotificationMessage.objects.bulk_create([record], ignore_conflicts=True)
+            logger.info(f"Stored notification message: {record.notification_id}")
+
     except Exception as e:
         logger.error(f"Error processing message: {e}", exc_info=True)
         raise self.retry(exc=e, countdown=30)
@@ -289,31 +270,32 @@ def process_mqtt_message_batch(self, batch_data: list):
     Process a batch of MQTT messages in a single transaction.
     Args:
         batch_data: List of dicts, each containing:
-                    {'node_id': int, 'topic': str, 'payload': dict, 'timestamp': str}
+                    {'node_id': int, 'source_id': int, 'topic': str,
+                     'payload': dict, 'timestamp': str}
     """
     records_to_create = []
-    
+
     try:
         # 1. Prepare all records in memory
         for item in batch_data:
             try:
-                record = _prepare_observation_record(item['node_id'], item['payload'])
+                record = _prepare_notification_message(item)
                 if record:
                     records_to_create.append(record)
             except Exception as e:
                 # Log individual failures but don't fail the whole batch
                 logger.error(f"Failed to prepare record in batch: {e}")
-        
+
         # 2. Bulk insert
         if records_to_create:
             with transaction.atomic():
-                # ignore_conflicts=True handles duplicate message_ids gracefully
-                created = StationMQTTMessageLog.objects.bulk_create(
+                # ignore_conflicts=True handles redelivered notifications gracefully
+                created = NotificationMessage.objects.bulk_create(
                     records_to_create,
                     ignore_conflicts=True
                 )
                 logger.info(f"Batch processed: {len(created)} records created out of {len(batch_data)} received.")
-    
+
     except Exception as e:
         logger.error(f"Critical error processing batch: {e}", exc_info=True)
         # We retry the batch on critical DB errors, though this might re-process good items

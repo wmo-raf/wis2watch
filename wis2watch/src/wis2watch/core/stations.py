@@ -1,19 +1,18 @@
-def dataset_stations_as_csv(dataset, output_file):
+import csv
+
+
+def node_stations_as_csv(node, output_file):
     """
-    Convert a dataset of stations to CSV format.
+    Write the stations a node's own registry declares, as CSV.
 
     Args:
-        dataset (Dataset): Dataset object
-        output_file file-like: File-like object to write CSV data to
-
-    Returns:
-        str: CSV formatted string of stations
+        node (WIS2Node): the node whose declared stations to export
+        output_file (file-like): file-like object to write CSV data to
     """
-    import csv
-    
+    from .models import StationSource
+
     writer = csv.writer(output_file)
-    
-    # Write header
+
     header = [
         "station_name",
         "wigos_station_identifier",
@@ -27,30 +26,23 @@ def dataset_stations_as_csv(dataset, output_file):
         "wmo_region"
     ]
     writer.writerow(header)
-    
-    stations = dataset.stations.all()
-    
-    # Write station data
-    for station in stations:
-        raw_json = station.raw_json
-        properties = raw_json.get("properties", {})
-        geometry = raw_json.get("geometry", {})
-        coordinates = geometry.get("coordinates", None)
-        
-        if not coordinates:
-            continue
-        
+
+    for declaration in StationSource.objects.declared_by_node_registry(node):
+        station = declaration.station
+        location = station.location
+        properties = (declaration.raw_json or {}).get("properties", {})
+
         row = [
-            properties.get("name", "").replace(",", ""),
-            properties.get("wigos_station_identifier", ""),
-            properties.get("traditional_station_identifier", ""),
-            properties.get("facility_type", ""),
-            coordinates[1],  # latitude
-            coordinates[0],  # longitude
-            coordinates[2],  # elevation
+            (declaration.local_name or station.name).replace(",", ""),
+            station.wigos_id,
+            declaration.local_id,
+            station.facility_type,
+            location.y if location else "",  # latitude
+            location.x if location else "",  # longitude
+            location.z if location else "",  # elevation
             properties.get("barometer_height", ""),
-            properties.get("territory_name", ""),
-            properties.get("wmo_region", "")
+            station.territory,
+            station.wmo_region,
         ]
-        
+
         writer.writerow(row)

@@ -95,21 +95,28 @@ class MQTTMonitoringService:
                 self._release_lock(node_id)
                 return False
             
+            origin_source = node.origin_source
+            if not origin_source:
+                logger.error(f"Node {node_id} has no origin broker configured")
+                self._release_lock(node_id)
+                return False
+
             # Thread-safe client management
             with self._lock:
                 # Stop existing client if any
                 if node_id in self.clients:
                     logger.info(f"Stopping existing client for node {node_id}")
                     self._stop_node_internal(node_id)
-                
+
                 # Create new client
                 try:
                     client = MQTTNodeClient(
                         node_id=node_id,
-                        broker_host=node.mqtt_host,
-                        broker_port=node.mqtt_port,
-                        username=node.mqtt_username,
-                        password=node.mqtt_password,
+                        source_id=origin_source.id,
+                        broker_host=origin_source.host,
+                        broker_port=origin_source.port,
+                        username=origin_source.username,
+                        password=origin_source.password,
                         topics=node.get_topics()
                     )
                 except ValueError as e:

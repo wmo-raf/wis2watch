@@ -273,9 +273,6 @@
                             <span class="badge badge-{{ dataset.status }}">
                             {{ dataset.get_status_display }}
                         </span>
-                            <span class="station-count">
-                            {{ dataset.stations.count }} {% trans "station" %}{{ dataset.stations.count|pluralize }}
-                        </span>
                         </div>
                     </div>
                     <span class="toggle-icon" id="toggle-{{ dataset.id }}">▼</span>
@@ -304,74 +301,6 @@
                             <span class="info-value">{{ dataset.last_synced|date:"Y-m-d H:i:s"|default:"—" }}</span>
                         </div>
                     </div>
-
-                    <!-- Stations Section -->
-                    <div class="stations-section">
-                        <div class="stations-header">
-                            <h5 class="stations-title">
-                                {% trans "Stations" %} ({{ dataset.stations.count }})
-                            </h5>
-                            {% if dataset.stations.count > 0 %}
-                                {% if dataset.stations.count > 0 %}
-                                    <div>
-                                        <a href="{% url 'preview_dataset_stations_csv' dataset.id %}"
-                                           class="button bicolor button--icon button-secondary button-small">
-                                                     <span class="icon-wrapper">
-                                                         <svg class="icon icon-view" aria-hidden="true">
-                                                             <use href="#icon-view"></use>
-                                                         </svg>
-                                                     </span>
-                                            {% trans "Preview CSV" %}
-                                        </a>
-                                        <a href="{% url 'get_dataset_stations_csv' dataset.id %}"
-                                           class="button bicolor button--icon button-small">
-                                                        <span class="icon-wrapper">
-                                                            <svg class="icon download" aria-hidden="true">
-                                                                <use href="#icon-download"></use>
-                                                            </svg>
-                                                        </span>
-                                            {% trans "Download CSV" %}
-                                        </a>
-                                    </div>
-                                {% endif %}
-                            {% endif %}
-                        </div>
-
-                        {% if dataset.stations.all %}
-                            <table class="listing stations-table">
-                                <thead>
-                                <tr>
-                                    <th>{% trans "WIGOS ID" %}</th>
-                                    <th>{% trans "Name" %}</th>
-                                    <th>{% trans "Facility Type" %}</th>
-                                    <th>{% trans "Location" %}</th>
-                                    <th>{% trans "Last Synced" %}</th>
-                                </tr>
-                                </thead>
-                                <tbody>
-                                {% for station in dataset.stations.all %}
-                                    <tr>
-                                        <td><code>{{ station.wigos_id }}</code></td>
-                                        <td>{{ station.name }}</td>
-                                        <td>{{ station.get_facility_type_display }}</td>
-                                        <td>
-                                            {{ station.location.y|floatformat:4 }}°,
-                                            {{ station.location.x|floatformat:4 }}°
-                                            {% if station.location.z %}
-                                                ({{ station.location.z|floatformat:0 }}m)
-                                            {% endif %}
-                                        </td>
-                                        <td>{{ station.last_synced|date:"Y-m-d H:i:s"|default:"—" }}</td>
-                                    </tr>
-                                {% endfor %}
-                                </tbody>
-                            </table>
-                        {% else %}
-                            <div class="no-stations">
-                                {% trans "No stations associated with this dataset" %}
-                            </div>
-                        {% endif %}
-                    </div>
                 </div>
             </div>
         {% endfor %}
@@ -380,6 +309,78 @@
             <p>{% trans "No datasets found for this node" %}</p>
         </div>
     {% endif %}
+
+    <!-- Stations Section -->
+    <div class="stations-section">
+        <div class="stations-header">
+            <h3 class="stations-title">
+                {% trans "Stations declared by this node" %} ({{ station_count }})
+            </h3>
+            {% if station_count %}
+                <div>
+                    <a href="{% url 'preview_node_stations_csv' node.id %}"
+                       class="button bicolor button--icon button-secondary button-small">
+                                 <span class="icon-wrapper">
+                                     <svg class="icon icon-view" aria-hidden="true">
+                                         <use href="#icon-view"></use>
+                                     </svg>
+                                 </span>
+                        {% trans "Preview CSV" %}
+                    </a>
+                    <a href="{% url 'get_node_stations_csv' node.id %}"
+                       class="button bicolor button--icon button-small">
+                                    <span class="icon-wrapper">
+                                        <svg class="icon download" aria-hidden="true">
+                                            <use href="#icon-download"></use>
+                                        </svg>
+                                    </span>
+                        {% trans "Download CSV" %}
+                    </a>
+                </div>
+            {% endif %}
+        </div>
+
+        {% if station_declarations %}
+            <table class="listing stations-table">
+                <thead>
+                <tr>
+                    <th>{% trans "WIGOS ID" %}</th>
+                    <th>{% trans "Name" %}</th>
+                    <th>{% trans "Local ID" %}</th>
+                    <th>{% trans "Facility Type" %}</th>
+                    <th>{% trans "Location" %}</th>
+                    <th>{% trans "Last Seen" %}</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for declaration in station_declarations %}
+                    <tr>
+                        <td><code>{{ declaration.station.wigos_id }}</code></td>
+                        <td>{{ declaration.local_name|default:declaration.station.name }}</td>
+                        <td>{{ declaration.local_id|default:"—" }}</td>
+                        <td>{{ declaration.station.get_facility_type_display|default:"—" }}</td>
+                        <td>
+                            {% if declaration.station.location %}
+                                {{ declaration.station.location.y|floatformat:4 }}°,
+                                {{ declaration.station.location.x|floatformat:4 }}°
+                                {% if declaration.station.location.z %}
+                                    ({{ declaration.station.location.z|floatformat:0 }}m)
+                                {% endif %}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
+                        <td>{{ declaration.last_seen|date:"Y-m-d H:i:s"|default:"—" }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        {% else %}
+            <div class="no-stations">
+                {% trans "This node's station registry has declared no stations" %}
+            </div>
+        {% endif %}
+    </div>
 
 
     <script>

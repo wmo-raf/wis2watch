@@ -1,0 +1,385 @@
+{
+ "totalCount": 13,
+ "pageCount": 1,
+ "pageNumber": 1,
+ "itemsPerPage": 50000,
+ "stationSearchResults": [
+  {
+   "id": 70401,
+   "name": "ALUPE",
+   "region": "Africa",
+   "territory": "Kenya",
+   "declaredStatus": "Operational",
+   "latitude": 0.497,
+   "longitude": 34.1252,
+   "elevation": 1161,
+   "hp": 1161,
+   "stationTypeName": "Land (fixed)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-404-300-402261127AS63663",
+     "primary": true
+    },
+    {
+     "wigosStationIdentifier": "0-404-0-63663",
+     "primary": false
+    }
+   ],
+   "wigosId": "0-404-300-402261127AS63663",
+   "stationTypeId": 1,
+   "dateEstablished": "2020-09-22T00:00:00.000+00:00",
+   "stationStatusCode": "operational",
+   "stationTypeCode": "landOceanSurface",
+   "stationProgramsDeclaredStatuses": "GOS General:Operational",
+   "stationDeclaredStatusCode": "operational",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "GOS General:Unknown",
+   "programApprovalStatus": "GOS General:Approved"
+  },
+  {
+   "id": 221,
+   "name": "Malindi",
+   "region": "Africa",
+   "territory": "Kenya",
+   "declaredStatus": "Closed",
+   "latitude": -2.9900000095,
+   "longitude": 40.1899986267,
+   "stationTypeName": "Land (fixed)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-20008-0-MLD",
+     "primary": true
+    }
+   ],
+   "wigosId": "0-20008-0-MLD",
+   "stationTypeId": 1,
+   "dateEstablished": "1967-03-01T00:00:00.000+00:00",
+   "dateClosed": "2006-01-04T00:00:00.000+00:00",
+   "stationStatusCode": "closed",
+   "stationTypeCode": "landOceanSurface",
+   "stationProgramsDeclaredStatuses": "GAW Regional:Closed",
+   "stationDeclaredStatusCode": "closed",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "GAW Regional:Unknown",
+   "programSpecificId": "GAW:MLD,GAW Regional:MLD",
+   "programApprovalStatus": "GAW Regional:Approved"
+  },
+  {
+   "id": 150360,
+   "name": "ADC JAPATA",
+   "region": "Africa",
+   "territory": "Kenya",
+   "declaredStatus": "Operational",
+   "latitude": 1.2048,
+   "longitude": 34.7966,
+   "elevation": 1972,
+   "stationTypeName": "Land (fixed)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-404-300-261370680RA34105",
+     "primary": true
+    }
+   ],
+   "wigosId": "0-404-300-261370680RA34105",
+   "stationTypeId": 1,
+   "dateEstablished": "2014-01-01T00:00:00.000+00:00",
+   "stationStatusCode": "operational",
+   "stationTypeCode": "landOceanSurface",
+   "stationProgramsDeclaredStatuses": "Non-affiliated:Operational",
+   "stationDeclaredStatusCode": "operational",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "Non-affiliated:Unknown",
+   "programApprovalStatus": "Non-affiliated:Approved"
+  },
+  {
+   "id": 146731,
+   "name": "AIC Churo Girls  High School",
+   "region": "Africa",
+   "territory": "Kenya",
+   "declaredStatus": "Operational",
+   "latitude": 0.7668,
+   "longitude": 36.4056,
+   "elevation": 1798,
+   "stationTypeName": "Land (fixed)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-404-300-301570787AS00074",
+     "primary": true
+    }
+   ],
+   "wigosId": "0-404-300-301570787AS00074",
+   "stationTypeId": 1,
+   "dateEstablished": "2021-11-29T00:00:00.000+00:00",
+   "stationStatusCode": "operational",
+   "stationTypeCode": "landOceanSurface",
+   "stationProgramsDeclaredStatuses": "Non-affiliated:Operational",
+   "stationDeclaredStatusCode": "operational",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "Non-affiliated:Unknown",
+   "programApprovalStatus": "Non-affiliated:Approved"
+  },
+  {
+   "id": 160884,
+   "name": "AMBONI",
+   "region": "Africa",
+   "territory": "Kenya",
+   "declaredStatus": "Operational",
+   "latitude": -0.35,
+   "longitude": 36.98889,
+   "elevation": 1753,
+   "stationTypeName": "Lake/River (fixed)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-404-800-4AB05",
+     "primary": true
+    }
+   ],
+   "wigosId": "0-404-800-4AB05",
+   "stationTypeId": 11,
+   "dateEstablished": "1949-02-01T00:00:00.000+00:00",
+   "stationStatusCode": "operational",
+   "stationTypeCode": "lakeRiver",
+   "stationProgramsDeclaredStatuses": "WHYCOS:Operational",
+   "stationDeclaredStatusCode": "operational",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "WHYCOS:Unknown",
+   "programApprovalStatus": "WHYCOS:Approved"
+  },
+  {
+   "id": 160244,
+   "name": "Amboni",
+   "region": "Africa",
+   "territory": "Kenya",
+   "declaredStatus": "Closed",
+   "latitude": -0.40667,
+   "longitude": 36.99167,
+   "elevation": 1707,
+   "stationTypeName": "Lake/River (fixed)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-404-800-4AB06",
+     "primary": true
+    }
+   ],
+   "wigosId": "0-404-800-4AB06",
+   "stationTypeId": 11,
+   "dateEstablished": "1958-10-09T00:00:00.000+00:00",
+   "dateClosed": "1965-07-01T00:00:00.000+00:00",
+   "stationStatusCode": "closed",
+   "stationTypeCode": "lakeRiver",
+   "stationProgramsDeclaredStatuses": "WHYCOS:Closed",
+   "stationDeclaredStatusCode": "closed",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "WHYCOS:Unknown",
+   "programApprovalStatus": "WHYCOS:Approved"
+  },
+  {
+   "id": 160881,
+   "name": "MURINGATO",
+   "region": "Africa",
+   "territory": "Kenya",
+   "declaredStatus": "Closed",
+   "latitude": -0.4,
+   "longitude": 36.94333,
+   "elevation": 1737,
+   "stationTypeName": "Lake/River (fixed)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-404-800-4AB01",
+     "primary": true
+    }
+   ],
+   "wigosId": "0-404-800-4AB01",
+   "stationTypeId": 11,
+   "dateEstablished": "1931-01-01T00:00:00.000+00:00",
+   "dateClosed": "2010-02-27T00:00:00.000+00:00",
+   "stationStatusCode": "closed",
+   "stationTypeCode": "lakeRiver",
+   "stationProgramsDeclaredStatuses": "WHYCOS:Closed",
+   "stationDeclaredStatusCode": "closed",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "WHYCOS:Unknown",
+   "programApprovalStatus": "WHYCOS:Approved"
+  },
+  {
+   "id": 70400,
+   "name": "BOMET",
+   "region": "Africa",
+   "territory": "Kenya",
+   "declaredStatus": "Partly operational",
+   "latitude": -0.714732,
+   "longitude": 35.3833,
+   "elevation": 2156,
+   "stationTypeName": "Land (fixed)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-404-0-63707",
+     "primary": true
+    }
+   ],
+   "wigosId": "0-404-0-63707",
+   "stationTypeId": 1,
+   "dateEstablished": "2020-09-21T00:00:00.000+00:00",
+   "stationStatusCode": "partlyOperational",
+   "stationTypeCode": "landOceanSurface",
+   "stationProgramsDeclaredStatuses": "GOS General:Pre-operational",
+   "stationDeclaredStatusCode": "partlyOperational",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "GOS General:Unknown",
+   "programApprovalStatus": "GOS General:Approved"
+  },
+  {
+   "id": 70360,
+   "name": "BUMULA",
+   "region": "Africa",
+   "territory": "Kenya",
+   "declaredStatus": "Partly operational",
+   "latitude": 0.3253,
+   "longitude": 34.2743,
+   "elevation": 1344,
+   "stationTypeName": "Land (fixed)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-404-300-392191090AS63662",
+     "primary": true
+    },
+    {
+     "wigosStationIdentifier": "0-404-0-63662",
+     "primary": false
+    }
+   ],
+   "wigosId": "0-404-300-392191090AS63662",
+   "stationTypeId": 1,
+   "dateEstablished": "2020-09-21T00:00:00.000+00:00",
+   "stationStatusCode": "partlyOperational",
+   "stationTypeCode": "landOceanSurface",
+   "stationProgramsDeclaredStatuses": "GOS General:Pre-operational",
+   "stationDeclaredStatusCode": "partlyOperational",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "GOS General:Unknown",
+   "programApprovalStatus": "GOS General:Approved"
+  },
+  {
+   "id": 150380,
+   "name": "BORANA CENTER",
+   "region": "Africa",
+   "territory": "Kenya",
+   "declaredStatus": "Unknown",
+   "latitude": 0.2354,
+   "longitude": 37.3172,
+   "elevation": 1954,
+   "stationTypeName": "Land (fixed)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-404-300-311650825RA37123",
+     "primary": true
+    }
+   ],
+   "wigosId": "0-404-300-311650825RA37123",
+   "stationTypeId": 1,
+   "dateEstablished": "2001-01-01T00:00:00.000+00:00",
+   "stationStatusCode": "unknown",
+   "stationTypeCode": "landOceanSurface",
+   "stationProgramsDeclaredStatuses": "Non-affiliated",
+   "stationDeclaredStatusCode": "unknown",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "Non-affiliated:Unknown",
+   "programApprovalStatus": "Non-affiliated:Approved"
+  },
+  {
+   "id": 150363,
+   "name": "ENDEBESS E,W. DOLIER",
+   "region": "Africa",
+   "territory": "Kenya",
+   "declaredStatus": "Unknown",
+   "latitude": 1.067,
+   "longitude": 34.967,
+   "elevation": 1847,
+   "stationTypeName": "Land (fixed)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-404-300-261370680RA34014",
+     "primary": true
+    }
+   ],
+   "wigosId": "0-404-300-261370680RA34014",
+   "stationTypeId": 1,
+   "dateEstablished": "2011-01-01T00:00:00.000+00:00",
+   "stationStatusCode": "unknown",
+   "stationTypeCode": "landOceanSurface",
+   "stationProgramsDeclaredStatuses": "Non-affiliated",
+   "stationDeclaredStatusCode": "unknown",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "Non-affiliated:Unknown",
+   "programApprovalStatus": "Non-affiliated:Approved"
+  },
+  {
+   "id": 86720,
+   "name": "1901045",
+   "territory": "Kenya",
+   "declaredStatus": "Closed",
+   "latitude": 3.596,
+   "longitude": 55.34,
+   "elevation": 0,
+   "stationTypeName": "Underwater (mobile)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-22000-0-1901045",
+     "primary": true
+    }
+   ],
+   "wigosId": "0-22000-0-1901045",
+   "stationTypeId": 8,
+   "dateEstablished": "2025-08-16T00:00:00.000+00:00",
+   "dateClosed": "2014-04-07T00:00:00.000+00:00",
+   "stationStatusCode": "closed",
+   "stationTypeCode": "subSurface",
+   "stationProgramsDeclaredStatuses": "ARGO KENYA:Closed",
+   "stationDeclaredStatusCode": "closed",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "ARGO KENYA:Unknown",
+   "programSpecificId": "ARGO KENYA:1901045",
+   "programApprovalStatus": "ARGO KENYA:Approved"
+  },
+  {
+   "id": 160883,
+   "name": "MWEIGA",
+   "region": "Africa",
+   "territory": "Kenya",
+   "declaredStatus": "Unknown",
+   "latitude": -0.33667,
+   "longitude": 36.91389,
+   "elevation": 1890,
+   "stationTypeName": "Lake/River (fixed)",
+   "wigosStationIdentifiers": [
+    {
+     "wigosStationIdentifier": "0-404-800-4AB03",
+     "primary": true
+    }
+   ],
+   "wigosId": "0-404-800-4AB03",
+   "stationTypeId": 11,
+   "dateEstablished": "1931-01-01T00:00:00.000+00:00",
+   "stationStatusCode": "unknown",
+   "stationTypeCode": "lakeRiver",
+   "stationProgramsDeclaredStatuses": "WHYCOS",
+   "stationDeclaredStatusCode": "unknown",
+   "assessedStatus": "Unknown",
+   "stationAssessedStatusCode": "unknown",
+   "stationProgramsAssessedStatuses": "WHYCOS:Unknown",
+   "programApprovalStatus": "WHYCOS:Approved"
+  }
+ ]
+}

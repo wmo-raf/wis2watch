@@ -227,9 +227,9 @@
     <div class="preview-container">
         <div class="preview-header">
             <div class="preview-info">
-                <h2 class="preview-title">{{ dataset.title }}</h2>
+                <h2 class="preview-title">{{ node.name }}</h2>
                 <p class="preview-subtitle">
-                    {% trans "Dataset" %}: <code>{{ dataset.identifier }}</code>
+                    {% trans "Node" %}: <code>{{ node.centre_id }}</code>
                 </p>
             </div>
             <div class="action-buttons">
@@ -243,7 +243,7 @@
                     {% trans "Copy CSV" %}
                 </button>
 
-                <a href="{% url 'get_dataset_stations_csv' dataset.id %}"
+                <a href="{% url 'get_node_stations_csv' node.id %}"
                    class="button bicolor button--icon">
                                    <span class="icon-wrapper">
                                        <svg class="icon download" aria-hidden="true">
@@ -253,7 +253,7 @@
                     {% trans "Download CSV" %}
                 </a>
 
-                <a href="{% url 'node_details' dataset.node.id %}"
+                <a href="{% url 'node_details' node.id %}"
                    class="button bicolor button--icon button-secondary">
                         <span class="icon-wrapper">
                             <svg class="icon icon-arrow-left icon" aria-hidden="true">
