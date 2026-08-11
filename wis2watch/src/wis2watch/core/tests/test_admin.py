@@ -137,6 +137,29 @@ class NodeOverviewViewTests(TestCase):
 
         self.assertEqual(response.context["order"], "centre")
 
+    def test_a_centre_whose_own_broker_does_not_answer_shows_why(self):
+        """The screen has to say it, or the finding stays in the database."""
+        MessageSource.objects.create(
+            name="dj-anm origin broker",
+            source_type=MessageSource.ORIGIN_BROKER,
+            node=self.quiet,
+            centre_id="dj-anm",
+            host="wis.dj-anm.example.int",
+            is_reachable=False,
+            last_error="Could not reach wis.dj-anm.example.int:1883",
+        )
+
+        response = self.client.get(reverse("node_overview"))
+
+        self.assertContains(response, "Not reachable")
+        self.assertContains(response, "Could not reach wis.dj-anm.example.int:1883")
+
+    def test_a_centre_advertising_no_broker_of_its_own_is_not_called_unreachable(self):
+        response = self.client.get(reverse("node_overview"))
+
+        self.assertContains(response, "No broker advertised")
+        self.assertNotContains(response, "Not reachable")
+
 
 class NodeDetailViewTests(TestCase):
     def setUp(self):

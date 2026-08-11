@@ -253,7 +253,14 @@ class MessageSource(TimeStampedModel):
 
     # Reachability is diagnostic state, not an error condition: a broker that
     # cannot be reached from outside is a finding this tool exists to report.
-    is_reachable = models.BooleanField(default=True)
+    # Null until a connection has been attempted, because "we have not looked
+    # yet" and "it does not answer" are different findings, and a broker a
+    # catalogue sync has just advertised is in the first state, not the second.
+    is_reachable = models.BooleanField(
+        null=True,
+        default=None,
+        help_text=_("Null until a connection to this broker has been attempted"),
+    )
     last_connected_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True)
 

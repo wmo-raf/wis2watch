@@ -15,7 +15,7 @@ from datetime import timedelta
 
 from django.test import TestCase
 
-from wis2watch.core.analysis import Staleness, node_overview
+from wis2watch.core.analysis import OriginReachability, Staleness, node_overview
 from wis2watch.core.models import (
     Dataset,
     HourlyRollup,
@@ -25,7 +25,7 @@ from wis2watch.core.models import (
     StationSource,
     WIS2Node,
 )
-from wis2watch.core.tests.support import at
+from wis2watch.core.tests.support import at, origin_broker
 
 
 NOW = at("2026-08-11T12:00:00")
@@ -317,3 +317,74 @@ class CountTests(OverviewTestCase):
         row = self.by_centre()["ke-meteo"]
 
         self.assertEqual((row.dataset_count, row.station_count), (0, 0))
+
+
+class OriginReachabilityTests(OverviewTestCase):
+    """Whether a centre's own broker answers from outside, on the same screen.
+
+    A large share of these brokers are unreachable, which is a finding about
+    the centre rather than a fault to hide: read next to the volume the Global
+    Broker saw, "not reachable, and yet publishing" is the row that starts an
+    investigation.
+    """
+
+    def test_a_centre_whose_broker_answers_is_reachable(self):
+        origin_broker(self.node("ke-meteo"), is_reachable=True)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.origin_reachability, OriginReachability.REACHABLE)
+        self.assertEqual(row.origin_last_error, "")
+
+    def test_a_centre_whose_broker_does_not_answer_says_why(self):
+        origin_broker(
+            self.node("ke-meteo"),
+            is_reachable=False,
+            last_error="Could not reach wis.ke-meteo.example.int:1883",
+        )
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.origin_reachability, OriginReachability.UNREACHABLE)
+        self.assertEqual(
+            row.origin_last_error, "Could not reach wis.ke-meteo.example.int:1883"
+        )
+
+    def test_a_broker_nothing_has_tried_yet_is_not_called_reachable(self):
+        origin_broker(self.node("ke-meteo"))
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.origin_reachability, OriginReachability.NOT_ATTEMPTED)
+
+    def test_a_centre_advertising_no_broker_of_its_own_says_so(self):
+        self.node("ke-meteo")
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.origin_reachability, OriginReachability.NOT_ADVERTISED)
+        self.assertEqual(row.origin_last_error, "")
+
+    def test_the_global_broker_is_not_mistaken_for_a_centres_own(self):
+        """The world's vantage point says nothing about the centre's broker."""
+        node = self.node("ke-meteo")
+        self.global_broker.node = node
+        self.global_broker.is_reachable = True
+        self.global_broker.save()
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.origin_reachability, OriginReachability.NOT_ADVERTISED)
+
+    def test_each_centre_carries_its_own_brokers_state(self):
+        origin_broker(self.node("ke-meteo"), is_reachable=True)
+        origin_broker(self.node("dj-anm"), is_reachable=False)
+
+        rows = self.by_centre()
+
+        self.assertEqual(
+            rows["ke-meteo"].origin_reachability, OriginReachability.REACHABLE
+        )
+        self.assertEqual(
+            rows["dj-anm"].origin_reachability, OriginReachability.UNREACHABLE
+        )

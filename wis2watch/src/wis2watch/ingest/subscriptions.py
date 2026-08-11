@@ -7,9 +7,15 @@ definition of the region being watched, which is what lets a catalogue sync
 widen the coverage without anyone editing a subscription list -- the supervisor
 recomputes this and the difference is what it acts on.
 
-The broker itself is a ``MessageSource`` like any other, seeded from settings
-the first time so a fresh deployment ingests without anyone opening the admin.
-Seeding is create-only: once the record exists, the admin owns it.
+A node's own broker is the second vantage point, and asks for far less: one
+centre, its own. The difference between what it carries and what the Global
+Broker carries is the propagation signal, which is why both connections exist.
+
+The brokers themselves are ``MessageSource`` records like any other. The Global
+Broker is seeded from settings the first time so a fresh deployment ingests
+without anyone opening the admin -- create-only, so that once the record exists
+the admin owns it -- and origin brokers are written by the catalogue sync from
+what each node's discovery metadata advertises.
 """
 
 import logging
@@ -51,6 +57,39 @@ def active_global_broker_sources():
         source_type=MessageSource.GLOBAL_BROKER,
         is_active=True,
     ).order_by("pk")
+
+
+def active_origin_broker_sources():
+    """The nodes' own brokers the process should be connected to.
+
+    Every monitored node that advertises a broker of its own is attempted,
+    including the many that will not answer. Whether a centre's broker is
+    reachable from outside is a finding this tool reports, so a broker known
+    to be unreachable is still knocked on -- it may come back, and until it
+    does its silence is the answer. Deactivating the source in the admin is
+    the one way to stop attempting it.
+    """
+    return (
+        MessageSource.objects.filter(
+            source_type=MessageSource.ORIGIN_BROKER,
+            is_active=True,
+        )
+        .select_related("node")
+        .order_by("pk")
+    )
+
+
+def origin_broker_subscriptions(source):
+    """The topic filters a node's own broker connection should carry.
+
+    Its own centre and nothing else. An origin broker carries one centre's
+    traffic, and the whole point of the connection is to compare what that
+    centre publishes with what reaches the Global Broker; a wider filter could
+    only add traffic that says nothing about the comparison.
+    """
+    topic = subscription_topic(source.owning_centre_id)
+
+    return (topic,) if topic else ()
 
 
 def ensure_global_broker_source():

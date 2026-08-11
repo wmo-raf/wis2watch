@@ -297,6 +297,14 @@ WIS2WATCH_SUBSCRIPTION_REFRESH_SECONDS = env.int(
     "WIS2WATCH_SUBSCRIPTION_REFRESH_SECONDS", 60
 )
 
+# How long the ingestion process may back off between attempts at a node's own
+# broker, in seconds. Long, because a large share of these brokers are not
+# reachable from outside at all: that is recorded as a finding about the centre,
+# and knocking on dozens of dead brokers more often would tell us nothing new.
+WIS2WATCH_ORIGIN_RECONNECT_MAX_SECONDS = env.int(
+    "WIS2WATCH_ORIGIN_RECONNECT_MAX_SECONDS", 3600
+)
+
 # How long raw notification messages are kept, in days. Deliberately short:
 # raw messages answer "what went wrong recently", while the permanent record of
 # the region lives in the hourly rollups, which are never expired.

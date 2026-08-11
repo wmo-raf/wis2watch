@@ -14,6 +14,7 @@ them.
 
 from .overview import (
     NodeOverviewRow,
+    OriginReachability,
     Staleness,
     default_volume_hours,
     node_overview,
@@ -21,6 +22,7 @@ from .overview import (
 
 __all__ = [
     "NodeOverviewRow",
+    "OriginReachability",
     "Staleness",
     "default_volume_hours",
     "node_overview",

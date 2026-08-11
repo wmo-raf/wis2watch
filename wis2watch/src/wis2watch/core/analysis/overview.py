@@ -1,5 +1,10 @@
 """The node overview: the state of the region on one screen.
 
+Each row pairs what the world saw of a centre with whether that centre's own
+broker answers from outside. Read together they separate "gone quiet" from
+"publishing where no one can see it", which is the distinction the whole tool
+is built around.
+
 Every monitored centre appears, whatever has been heard from it -- a centre
 nothing has ever arrived from is the most concerning row in the table, not an
 absent one, so the query starts from the registry and hangs everything else
@@ -14,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
-from django.db.models import Count, OuterRef, Subquery, Sum
+from django.db.models import Count, Exists, OuterRef, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext_lazy as _
@@ -62,6 +67,31 @@ class Staleness:
     LABELS = dict(CHOICES)
 
 
+class OriginReachability:
+    """What is known about a centre's own broker, from outside.
+
+    Four states, because two of them are absences that mean different things.
+    A broker nothing has attempted yet is not a broker that failed, and a
+    centre whose catalogue record advertises no broker at all is neither --
+    calling any of these "unreachable" would report a fault that has not been
+    observed.
+    """
+
+    REACHABLE = "reachable"
+    UNREACHABLE = "unreachable"
+    NOT_ATTEMPTED = "not_attempted"
+    NOT_ADVERTISED = "not_advertised"
+
+    CHOICES = [
+        (UNREACHABLE, _("Not reachable")),
+        (NOT_ATTEMPTED, _("Not attempted yet")),
+        (NOT_ADVERTISED, _("No broker advertised")),
+        (REACHABLE, _("Reachable")),
+    ]
+
+    LABELS = dict(CHOICES)
+
+
 @dataclass(frozen=True)
 class NodeOverviewRow:
     """One centre's line in the overview."""
@@ -77,11 +107,20 @@ class NodeOverviewRow:
     recent_message_count: int
     dataset_count: int
     station_count: int
+    origin_reachability: str
+    origin_last_error: str
 
     @property
     def staleness_label(self):
         """What the staleness is called, for a table cell."""
         return Staleness.LABELS.get(self.staleness, self.staleness)
+
+    @property
+    def origin_reachability_label(self):
+        """What the centre's own broker's state is called, for a table cell."""
+        return OriginReachability.LABELS.get(
+            self.origin_reachability, self.origin_reachability
+        )
 
 
 def default_stale_after_hours():
@@ -190,11 +229,22 @@ def _annotated_nodes(*, since):
         "last_message_at"
     )
 
+    # A node has at most one broker of its own, so this reads one row. It is
+    # asked for separately from whether that row exists at all, because a
+    # reachability of null means "not attempted" only when there is a broker
+    # to have attempted.
+    origin_broker = MessageSource.objects.filter(
+        node=OuterRef("pk"), source_type=MessageSource.ORIGIN_BROKER
+    )
+
     return WIS2Node.objects.annotate(
         last_seen_at=Subquery(last_seen[:1]),
         recent_message_count=Coalesce(Subquery(recent_messages), 0),
         dataset_count=Coalesce(Subquery(datasets), 0),
         station_count=Coalesce(Subquery(stations), 0),
+        has_origin_broker=Exists(origin_broker),
+        origin_reachable=Subquery(origin_broker.values("is_reachable")[:1]),
+        origin_error=Subquery(origin_broker.values("last_error")[:1]),
     )
 
 
@@ -214,6 +264,23 @@ def _row(node, *, now, stale_after):
         recent_message_count=node.recent_message_count,
         dataset_count=node.dataset_count,
         station_count=node.station_count,
+        origin_reachability=_origin_reachability(node),
+        origin_last_error=node.origin_error or "",
+    )
+
+
+def _origin_reachability(node):
+    """What the centre's own broker is known to be doing."""
+    if not node.has_origin_broker:
+        return OriginReachability.NOT_ADVERTISED
+
+    if node.origin_reachable is None:
+        return OriginReachability.NOT_ATTEMPTED
+
+    return (
+        OriginReachability.REACHABLE
+        if node.origin_reachable
+        else OriginReachability.UNREACHABLE
     )
 
 

@@ -78,6 +78,28 @@
             color: #721c24;
         }
 
+        .badge-reachable {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge-unreachable {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .badge-not_attempted,
+        .badge-not_advertised {
+            background: #eee;
+            color: #555;
+        }
+
+        .broker-error {
+            margin-top: 4px;
+            color: #721c24;
+            font-size: 0.8em;
+        }
+
         .empty-state {
             text-align: center;
             padding: 50px;
@@ -121,6 +143,9 @@
                 </th>
                 <th class="numeric">{% trans "Datasets" %}</th>
                 <th class="numeric">{% trans "Stations" %}</th>
+                <th title="{% trans "Whether this centre's own broker answers from outside" %}">
+                    {% trans "Origin broker" %}
+                </th>
                 <th>{% trans "Status" %}</th>
             </tr>
             </thead>
@@ -144,6 +169,16 @@
                     <td class="numeric">{{ row.recent_message_count }}</td>
                     <td class="numeric">{{ row.dataset_count }}</td>
                     <td class="numeric">{{ row.station_count }}</td>
+                    <td>
+                        <span class="badge badge-{{ row.origin_reachability }}">
+                            {{ row.origin_reachability_label }}
+                        </span>
+                        {% if row.origin_last_error %}
+                            <div class="broker-error" title="{{ row.origin_last_error }}">
+                                {{ row.origin_last_error|truncatechars:60 }}
+                            </div>
+                        {% endif %}
+                    </td>
                     <td>
                         <span class="badge badge-{{ row.staleness }}">{{ row.staleness_label }}</span>
                     </td>
