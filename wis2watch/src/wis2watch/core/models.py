@@ -35,7 +35,14 @@ class GlobalDiscoveryCatalogue(TimeStampedModel):
         default=False,
         help_text=_("Only the writing catalogue may create or update registry records"),
     )
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(
+        default=True,
+        help_text=_(
+            "Switch a catalogue off here rather than deleting it: the Global "
+            "Services this release ships with are recreated on the next start, "
+            "and a deleted one comes back"
+        ),
+    )
     last_sync = models.DateTimeField(null=True, blank=True)
 
     panels = [
@@ -311,7 +318,14 @@ class MessageSource(TimeStampedModel):
     password = models.CharField(max_length=255, blank=True)
     use_tls = models.BooleanField(default=False)
 
-    is_active = models.BooleanField(default=True)
+    is_active = models.BooleanField(
+        default=True,
+        help_text=_(
+            "Switch a broker off here rather than deleting it: the Global "
+            "Brokers this release ships with are recreated on the next start, "
+            "and an origin broker by the next catalogue sync"
+        ),
+    )
 
     # Reachability is diagnostic state, not an error condition: a broker that
     # cannot be reached from outside is a finding this tool exists to report.
@@ -370,6 +384,17 @@ class MessageSource(TimeStampedModel):
                 fields=["carried_by", "source_type"],
                 condition=models.Q(carried_by__isnull=False),
                 name="unique_source_type_per_carrier",
+            ),
+            # A centre publishes one broker of any given kind, and the seed
+            # keys a Global Broker on exactly that pair. Neither constraint
+            # above reaches a Global Broker -- its node and its carrier are
+            # both null -- so without this one a second Meteo-France row would
+            # be accepted, and every notification stored twice. Only rows that
+            # name a centre take part: a carried vantage point names none.
+            models.UniqueConstraint(
+                fields=["centre_id", "source_type"],
+                condition=~models.Q(centre_id=""),
+                name="unique_source_type_per_centre",
             ),
         ]
         verbose_name = _("Message Source")

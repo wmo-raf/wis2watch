@@ -284,12 +284,10 @@ CHANNEL_LAYERS = {
 # the whole of Africa -- see wis2watch.core.countries for the default list.
 WIS2WATCH_MONITORED_COUNTRIES = env.list("WIS2WATCH_MONITORED_COUNTRIES", default=[])
 
-# The Global Broker the ingestion process subscribes to. Seeded as a message
-# source on first run; thereafter the admin owns the record.
-WIS2WATCH_GLOBAL_BROKER_URL = env.str(
-    "WIS2WATCH_GLOBAL_BROKER_URL",
-    "mqtts://everyone:everyone@globalbroker.meteo.fr:8883",
-)
+# The Global Broker is not configured here. All four are seeded on start from
+# wis2watch.core.global_services, and which one is dialled is the admin's
+# is_active checkbox -- a broker address in env could only ever be a second
+# opinion the database would silently win.
 
 # How often the ingestion process re-reads the registry -- both the brokers it
 # connects to and the centres it asks them for -- in seconds. This is what lets

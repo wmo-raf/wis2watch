@@ -20,11 +20,11 @@ WIS2 relies on four Global Services that work together to ensure reliable, real-
 
 ### Global Discovery Catalogues
 
-| Centre Identifier                               | Provider                            | API Link                                                           |
-|-------------------------------------------------|-------------------------------------|--------------------------------------------------------------------|
-| `ca-eccc-msc-global-global-discovery-catalogue` | Meteorological Service of Canada    | https://wis2-gdc.weather.gc.ca/collections/wis2-discovery-metadata |
-| `cn-cma-global-global-discovery-catalogue`      | China Meteorological Administration | https://gdc.wis.cma.cn/collections/wis2-discovery-metadata         |
-| `de-dwd-global-global-discovery-catalogue`      | Deutscher Wetterdienst (Germany)    | https://wis2.dwd.de/gdc/collections/wis2-discovery-metadata        |
+| Centre Identifier                        | Provider                            | API Link                                                           |
+|------------------------------------------|-------------------------------------|--------------------------------------------------------------------|
+| `ca-eccc-msc-global-discovery-catalogue` | Meteorological Service of Canada    | https://wis2-gdc.weather.gc.ca/collections/wis2-discovery-metadata |
+| `cn-cma-global-discovery-catalogue`      | China Meteorological Administration | https://gdc.wis.cma.cn/collections/wis2-discovery-metadata         |
+| `de-dwd-global-discovery-catalogue`      | Deutscher Wetterdienst (Germany)    | https://wis2.dwd.de/gdc/collections/wis2-discovery-metadata        |
 
 ### Global Brokers
 
