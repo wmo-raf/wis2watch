@@ -130,6 +130,16 @@ class DatasetSilenceRow:
         """What this dataset's silence is called, for a table cell."""
         return Silence.label(self.silence)
 
+    @property
+    def expectation_label(self):
+        """Where the expectation came from, for a table cell.
+
+        Shown beside the interval rather than instead of it, because a person
+        deciding whether to correct a baseline needs to know whether they are
+        looking at their own answer or the tool's.
+        """
+        return Expectation.LABELS.get(self.expectation, self.expectation)
+
 
 @dataclass(frozen=True)
 class NodeSilence:

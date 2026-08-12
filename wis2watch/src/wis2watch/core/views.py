@@ -7,9 +7,9 @@ from django.urls import reverse_lazy
 from django.utils.translation import gettext as _
 from wagtail.admin import messages
 
-from .analysis import Staleness, default_volume_hours, node_overview
+from .analysis import Staleness, default_volume_hours, node_detail, node_overview
 from .forms import SyncNodeForm
-from .models import StationSource, SyncLog, WIS2Node
+from .models import SyncLog, WIS2Node
 from .node_stations import sync_node_stations
 from .stations import node_stations_as_csv
 from .viewsets import WIS2NodeViewSet
@@ -109,8 +109,12 @@ def get_node_stations_as_csv(request, node_id):
 
 
 def node_details(request, node_id):
-    """
-    View to display details of a WIS2 Node.
+    """Everything known about one centre, on one page.
+
+    Where the overview flags a centre, this is where the flag is followed to.
+    The findings are computed whole and then rendered; syncing the node by hand
+    happens before they are read, so a page returned after a sync shows what
+    that sync left behind rather than the state it was asked to correct.
 
     Args:
         request: HTTP request object.
@@ -154,16 +158,15 @@ def node_details(request, node_id):
         {"url": "", "label": node.name},
     ]
 
-    station_declarations = StationSource.objects.declared_by_node_registry(
-        node
-    ).with_last_transmitted()
+    detail = node_detail(node)
 
     context = {
         "breadcrumbs_items": breadcrumbs_items,
         "node": node,
         "nodes_index_url": nodes_index_url,
-        "station_declarations": station_declarations,
-        "station_count": station_declarations.count(),
+        "overview_url": reverse_lazy("node_overview"),
+        "detail": detail,
+        "station_count": len(detail.stations),
     }
 
     return render(request, 'wis2watchcore/node_details.html', context)

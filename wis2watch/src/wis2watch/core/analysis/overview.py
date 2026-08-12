@@ -106,6 +106,24 @@ class OriginReachability:
 
     LABELS = dict(CHOICES)
 
+    @classmethod
+    def of(cls, is_reachable, *, advertised=True):
+        """What a broker's stored reachability amounts to.
+
+        Read from the one field and from whether there is a broker at all,
+        because the overview and a centre's own page ask the same question of
+        the same record by different routes -- one annotated across the whole
+        region, one for a single node -- and two spellings of "null means not
+        attempted" would eventually disagree on the row that mattered.
+        """
+        if not advertised:
+            return cls.NOT_ADVERTISED
+
+        if is_reachable is None:
+            return cls.NOT_ATTEMPTED
+
+        return cls.REACHABLE if is_reachable else cls.UNREACHABLE
+
 
 class CachePickup:
     """Whether the Global Caches are carrying a centre's core data.
@@ -340,7 +358,7 @@ def _annotated_nodes(*, since):
 
 def _row(node, *, now, stale_after, silence):
     """One annotated node as a finding."""
-    quiet_for = _hours_between(node.last_seen_at, now)
+    quiet_for = hours_between(node.last_seen_at, now)
     node_silence = silence.get(node.pk) or NodeSilence.nothing_known()
 
     return NodeOverviewRow(
@@ -385,20 +403,12 @@ def _cache_pickup(node):
 
 def _origin_reachability(node):
     """What the centre's own broker is known to be doing."""
-    if not node.has_origin_broker:
-        return OriginReachability.NOT_ADVERTISED
-
-    if node.origin_reachable is None:
-        return OriginReachability.NOT_ATTEMPTED
-
-    return (
-        OriginReachability.REACHABLE
-        if node.origin_reachable
-        else OriginReachability.UNREACHABLE
+    return OriginReachability.of(
+        node.origin_reachable, advertised=node.has_origin_broker
     )
 
 
-def _hours_between(last_seen_at, now):
+def hours_between(last_seen_at, now):
     """How many hours a centre has been quiet, or None if it never spoke."""
     if last_seen_at is None:
         return None
