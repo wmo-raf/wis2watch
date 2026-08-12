@@ -427,9 +427,30 @@ class PropagationGapHorizonTests(PropagationGapTestCase):
 
         note = self.note()
 
-        self.assertIn("2", note)
+        self.assertIn("2 older gaps", note)
         self.assertIn("2026-07-28", note)
         self.assertIn("expired", note)
+
+    def test_the_index_says_what_the_count_it_shows_left_out(self):
+        """The count is what decides whether the report is worth opening."""
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+
+        (summary,) = [
+            summary
+            for summary in gap_report_summaries(now=NOW)
+            if summary.slug == "propagation-gaps"
+        ]
+
+        self.assertEqual(summary.count, 0)
+        self.assertIn("1 older gap is not listed", summary.bound)
+
+    def test_a_report_that_bounds_nothing_says_nothing_on_the_index(self):
+        bounds = {
+            summary.slug: summary.bound for summary in gap_report_summaries(now=NOW)
+        }
+
+        self.assertEqual(set(bounds.values()), {None})
 
     def test_a_report_listing_everything_it_holds_says_nothing(self):
         origin_broker(self.kenya, is_reachable=True)

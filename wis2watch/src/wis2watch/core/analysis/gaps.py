@@ -52,8 +52,8 @@ from ..models import (
     PropagationGap,
     StationSource,
     UnregisteredCentre,
+    evidence_horizon,
 )
-from ..retention import raw_retention_cutoff
 from ..rollups import window_start
 from .silence import hours_between
 
@@ -298,7 +298,7 @@ def propagation_gaps_left_out(*, now=None):
         # this one is read against the publication times in the table beside
         # it.
         "horizon": date_format(
-            dj_timezone.localtime(raw_retention_cutoff(now=now)), "Y-m-d H:i"
+            dj_timezone.localtime(evidence_horizon(now)), "Y-m-d H:i"
         ),
     }
 
@@ -718,12 +718,18 @@ class GapReport:
 
 @dataclass(frozen=True)
 class GapReportSummary:
-    """One line of the index: a report and how much it has found."""
+    """One line of the index: a report and how much it has found.
+
+    The bound travels with the count rather than waiting on the page behind
+    it. A count that leaves something out is exactly what decides whether the
+    report is worth opening, and the index is where that decision is made.
+    """
 
     slug: str
     title: str
     description: str
     count: int
+    bound: str | None = None
 
 
 #: The five reports, in the order the index shows them: what is declared and
@@ -813,6 +819,7 @@ def gap_report_summaries(*, now=None):
             title=report.title,
             description=report.description,
             count=report.count_rows(now=now),
+            bound=report.describe_bound(now=now),
         )
         for report in GAP_REPORTS
     ]

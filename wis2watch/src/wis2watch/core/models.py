@@ -964,7 +964,7 @@ class PropagationGapQuerySet(models.QuerySet):
         it a gap is a standing question: a late arrival can still close it, and
         a run told to look further back can still find the answer.
         """
-        return self.filter(published_at__gte=_evidence_horizon(now))
+        return self.filter(published_at__gte=evidence_horizon(now))
 
     def beyond_evidence(self, now=None):
         """Gaps nothing can check again.
@@ -979,15 +979,17 @@ class PropagationGapQuerySet(models.QuerySet):
         is something to send somebody to a centre about, which is why the
         reports ask this question rather than deleting the row.
         """
-        return self.filter(published_at__lt=_evidence_horizon(now))
+        return self.filter(published_at__lt=evidence_horizon(now))
 
 
-def _evidence_horizon(now):
+def evidence_horizon(now=None):
     """The instant before which a gap's evidence is no longer held.
 
     The raw retention cutoff itself rather than a horizon of its own: the two
     disagreeing would mean either reporting gaps nothing can check, or
-    withholding ones something still can.
+    withholding ones something still can. It is named here all the same,
+    because the report that bounds itself at this instant has to print it, and
+    two callers working it out separately is how they come to differ.
 
     Imported here rather than at the top of the module: expiry is written in
     terms of the rows it removes, so importing it up here would close a
