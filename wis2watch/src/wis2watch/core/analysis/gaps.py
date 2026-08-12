@@ -41,7 +41,9 @@ from django.conf import settings
 from django.db.models import Exists, F, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone as dj_timezone
+from django.utils.formats import date_format
 from django.utils.translation import gettext_lazy as _
+from django.utils.translation import ngettext
 from django_countries.fields import Country
 
 from ..models import (
@@ -51,6 +53,7 @@ from ..models import (
     StationSource,
     UnregisteredCentre,
 )
+from ..retention import raw_retention_cutoff
 from ..rollups import window_start
 from .silence import hours_between
 
@@ -240,10 +243,64 @@ def propagation_gaps(*, now=None):
     from this tool having stopped listening, and sending somebody to a centre
     to ask about messages that may never have gone missing is how a diagnostic
     stops being believed.
+
+    And only gaps this tool can still stand behind. An open gap outlives the
+    evidence that would close it: past the raw retention window the Global
+    Broker rows that could settle it have been expired, so it can neither be
+    closed nor checked again, and left here those rows would accumulate for
+    ever. A report where last spring's gaps sit permanently above this
+    morning's is one people stop opening, which is the failure the reports
+    exist to prevent. What is left out that way is counted and said, by
+    ``propagation_gaps_left_out`` below.
     """
     now = now or dj_timezone.now()
 
-    return [_propagation_gap_row(gap, now=now) for gap in _reportable_gaps()]
+    return [_propagation_gap_row(gap, now=now) for gap in _reportable_gaps(now=now)]
+
+
+def propagation_gaps_left_out(*, now=None):
+    """What the propagation report holds and does not list, in a sentence.
+
+    Args:
+        now: the instant the horizon is worked out from.
+
+    Returns:
+        str | None: what was left out and why, or nothing where the report
+        lists everything it holds.
+
+    A bound that goes unsaid is truncation, and a report that quietly drops
+    findings is worse than one that is long. It matters most where the report
+    is otherwise empty: with nothing listed and nothing said, the empty state
+    would announce that everything published has reached the Global Broker --
+    the one thing this report does not know about the gaps past its horizon.
+
+    Only the gaps the horizon left out. The centres whose own broker is
+    unreachable are withheld for a different reason, which the report's own
+    description gives; one sentence, one reason.
+    """
+    now = now or dj_timezone.now()
+    left_out = _gaps_past_the_horizon(now=now).count()
+
+    if not left_out:
+        return None
+
+    return ngettext(
+        "%(count)d older gap is not listed. It was published before "
+        "%(horizon)s, beyond which the Global Broker rows that would settle "
+        "it have expired, so this tool can no longer check it either way.",
+        "%(count)d older gaps are not listed. They were published before "
+        "%(horizon)s, beyond which the Global Broker rows that would settle "
+        "them have expired, so this tool can no longer check them either way.",
+        left_out,
+    ) % {
+        "count": left_out,
+        # Written the way every timestamp in the reports is written, because
+        # this one is read against the publication times in the table beside
+        # it.
+        "horizon": date_format(
+            dj_timezone.localtime(raw_retention_cutoff(now=now)), "Y-m-d H:i"
+        ),
+    }
 
 
 def unregistered_centres(*, now=None):
@@ -384,12 +441,29 @@ def _undeclared_station_row(observation, *, now):
     )
 
 
-def _reportable_gaps():
-    """The open gaps of centres whose own broker still answers."""
+def _reportable_gaps(*, now=None):
+    """The open gaps of centres whose own broker still answers.
+
+    Bounded at the horizon its evidence ends at, so that the report is as long
+    as the forensic window rather than as long as the installation has been
+    running.
+    """
     return (
-        PropagationGap.objects.open()
-        .filter(node__in=MessageSource.objects.watched_origins().values("node_id"))
+        _gaps_at_watched_centres()
+        .within_evidence(now)
         .select_related("node", "dataset")
+    )
+
+
+def _gaps_past_the_horizon(*, now=None):
+    """The open gaps the report holds and cannot stand behind any more."""
+    return _gaps_at_watched_centres().beyond_evidence(now)
+
+
+def _gaps_at_watched_centres():
+    """Every open gap the report would be entitled to list at all."""
+    return PropagationGap.objects.open().filter(
+        node__in=MessageSource.objects.watched_origins().values("node_id")
     )
 
 
@@ -596,6 +670,14 @@ def _unattributed_rate_notice(row):
     )
 
 
+def _bounds_nothing(*, now=None):
+    """What a report bounded by its filters rather than by truncation says.
+
+    Nothing at all: everything it found is on the page, a page at a time.
+    """
+    return None
+
+
 @dataclass(frozen=True)
 class GapReport:
     """One report: what it finds, and how to ask for it.
@@ -616,6 +698,13 @@ class GapReport:
     The rate report needs that: it lists every publishing centre so that a
     share can be read against the ones doing it right, and most of them have
     nothing to answer for.
+
+    ``describe_bound`` is how a report that lists less than it holds says so,
+    and most of them have nothing to say: they are bounded by filters rather
+    than by truncation, so everything they found is on the page. Only the
+    propagation report bounds anything, and it is held here rather than in its
+    template so that a sixth report that has to truncate says so in the same
+    place and the same way.
     """
 
     slug: str
@@ -624,6 +713,7 @@ class GapReport:
     find_rows: Callable[..., list]
     count_rows: Callable[..., int]
     describe_row: Callable[..., Notice | None]
+    describe_bound: Callable[..., str | None] = _bounds_nothing
 
 
 @dataclass(frozen=True)
@@ -671,8 +761,9 @@ GAP_REPORTS = (
             "currently be reached are left out."
         ),
         find_rows=propagation_gaps,
-        count_rows=lambda *, now=None: _reportable_gaps().count(),
+        count_rows=lambda *, now=None: _reportable_gaps(now=now).count(),
         describe_row=_propagation_gap_notice,
+        describe_bound=propagation_gaps_left_out,
     ),
     GapReport(
         slug="unregistered-centres",

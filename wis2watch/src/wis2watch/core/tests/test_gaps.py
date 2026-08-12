@@ -15,10 +15,11 @@ own broker was reachable at all when the gap was recorded.
 
 from datetime import timedelta
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 
 from wis2watch.core.analysis import (
     GAP_REPORTS,
+    gap_report,
     gap_report_summaries,
     propagation_gaps,
     stations_declared_but_silent,
@@ -273,8 +274,8 @@ class TransmittingUndeclaredTests(GapReportTestCase):
         )
 
 
-class PropagationGapTests(GapReportTestCase):
-    """Notifications a centre published that the world never received."""
+class PropagationGapTestCase(GapReportTestCase):
+    """One recorded gap, and the report that lists it."""
 
     def report(self):
         return propagation_gaps(now=NOW)
@@ -301,6 +302,10 @@ class PropagationGapTests(GapReportTestCase):
             detected_at=NOW - timedelta(hours=hours_ago) + timedelta(minutes=20),
             resolved_at=NOW if resolved else None,
         )
+
+
+class PropagationGapTests(PropagationGapTestCase):
+    """Notifications a centre published that the world never received."""
 
     def test_an_open_gap_at_a_reachable_centre_names_the_notification(self):
         origin_broker(self.kenya, is_reachable=True)
@@ -373,6 +378,85 @@ class PropagationGapTests(GapReportTestCase):
         (row,) = self.report()
 
         self.assertEqual(row.dataset_title, "Kenya SYNOP")
+
+
+@override_settings(WIS2WATCH_RAW_RETENTION_DAYS=14)
+class PropagationGapHorizonTests(PropagationGapTestCase):
+    """What the propagation report does as its gaps accumulate.
+
+    An open gap outlives the evidence that would close it: past the raw
+    retention window the Global Broker rows that could settle it have been
+    expired, so it can never be closed and never be checked again. Left in the
+    report those rows accumulate for ever, and last spring's gaps sitting
+    permanently above this morning's is how a report stops being opened --
+    which is the failure the reports exist to prevent.
+
+    So the report is bounded at the horizon its evidence ends at, and says so.
+    A bound that goes unsaid is truncation, and a report that quietly drops
+    findings is worse than one that is long.
+    """
+
+    def note(self, now=NOW):
+        return gap_report("propagation-gaps").describe_bound(now=now)
+
+    def counted(self, now=NOW):
+        return {
+            summary.slug: summary.count
+            for summary in gap_report_summaries(now=now)
+        }
+
+    def test_a_gap_whose_evidence_has_expired_is_not_listed(self):
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_gap_either_side_of_the_cutoff_is_listed_or_left_out(self):
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+        self.gap(notification_id="this-morning", hours_ago=2)
+
+        self.assertEqual(
+            [row.notification_id for row in self.report()], ["this-morning"]
+        )
+
+    def test_the_report_says_how_many_gaps_it_left_out_and_why(self):
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+        self.gap(notification_id="the-one-before", hours_ago=24 * 21)
+
+        note = self.note()
+
+        self.assertIn("2", note)
+        self.assertIn("2026-07-28", note)
+        self.assertIn("expired", note)
+
+    def test_a_report_listing_everything_it_holds_says_nothing(self):
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="this-morning", hours_ago=2)
+
+        self.assertIsNone(self.note())
+
+    def test_an_old_gap_the_world_turned_out_to_carry_is_not_left_out(self):
+        """It was settled while the evidence stood; nothing is being withheld."""
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20, resolved=True)
+
+        self.assertIsNone(self.note())
+
+    def test_gaps_withheld_for_an_unreachable_broker_are_not_counted_as_old(self):
+        """One sentence, one reason: those are withheld for the broker."""
+        origin_broker(self.kenya, is_reachable=False)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+
+        self.assertIsNone(self.note())
+
+    def test_the_index_counts_what_the_report_actually_lists(self):
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+        self.gap(notification_id="this-morning", hours_ago=2)
+
+        self.assertEqual(self.counted()["propagation-gaps"], 1)
 
 
 class UnregisteredCentreTests(GapReportTestCase):

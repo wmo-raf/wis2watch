@@ -114,6 +114,11 @@ def gap_report_table(request, slug):
         "header_title": report.title,
         "header_icon": "warning",
         "report": report,
+        # What the report holds and does not list, where it bounds anything.
+        # Read here rather than in the template because it is a query, and a
+        # page that runs one from the middle of its own layout is a page
+        # nobody can account for.
+        "bound_note": report.describe_bound(),
         "rows": page,
         "page_obj": page,
         "elided_page_range": paginator.get_elided_page_range(page.number),

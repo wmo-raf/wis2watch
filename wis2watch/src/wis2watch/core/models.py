@@ -956,6 +956,47 @@ class PropagationGapQuerySet(models.QuerySet):
         """
         return self.filter(resolved_at__isnull=True)
 
+    def within_evidence(self, now=None):
+        """Gaps something could still settle either way.
+
+        The rows that would close a gap are the Global Broker's copies of the
+        notification, and those are kept for the forensic window only. Inside
+        it a gap is a standing question: a late arrival can still close it, and
+        a run told to look further back can still find the answer.
+        """
+        return self.filter(published_at__gte=_evidence_horizon(now))
+
+    def beyond_evidence(self, now=None):
+        """Gaps nothing can check again.
+
+        Past the horizon the Global Broker rows have been expired, so the
+        notification's absence there no longer says the world never carried it
+        -- only that this tool no longer holds either answer. Such a gap can
+        never be closed and never be re-detected.
+
+        It is kept rather than retired, because it is the last thing that
+        holds the UUID and the rollups carry counts alone. What it stops being
+        is something to send somebody to a centre about, which is why the
+        reports ask this question rather than deleting the row.
+        """
+        return self.filter(published_at__lt=_evidence_horizon(now))
+
+
+def _evidence_horizon(now):
+    """The instant before which a gap's evidence is no longer held.
+
+    The raw retention cutoff itself rather than a horizon of its own: the two
+    disagreeing would mean either reporting gaps nothing can check, or
+    withholding ones something still can.
+
+    Imported here rather than at the top of the module: expiry is written in
+    terms of the rows it removes, so importing it up here would close a
+    circle.
+    """
+    from .retention import raw_retention_cutoff
+
+    return raw_retention_cutoff(now=now)
+
 
 class PropagationGap(models.Model):
     """A notification a centre published that the world never saw.
@@ -973,6 +1014,12 @@ class PropagationGap(models.Model):
     messages are kept for a forensic window only and the rollups carry counts
     rather than UUIDs, so a gap not written down while its rows still exist is
     a finding that cannot be made again.
+
+    Which is also why a gap outlives what could settle it. Once its evidence
+    has expired nothing can close it and nothing can find it again, and a gap
+    this tool merely stopped being able to check is not the same finding as
+    one the world is still not carrying. Both stay on the record; which is
+    which is ``within_evidence`` and ``beyond_evidence`` above.
 
     The origin broker record may be replaced by a later catalogue sync, and the
     dataset may be deleted by hand; neither unmakes the observation, so both are
