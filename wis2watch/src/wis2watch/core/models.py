@@ -1,5 +1,6 @@
 from django.contrib.gis.db import models
 from django.contrib.gis.geos import Polygon
+from django.contrib.postgres.fields import ArrayField
 from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
@@ -10,6 +11,7 @@ from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 from wagtail.snippets.models import register_snippet
 
 from .countries import monitored_country_code_for_centre_id
+from .interpretation import OPERATIONAL
 
 
 class GlobalDiscoveryCatalogue(TimeStampedModel):
@@ -368,6 +370,45 @@ class Dataset(TimeStampedModel):
         return f"{self.title} ({self.identifier})"
 
 
+class StationQuerySet(models.QuerySet):
+    def resolve(self, wigos_id, *also_known_as):
+        """The one station these identifiers name, created if none knows it.
+
+        A station routinely carries more than one WIGOS identifier -- OSCAR
+        files some under a long synthetic primary while their centre transmits
+        the traditional form, and others the other way about -- so resolving on
+        one identifier alone would give a single physical station two records.
+        Every identifier a source declares is therefore looked up, and the ones
+        the record did not already carry are remembered, so that a source which
+        knows the station by only one of them still finds it later.
+
+        The identifier a station is already keyed on is never moved: everything
+        else refers to the record, and the source that created it is not
+        necessarily wrong about which identifier to call it by.
+        """
+        declared = [wigos_id, *also_known_as]
+
+        station = self.filter(
+            models.Q(wigos_id__in=declared)
+            | models.Q(other_wigos_ids__overlap=declared)
+        ).first()
+
+        if station is None:
+            return self.create(wigos_id=wigos_id, other_wigos_ids=list(also_known_as)), True
+
+        unrecorded = [
+            identifier
+            for identifier in declared
+            if identifier != station.wigos_id and identifier not in station.other_wigos_ids
+        ]
+
+        if unrecorded:
+            station.other_wigos_ids = [*station.other_wigos_ids, *unrecorded]
+            station.save(update_fields=["other_wigos_ids", "modified"])
+
+        return station, False
+
+
 @register_snippet
 class Station(TimeStampedModel):
     """
@@ -375,7 +416,8 @@ class Station(TimeStampedModel):
 
     The WIGOS identifier is the identity authority: OSCAR/Surface, a node's own
     registry and observed traffic are three sources that may each declare the
-    same physical station, and all three resolve to one record here.
+    same physical station, and all three resolve to one record here -- by any of
+    the identifiers it is known by, not only the one it is keyed on.
     """
 
     FACILITY_TYPE_CHOICES = [
@@ -390,6 +432,12 @@ class Station(TimeStampedModel):
         max_length=100,
         unique=True,
         help_text=_("WIGOS station identifier"),
+    )
+    other_wigos_ids = ArrayField(
+        models.CharField(max_length=100),
+        default=list,
+        blank=True,
+        help_text=_("Further WIGOS station identifiers the same station is known by"),
     )
     name = models.CharField(max_length=200, blank=True)
     location = models.PointField(
@@ -411,6 +459,8 @@ class Station(TimeStampedModel):
         help_text=_("Operational status as reported by OSCAR/Surface"),
     )
 
+    objects = StationQuerySet.as_manager()
+
     class Meta:
         ordering = ["name"]
 
@@ -419,6 +469,24 @@ class Station(TimeStampedModel):
 
 
 class StationSourceQuerySet(models.QuerySet):
+    def declared_in_oscar(self):
+        """What the monitored countries officially declare and still operate.
+
+        OSCAR is notoriously stale -- many of the stations it lists were
+        decommissioned years ago -- so only a station it reports as fully
+        operational counts as declared. Partly operational, closed, silent and
+        unknown are all left out: the declared-but-silent report is only
+        actionable if the stations in it are ones somebody expects to hear from.
+        """
+        return (
+            self.filter(
+                source_type=StationSource.OSCAR,
+                station__operating_status=OPERATIONAL,
+            )
+            .select_related("station")
+            .order_by("station__name")
+        )
+
     def declared_by_node_registry(self, node):
         """A node's own registry declarations, ready to list or export."""
         return (

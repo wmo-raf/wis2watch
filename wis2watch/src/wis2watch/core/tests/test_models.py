@@ -230,6 +230,82 @@ class StationProvenanceTests(TestCase):
         self.assertEqual(declaration.local_id, "63740")
 
 
+class StationIdentityTests(TestCase):
+    """One record per physical station, however it is identified.
+
+    A station routinely carries more than one WIGOS identifier: OSCAR files it
+    under a long synthetic primary while its centre transmits the traditional
+    form, or the other way about -- Kenya's OSCAR entries do both. Resolving on
+    the primary alone would give one station two records, which is exactly what
+    the three-source comparison cannot survive.
+    """
+
+    def test_an_unknown_station_is_created_under_its_primary_identifier(self):
+        station, created = Station.objects.resolve(
+            "0-404-300-402261127AS63663", "0-404-0-63663"
+        )
+
+        self.assertTrue(created)
+        self.assertEqual(station.wigos_id, "0-404-300-402261127AS63663")
+        self.assertEqual(station.other_wigos_ids, ["0-404-0-63663"])
+
+    def test_a_station_already_known_is_returned_rather_than_created(self):
+        known = Station.objects.create(wigos_id="0-404-0-63663")
+
+        station, created = Station.objects.resolve("0-404-0-63663")
+
+        self.assertFalse(created)
+        self.assertEqual(station.pk, known.pk)
+
+    def test_a_station_known_by_another_of_its_identifiers_is_the_same_station(self):
+        """What a node transmits and what OSCAR files it under is one station."""
+        Station.objects.create(wigos_id="0-404-0-63663")
+
+        station, created = Station.objects.resolve(
+            "0-404-300-402261127AS63663", "0-404-0-63663"
+        )
+
+        self.assertFalse(created)
+        self.assertEqual(Station.objects.count(), 1)
+        self.assertEqual(station.wigos_id, "0-404-0-63663")
+
+    def test_the_identifier_a_station_is_already_keyed_on_is_not_moved(self):
+        """Everything else points at the record, so its key stays put."""
+        Station.objects.create(wigos_id="0-404-0-63663")
+
+        station, _ = Station.objects.resolve(
+            "0-404-300-402261127AS63663", "0-404-0-63663"
+        )
+
+        self.assertEqual(station.wigos_id, "0-404-0-63663")
+        self.assertEqual(station.other_wigos_ids, ["0-404-300-402261127AS63663"])
+
+    def test_an_identifier_learnt_later_finds_the_station_it_names(self):
+        Station.objects.resolve("0-404-300-402261127AS63663", "0-404-0-63663")
+
+        station, created = Station.objects.resolve("0-404-0-63663")
+
+        self.assertFalse(created)
+        self.assertEqual(station.wigos_id, "0-404-300-402261127AS63663")
+
+    def test_an_identifier_is_recorded_once_however_often_it_is_declared(self):
+        Station.objects.resolve("0-404-300-402261127AS63663", "0-404-0-63663")
+        station, _ = Station.objects.resolve(
+            "0-404-300-402261127AS63663", "0-404-0-63663"
+        )
+
+        self.assertEqual(station.other_wigos_ids, ["0-404-0-63663"])
+
+    def test_two_stations_are_two_stations(self):
+        Station.objects.resolve("0-404-0-63663")
+
+        station, created = Station.objects.resolve("0-404-0-63662")
+
+        self.assertTrue(created)
+        self.assertEqual(Station.objects.count(), 2)
+        self.assertNotEqual(station.wigos_id, "0-404-0-63663")
+
+
 class SyncLogTests(TestCase):
     def test_a_catalogue_sync_is_recorded_without_a_node(self):
         catalogue = GlobalDiscoveryCatalogue.objects.create(

@@ -388,6 +388,12 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'wis2watch.core.tasks.run_sync_all_node_stations',
         'schedule': 3600.0,  # Every hour
     },
+    # OSCAR changes slowly: a country's declared set moves in months, and the
+    # whole monitored region is read territory by territory in one run.
+    'sync-oscar-stations': {
+        'task': 'wis2watch.core.tasks.run_sync_oscar_stations',
+        'schedule': 604800.0,  # Weekly
+    },
     'update-rollups': {
         'task': 'wis2watch.core.tasks.run_update_rollups',
         'schedule': 900.0,  # Every 15 minutes

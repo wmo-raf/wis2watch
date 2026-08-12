@@ -71,6 +71,16 @@ Covered: every operational status OSCAR reports for the territory
 more than one WIGOS identifier, a station with no elevation, and one with an
 elevation of zero.
 
+Elsewhere in the region OSCAR also reports `silent`, which Kenya has none of;
+the sync tests assert that one against a hand-written record. The station types
+here — `Land (fixed)`, `Lake/River (fixed)`, `Underwater (mobile)` — are the
+ones African territories actually carry, and only the first names a WIGOS
+facility type.
+
+OSCAR answers a territory whole: `itemsPerPage` comes back as 50000 and
+`pageCount` as 1 even for territories running to thousands of stations, and its
+station search takes no page parameter.
+
 ## `node_stations_gh_gmet.json`
 
 Ghana's own station registry

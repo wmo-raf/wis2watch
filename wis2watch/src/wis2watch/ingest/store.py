@@ -133,11 +133,13 @@ class RegistryLookup:
         and where it stands are OSCAR's and the node registry's to say; a
         notification carries neither, and inventing them here would put words
         in a source's mouth.
+
+        The identifier a centre transmits under is not always the one OSCAR
+        keys the station on, so it is resolved against every identifier a
+        station is known by rather than looked up as the key.
         """
         if wigos_id not in self._stations:
-            self._stations[wigos_id], _ = Station.objects.get_or_create(
-                wigos_id=wigos_id
-            )
+            self._stations[wigos_id], _ = Station.objects.resolve(wigos_id)
 
         return self._stations[wigos_id]
 

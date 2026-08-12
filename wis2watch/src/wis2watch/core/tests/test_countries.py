@@ -6,6 +6,7 @@ from wis2watch.core.countries import (
     get_monitored_country_codes,
     is_monitored_centre_id,
     monitored_country_code_for_centre_id,
+    monitored_territory_codes,
 )
 
 
@@ -26,6 +27,30 @@ class MonitoredCountryCodesTests(SimpleTestCase):
     @override_settings(WIS2WATCH_MONITORED_COUNTRIES=[])
     def test_empty_override_falls_back_to_africa(self):
         self.assertEqual(get_monitored_country_codes(), AFRICA_COUNTRY_CODES)
+
+
+class MonitoredTerritoryCodesTests(SimpleTestCase):
+    """The same region, in the three-letter codes OSCAR/Surface asks for."""
+
+    def test_a_territory_is_named_for_every_monitored_country(self):
+        self.assertEqual(len(monitored_territory_codes()), len(AFRICA_COUNTRY_CODES))
+
+    def test_countries_are_named_by_their_three_letter_code(self):
+        territories = monitored_territory_codes()
+
+        self.assertIn("KEN", territories)
+        self.assertIn("ZAF", territories)
+        self.assertIn("COD", territories)
+        self.assertNotIn("KE", territories)
+
+    @override_settings(WIS2WATCH_MONITORED_COUNTRIES=["ke", "ug"])
+    def test_territories_follow_the_configured_list(self):
+        self.assertEqual(monitored_territory_codes(), ("KEN", "UGA"))
+
+    @override_settings(WIS2WATCH_MONITORED_COUNTRIES=["ke", "xx"])
+    def test_a_country_code_naming_no_territory_is_left_out(self):
+        """OSCAR has nothing to answer for a code that is not a country."""
+        self.assertEqual(monitored_territory_codes(), ("KEN",))
 
 
 class CentreIdPrefixTests(SimpleTestCase):

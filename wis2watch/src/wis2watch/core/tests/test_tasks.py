@@ -11,7 +11,11 @@ from unittest import mock
 from django.test import TestCase
 
 from wis2watch.core.models import SyncLog, WIS2Node
-from wis2watch.core.tasks import run_sync_all_node_stations, run_sync_node_stations
+from wis2watch.core.tasks import (
+    run_sync_all_node_stations,
+    run_sync_node_stations,
+    run_sync_oscar_stations,
+)
 
 
 class NodeStationTaskTests(TestCase):
@@ -49,3 +53,16 @@ class NodeStationTaskTests(TestCase):
 
         self.assertIsNone(run_sync_node_stations(node.id))
         self.assertEqual(SyncLog.objects.count(), 0)
+
+
+class OscarStationTaskTests(TestCase):
+    """OSCAR changes slowly, so the weekly run only has to report its outcome."""
+
+    def test_a_run_reports_the_log_it_wrote(self):
+        with mock.patch("wis2watch.core.tasks.sync_oscar_stations") as sync:
+            sync.return_value = SyncLog.objects.create(
+                sync_type=SyncLog.OSCAR_STATIONS,
+                status=SyncLog.SUCCESS,
+            )
+
+            self.assertEqual(run_sync_oscar_stations(), sync.return_value.id)
