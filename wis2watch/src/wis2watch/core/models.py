@@ -994,6 +994,81 @@ class PropagationGap(models.Model):
         return f"{self.notification_id} published @ {self.published_at}"
 
 
+class UnregisteredCentreQuerySet(models.QuerySet):
+    def unregistered(self):
+        """The centres the registry still does not know about.
+
+        A row is kept after the registry catches up, because "this centre was
+        publishing for a fortnight before anyone registered it" is worth being
+        able to say. What nobody should be sent to investigate is a gap that
+        has since been closed, so reading defaults to the ones still open.
+        """
+        return self.filter(registered_at__isnull=True)
+
+
+class UnregisteredCentre(TimeStampedModel):
+    """A centre in the monitored region publishing without a registry record.
+
+    The per-centre subscriptions are built from the registry, so they are
+    structurally blind to a centre no catalogue has indexed -- including a
+    newly onboarded country whose metadata registration is incomplete. The
+    periodic wildcard sweep is what looks past them, and this is what it finds.
+
+    Membership of the region is decided by the centre ID's ISO 3166 prefix
+    alone. That is the one question about an unknown centre that can be
+    answered without a registry, which is precisely the position the sweep is
+    in: it is looking at traffic from a centre nothing has ever heard of.
+
+    A row per centre rather than per message. What is worth reporting is that
+    the centre exists at all; the traffic itself is stored like any other, with
+    no node attached, and the sample topic here is only enough to say what kind
+    of publishing was seen.
+    """
+
+    centre_id = models.CharField(
+        max_length=200,
+        unique=True,
+        help_text=_("WIS2 centre ID observed publishing, e.g. ke-kmd"),
+    )
+    country = CountryField(
+        blank=True,
+        blank_label=_("Select Country"),
+        verbose_name=_("Country"),
+        help_text=_("Derived from the centre ID prefix"),
+    )
+
+    sample_topic = models.CharField(
+        max_length=1000,
+        blank=True,
+        help_text=_("A topic this centre was last seen publishing on"),
+    )
+
+    first_seen_at = models.DateTimeField(
+        help_text=_("When a sweep first saw this centre publishing"),
+    )
+    last_seen_at = models.DateTimeField(
+        help_text=_("When a sweep last saw this centre publishing"),
+    )
+    registered_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the registry caught up with this centre"),
+    )
+
+    objects = UnregisteredCentreQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["centre_id"]
+        indexes = [
+            models.Index(fields=["registered_at"]),
+        ]
+        verbose_name = _("Unregistered Centre")
+        verbose_name_plural = _("Unregistered Centres")
+
+    def __str__(self):
+        return f"{self.centre_id} (last seen {self.last_seen_at})"
+
+
 class SyncLog(models.Model):
     """
     One run of a synchronisation job, with its counts and any error.
@@ -1003,12 +1078,14 @@ class SyncLog(models.Model):
     DISCOVERY_METADATA = "discovery_metadata"
     NODE_STATIONS = "node_stations"
     OSCAR_STATIONS = "oscar_stations"
+    WILDCARD_SWEEP = "wildcard_sweep"
 
     SYNC_TYPE_CHOICES = [
         (CATALOGUE, _("Global Discovery Catalogue")),
         (DISCOVERY_METADATA, _("Discovery Metadata")),
         (NODE_STATIONS, _("Node Stations")),
         (OSCAR_STATIONS, _("OSCAR Stations")),
+        (WILDCARD_SWEEP, _("Wildcard Sweep")),
     ]
 
     SUCCESS = "success"

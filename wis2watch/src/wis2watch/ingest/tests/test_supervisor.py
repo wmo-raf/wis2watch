@@ -22,7 +22,7 @@ from wis2watch.core.models import (
     NotificationMessage,
     WIS2Node,
 )
-from wis2watch.core.tests.support import load_jsonl_fixture, origin_broker
+from wis2watch.core.tests.support import in_region, load_jsonl_fixture, origin_broker
 from wis2watch.ingest.client import RECONNECT_MAX_DELAY
 from wis2watch.ingest.store import store_notifications
 from wis2watch.ingest.supervisor import Supervisor
@@ -112,6 +112,57 @@ class BreakingListeners:
     def opens_again(self):
         """Whatever was wrong with that broker has been put right."""
         self._unopenable = None
+
+
+class SweepUnderControl:
+    """A sweep whose window the test opens and closes.
+
+    The real one decides on wall-clock time, which is tested where it lives.
+    What these tests are about is what the supervisor does when the window
+    opens: the filter is a state the connections have to be told about, and
+    the traffic it brings in has to find its way back.
+    """
+
+    SWEEP_TOPIC = "origin/a/wis2/+/#"
+
+    def __init__(self):
+        self.is_running = False
+        self.is_over_now = False
+        self.observed = {}
+        self.finished = False
+        self._changed = False
+
+    def open(self):
+        self.is_running = True
+        self._changed = True
+
+    def close(self):
+        self.is_running = False
+        self._changed = True
+
+    def topics(self):
+        return (self.SWEEP_TOPIC,) if self.is_running else ()
+
+    def is_over(self, now=None):
+        return self.is_running and self.is_over_now
+
+    def service(self, now=None):
+        if self.is_over(now):
+            self.finish(now)
+
+            return True
+
+        changed, self._changed = self._changed, False
+
+        return changed
+
+    def observe(self, centres, now=None):
+        if self.is_running:
+            self.observed.update(centres)
+
+    def finish(self, now=None):
+        self.finished = True
+        self.is_running = False
 
 
 def only_this_source_fails(source_id):
@@ -615,8 +666,10 @@ class DrainTests(SupervisorTestCase):
 
         self.supervisor.drain_listeners()
 
+        # The capture is real Global Broker traffic, so it carries centres of
+        # other regions too; those are refused as they are stored.
         self.assertEqual(
-            NotificationMessage.objects.count(), len(captured_messages())
+            NotificationMessage.objects.count(), len(in_region(captured_messages()))
         )
 
     def test_a_drain_with_nothing_received_stores_nothing(self):
@@ -646,6 +699,153 @@ class DrainTests(SupervisorTestCase):
         self.supervisor.drain_listeners()
 
         self.assertEqual(NotificationMessage.objects.count(), 0)
+
+
+class WildcardSweepTests(SupervisorTestCase):
+    """The window in which the connection asks for more than the registry.
+
+    The sweep decides when on wall-clock time; what the supervisor owes it is
+    that the filter reaches the connection as the window opens and leaves it
+    as the window closes, and that what arrives meanwhile is offered back.
+    """
+
+    def sweep_under_control(self):
+        """Put the supervisor's sweep under the test's control, and return it."""
+        sweep = SweepUnderControl()
+        self.supervisor = Supervisor(make_listener=self.listeners, sweep=sweep)
+
+        return sweep
+
+    def test_an_open_sweep_adds_its_filter_to_the_registry_filters(self):
+        broker = self.broker()
+        self.node("ke-meteo")
+        sweep = self.sweep_under_control()
+        self.supervisor.start_listeners()
+
+        sweep.open()
+        self.supervisor.service_sweep()
+
+        self.assertEqual(
+            self.listeners[broker].subscriptions,
+            ("origin/a/wis2/ke-meteo/#", "origin/a/wis2/+/#"),
+        )
+
+    def test_a_closed_sweep_leaves_the_registry_filters_alone(self):
+        broker = self.broker()
+        self.node("ke-meteo")
+        sweep = self.sweep_under_control()
+        self.supervisor.start_listeners()
+
+        sweep.open()
+        self.supervisor.service_sweep()
+        sweep.close()
+        self.supervisor.service_sweep()
+
+        self.assertEqual(
+            self.listeners[broker].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+        )
+
+    def test_a_registry_refresh_mid_sweep_keeps_carrying_the_sweep(self):
+        broker = self.broker()
+        sweep = self.sweep_under_control()
+        self.supervisor.start_listeners()
+        sweep.open()
+        self.supervisor.service_sweep()
+
+        self.node("dj-anm")
+        self.supervisor.refresh_from_registry()
+
+        self.assertEqual(
+            self.listeners[broker].subscriptions,
+            ("origin/a/wis2/dj-anm/#", "origin/a/wis2/+/#"),
+        )
+
+    def test_an_unchanged_sweep_state_does_not_touch_the_connection(self):
+        broker = self.broker()
+        sweep = self.sweep_under_control()
+        self.supervisor.start_listeners()
+        asked_so_far = len(self.listeners[broker].subscription_calls)
+
+        self.supervisor.service_sweep()
+
+        self.assertEqual(
+            len(self.listeners[broker].subscription_calls), asked_so_far
+        )
+
+    def test_an_unregistered_centre_heard_during_a_sweep_is_offered_to_it(self):
+        broker = self.broker()
+        self.node("ke-meteo")
+        sweep = self.sweep_under_control()
+        self.supervisor.start_listeners()
+        sweep.open()
+        self.listeners[broker].received = captured_messages()
+
+        self.supervisor.drain_listeners()
+
+        self.assertEqual(sorted(sweep.observed), ["dj-anm", "ng-nimet"])
+
+    def test_a_registered_centre_is_not_offered_as_a_finding(self):
+        broker = self.broker()
+        self.node("ke-meteo")
+        sweep = self.sweep_under_control()
+        self.supervisor.start_listeners()
+        sweep.open()
+        self.listeners[broker].received = [captured_messages(limit=2)[1]]
+
+        self.supervisor.drain_listeners()
+
+        self.assertEqual(sweep.observed, {})
+
+    def test_the_sweeps_double_delivery_stores_no_second_copy(self):
+        """Both filters carry a monitored centre while the window is open."""
+        broker = self.broker()
+        self.node("ke-meteo")
+        sweep = self.sweep_under_control()
+        self.supervisor.start_listeners()
+        sweep.open()
+        delivered = captured_messages(limit=2)
+        self.listeners[broker].received = delivered + delivered
+
+        self.supervisor.drain_listeners()
+
+        self.assertEqual(NotificationMessage.objects.count(), len(delivered))
+
+    def test_what_arrived_at_the_end_of_a_window_is_still_offered_to_it(self):
+        """The tail of every window would otherwise be drained after it closed."""
+        broker = self.broker()
+        self.node("ke-meteo")
+        sweep = self.sweep_under_control()
+        self.supervisor.start_listeners()
+        sweep.open()
+
+        sweep.is_over_now = True
+        self.listeners[broker].received = captured_messages()
+        self.supervisor.service_sweep()
+
+        self.assertEqual(sorted(sweep.observed), ["dj-anm", "ng-nimet"])
+        self.assertTrue(sweep.finished)
+
+    def test_shutting_down_mid_sweep_closes_the_run(self):
+        self.broker()
+        sweep = self.sweep_under_control()
+        self.supervisor.start_listeners()
+        sweep.open()
+
+        self.supervisor.shutdown()
+
+        self.assertTrue(sweep.finished)
+
+    def test_a_real_sweep_is_not_due_the_moment_the_process_starts(self):
+        """A restarting process must not ask for the world every time."""
+        broker = self.broker()
+        self.node("ke-meteo")
+
+        self.supervisor.start_listeners()
+        self.supervisor.tick()
+
+        self.assertEqual(
+            self.listeners[broker].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+        )
 
 
 class ReachabilityTests(SupervisorTestCase):

@@ -23,7 +23,7 @@ from wis2watch.core.models import (
     StationSource,
     WIS2Node,
 )
-from wis2watch.core.tests.support import load_jsonl_fixture
+from wis2watch.core.tests.support import in_region, load_jsonl_fixture
 from wis2watch.ingest.store import store_notifications
 
 CAPTURE = "global_broker_notifications.jsonl"
@@ -32,6 +32,9 @@ KE_TOPIC = "origin/a/wis2/ke-meteo/data/core/weather/surface-based-observations/
 KE_CACHE_TOPIC = KE_TOPIC.replace("origin/", "cache/")
 KE_METADATA_ID = "urn:wmo:md:ke-meteo:synop-dataset-surface-observations"
 KE_STATION = "0-20000-0-63708"
+
+DJ_TOPIC = "origin/a/wis2/dj-anm/data/recommended/weather/aviation/taf"
+BR_TOPIC = "origin/a/wis2/br-inmet/data/core/weather/surface-based-observations/synop"
 
 
 def captured():
@@ -62,6 +65,13 @@ def published_at(pubtime, topic=KE_TOPIC, notification_id=None):
     )
 
     return (topic, payload)
+
+
+def message_pair(topic):
+    """A captured message as the listener hands it over: ``(topic, payload)``."""
+    message = message_on(topic)
+
+    return (message["topic"], message["payload"])
 
 
 def store_one(source, topic, payload):
@@ -163,6 +173,79 @@ class NodeAttributionTests(StoreTestCase):
         self.assertIsNone(record.dataset)
 
 
+class RegionTests(StoreTestCase):
+    """The tool watches a region, so it stores a region.
+
+    Nothing subscribes to the world, but the wildcard sweep is briefly offered
+    it, and these are the rules that decide what survives that: the centre ID
+    prefix, and whether the registry knows the centre at all.
+    """
+
+    def test_a_centre_of_another_region_is_refused(self):
+        message = message_on(BR_TOPIC)
+
+        record = store_one(self.source, message["topic"], message["payload"])
+
+        self.assertIsNone(record)
+        self.assertEqual(NotificationMessage.objects.count(), 0)
+
+    def test_a_refused_message_is_counted_as_out_of_region(self):
+        message = message_on(BR_TOPIC)
+
+        counts = store_notifications(
+            self.source, [(message["topic"], message["payload"])]
+        )
+
+        self.assertEqual(counts.out_of_region, 1)
+        self.assertEqual(counts.accepted, 0)
+
+    def test_a_centre_of_another_region_in_the_registry_is_kept(self):
+        """A node added by hand is one somebody asked to watch."""
+        WIS2Node.objects.create(centre_id="br-inmet", name="Brazil")
+        message = message_on(BR_TOPIC)
+
+        record = store_one(self.source, message["topic"], message["payload"])
+
+        self.assertIsNotNone(record)
+        self.assertEqual(record.node.centre_id, "br-inmet")
+
+    def test_an_unregistered_centre_of_the_region_is_kept_and_reported(self):
+        message = message_on(DJ_TOPIC)
+
+        counts = store_notifications(
+            self.source, [(message["topic"], message["payload"])]
+        )
+
+        self.assertEqual(counts.accepted, 1)
+        self.assertEqual(counts.unregistered_centres, {"dj-anm": DJ_TOPIC})
+
+    def test_a_registered_centre_is_not_reported_as_unregistered(self):
+        counts = store_notifications(self.source, [message_pair(KE_TOPIC)])
+
+        self.assertEqual(counts.unregistered_centres, {})
+
+    def test_a_cache_topic_reports_the_centre_that_published_it(self):
+        """A Global Cache mirroring a centre says the centre is publishing."""
+        message = message_on(
+            "cache/a/wis2/ng-nimet/data/core/weather/surface-based-observations/synop"
+        )
+
+        counts = store_notifications(
+            self.source, [(message["topic"], message["payload"])]
+        )
+
+        self.assertEqual(list(counts.unregistered_centres), ["ng-nimet"])
+
+    def test_a_topic_that_names_no_centre_is_still_stored(self):
+        """It arrived on a filter this process asked for; the row is the evidence."""
+        payload = message_on(KE_TOPIC)["payload"]
+
+        record = store_one(self.source, "some/other/thing", payload)
+
+        self.assertIsNotNone(record)
+        self.assertEqual(record.topic, "some/other/thing")
+
+
 class DatasetAttributionTests(StoreTestCase):
     """Unknown-topic traffic is a finding, so it is stored, not discarded."""
 
@@ -225,6 +308,9 @@ class StationAttributionTests(StoreTestCase):
 
     def test_a_station_identifier_is_never_read_out_of_the_data_identifier(self):
         """The data identifier spells the station out; reading it back is inference."""
+        # Registered by hand, since the centre is outside the monitored region
+        # and its traffic would otherwise be refused before it was attributed.
+        WIS2Node.objects.create(centre_id="ca-eccc-msc", name="Canada")
         message = message_on(
             "origin/a/wis2/ca-eccc-msc/data/core/weather/prediction/forecast"
             "/short-range/probabilistic/limited-area"
@@ -402,11 +488,20 @@ class BatchTests(StoreTestCase):
     def received(self):
         return [(m["topic"], m["payload"]) for m in captured()]
 
-    def test_the_whole_capture_is_stored(self):
+    def in_region(self):
+        """The captured traffic belonging to the monitored region.
+
+        The capture is real Global Broker traffic, so it carries Brazilian and
+        Canadian centres alongside the African ones -- which is exactly what a
+        wildcard sweep is offered, and what the store refuses.
+        """
+        return in_region(self.received())
+
+    def test_the_regions_traffic_is_stored(self):
         counts = store_notifications(self.source, self.received())
 
-        self.assertEqual(counts.accepted, len(self.received()))
-        self.assertEqual(NotificationMessage.objects.count(), len(self.received()))
+        self.assertEqual(counts.accepted, len(self.in_region()))
+        self.assertEqual(NotificationMessage.objects.count(), len(self.in_region()))
 
     def test_a_centre_added_between_flushes_is_attributed_from_then_on(self):
         """Lookups are remembered per flush, so the registry is re-read each time."""
@@ -428,9 +523,9 @@ class BatchTests(StoreTestCase):
     def test_the_unattributed_messages_are_counted_as_such(self):
         counts = store_notifications(self.source, self.received())
 
-        self.assertEqual(counts.unattributed, 3)
+        self.assertEqual(counts.unattributed, 1)
         self.assertEqual(
-            NotificationMessage.objects.filter(wigos_station_id="").count(), 3
+            NotificationMessage.objects.filter(wigos_station_id="").count(), 1
         )
 
     def test_traffic_no_dataset_claims_is_counted_as_unknown(self):
@@ -438,7 +533,7 @@ class BatchTests(StoreTestCase):
 
         counts = store_notifications(self.source, self.received())
 
-        self.assertEqual(counts.unknown_dataset, len(self.received()) - 3)
+        self.assertEqual(counts.unknown_dataset, len(self.in_region()) - 3)
 
     def test_a_message_that_cannot_be_stored_does_not_lose_the_batch(self):
         received = self.received()
@@ -447,13 +542,13 @@ class BatchTests(StoreTestCase):
         counts = store_notifications(self.source, received)
 
         self.assertEqual(counts.discarded, 1)
-        self.assertEqual(counts.accepted, len(self.received()))
+        self.assertEqual(counts.accepted, len(self.in_region()))
 
     def test_a_redelivered_notification_is_not_stored_twice(self):
         store_notifications(self.source, self.received())
         store_notifications(self.source, self.received())
 
-        self.assertEqual(NotificationMessage.objects.count(), len(self.received()))
+        self.assertEqual(NotificationMessage.objects.count(), len(self.in_region()))
 
     def test_the_same_notification_from_another_source_is_a_second_row(self):
         """Two vantage points on one notification is the propagation signal."""

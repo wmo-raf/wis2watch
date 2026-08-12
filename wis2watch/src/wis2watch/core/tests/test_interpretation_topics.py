@@ -9,6 +9,7 @@ from wis2watch.core.interpretation import (
     monitored_country_code_for_centre_id,
     parse_topic,
     subscription_topic,
+    sweep_topic,
 )
 
 from .support import NoNetworkTestCase, load_json_fixture, load_jsonl_fixture
@@ -106,6 +107,13 @@ class SubscriptionTopicTests(NoNetworkTestCase):
         self.assertIsNone(subscription_topic(""))
         self.assertIsNone(subscription_topic(None))
         self.assertIsNone(subscription_topic("   "))
+
+
+class SweepTopicTests(NoNetworkTestCase):
+    """The one filter that names no centre, for the centres nothing names."""
+
+    def test_the_sweep_asks_for_every_centre_publishing_at_origin(self):
+        self.assertEqual(sweep_topic(), "origin/a/wis2/+/#")
 
 
 class CapturedTopicTests(NoNetworkTestCase):

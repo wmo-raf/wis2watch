@@ -23,6 +23,11 @@ connected to and which centres to ask them for. Neither is fixed at startup,
 which is how a catalogue sync widens coverage, and how a broker added in the
 admin starts being watched, without the process being restarted.
 
+Once in a while it also asks the Global Broker for everything, briefly, so that
+a centre the registry has never heard of can be heard at all -- the registry
+cannot name what it has no record of. That window is bounded and rare; what it
+finds is in :mod:`wis2watch.ingest.sweep`.
+
 Everything the loop decides comes from the registry, so a restart resumes from
 the registry too; there is no state in this process worth recovering.
 """
@@ -47,6 +52,7 @@ from .subscriptions import (
     global_broker_subscriptions,
     origin_broker_subscriptions,
 )
+from .sweep import WildcardSweep
 
 logger = logging.getLogger(__name__)
 
@@ -120,12 +126,14 @@ class HeldConnection:
 class Supervisor:
     """Owns the broker connections and the loop that services them."""
 
-    def __init__(self, make_listener=BrokerListener):
+    def __init__(self, make_listener=BrokerListener, sweep=None):
         """
         Args:
             make_listener: how a ``MessageSource`` becomes a connection.
                 Injected so that the loop can be driven -- and its
                 registry-following tested -- without opening one.
+            sweep: the periodic wildcard sweep, which decides on wall-clock
+                time when the connections should be asking for everything.
         """
         self._make_listener = make_listener
         self._connections = {}
@@ -133,6 +141,7 @@ class Supervisor:
         self._subscriptions = None
         self._reachability = {}
         self._until_refresh = 0.0
+        self._sweep = sweep or WildcardSweep()
 
     @property
     def listeners(self):
@@ -173,6 +182,7 @@ class Supervisor:
                 self._until_refresh = refresh_seconds()
 
             self.drain_listeners()
+            self.service_sweep()
             self.record_reachability()
         except Exception:
             logger.exception("Ingestion tick failed; the connections are left running")
@@ -198,13 +208,19 @@ class Supervisor:
             logger.info("Not on the main thread; stop() must be called directly")
 
     def shutdown(self):
-        """Close every connection, storing whatever was already received."""
+        """Close every connection, storing whatever was already received.
+
+        A sweep still open is closed off after that store, so that what it
+        found is counted on its own log rather than left on a run that says it
+        never finished.
+        """
         logger.info("Ingestion supervisor shutting down")
 
         for held in self._connections.values():
             held.listener.stop()
 
         self.drain_listeners()
+        self._sweep.finish()
 
         logger.info("Ingestion supervisor stopped")
 
@@ -254,6 +270,10 @@ class Supervisor:
         Which brokers to watch is re-read rather than fixed at startup, so a
         Global Broker added in the admin -- or one deactivated -- takes effect
         on the running process, exactly as a newly synced centre does.
+
+        While a sweep is open its wildcard is carried alongside the registry's
+        filters, so that a refresh landing mid-sweep neither drops the sweep
+        nor leaves it carried after the window has closed.
         """
         subscriptions = global_broker_subscriptions()
 
@@ -264,13 +284,44 @@ class Supervisor:
             )
             self._subscriptions = subscriptions
 
+        carried = subscriptions + self._sweep.topics()
+
         self._reconcile(
             MessageSource.GLOBAL_BROKER,
             active_global_broker_sources(),
             # Every Global Broker carries the same filters: the registry, whole.
-            lambda source: subscriptions,
+            lambda source: carried,
             reconnect_max_delay=RECONNECT_MAX_DELAY,
         )
+
+    def service_sweep(self):
+        """Open or close the periodic wildcard window when it is due.
+
+        Only when the sweep says its state changed are the Global Broker
+        filters pushed. The window is short and the refresh interval is not,
+        so leaving the wildcard to be picked up -- or dropped -- by the next
+        registry refresh would make the window whatever the refresh happened
+        to make it.
+
+        A window about to close is drained once more first. What a listener
+        received in the last moments of a sweep is otherwise stored on the
+        next pass, by which time the sweep has closed and the centres it named
+        belong to no run -- a loss of the tail of every window, and the window
+        is the only time anything is listening for them at all.
+
+        The database connection is recycled first: opening and closing a
+        window are the only writes this loop makes on an hourly cadence, and a
+        region quiet enough to have gone a whole interval without a drain is
+        exactly where a connection left open since the last one would have
+        gone stale.
+        """
+        close_old_connections()
+
+        if self._sweep.is_over():
+            self.drain_listeners()
+
+        if self._sweep.service():
+            self.refresh_global_brokers()
 
     def refresh_origin_brokers(self):
         """Connect every monitored node's own broker, alongside the world's.
@@ -488,5 +539,10 @@ class Supervisor:
         counts = store_notifications(source, received)
 
         logger.info("Ingested from %s: %s", listener.name, counts.summary)
+
+        # A centre of the region with no registry record behind it is what a
+        # sweep exists to find; outside a sweep window there is none to hear,
+        # and the sweep ignores what it is told.
+        self._sweep.observe(counts.unregistered_centres)
 
         broadcast_sample(received)
