@@ -38,7 +38,7 @@ evidence, it is the tool not having existed yet.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from django.db.models import F, Min, OuterRef, Subquery
 from django.utils import timezone as dj_timezone
@@ -46,6 +46,18 @@ from django.utils.translation import gettext_lazy as _
 
 from ..models import Dataset, HourlyRollup
 from ..rollups import floor_to_hour
+
+#: Sorts before any real last-seen time, so whatever nothing has ever been
+#: heard from heads a table and still tie-breaks by name among its own kind.
+BEFORE_ANYTHING = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def hours_between(last_seen_at, now):
+    """How many hours something has been quiet, or None if it never spoke."""
+    if last_seen_at is None:
+        return None
+
+    return (now - last_seen_at).total_seconds() / 3600
 
 
 class Expectation:
@@ -129,6 +141,16 @@ class DatasetSilenceRow:
     def silence_label(self):
         """What this dataset's silence is called, for a table cell."""
         return Silence.label(self.silence)
+
+    @property
+    def expectation_label(self):
+        """Where the expectation came from, for a table cell.
+
+        Shown beside the interval rather than instead of it, because a person
+        deciding whether to correct a baseline needs to know whether they are
+        looking at their own answer or the tool's.
+        """
+        return Expectation.LABELS.get(self.expectation, self.expectation)
 
 
 @dataclass(frozen=True)
@@ -228,12 +250,22 @@ def _live_datasets(node, *, now):
         datasets = datasets.filter(node=node)
 
     return list(
-        datasets.annotate(
+        with_last_active_hour(datasets, now=now).annotate(
             learned_interval_hours=F("cadence_baseline__interval_hours"),
             learned_from=F("cadence_baseline__observations"),
-            last_active_hour=Subquery(_last_active_hour(now)),
         )
     )
+
+
+def with_last_active_hour(datasets, *, now):
+    """Each dataset beside the most recent hour it was seen publishing in.
+
+    Public because a dataset nobody is waiting to hear from still has a last
+    publication, and a page that lists one has the same question to answer as
+    this module does -- asked the same way, off the same index, rather than
+    spelled a second time somewhere the two could drift apart.
+    """
+    return datasets.annotate(last_active_hour=Subquery(_last_active_hour(now)))
 
 
 def _last_active_hour(now):

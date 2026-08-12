@@ -153,6 +153,16 @@ class NodeOverviewViewTests(TestCase):
 
         self.assertContains(response, "never heard from")
 
+    def test_each_centre_is_a_link_to_its_own_page(self):
+        """The table says which centre to look at; the page says what stopped."""
+        response = self.client.get(reverse("node_overview"))
+
+        for node in (self.quiet, self.talking):
+            with self.subTest(centre_id=node.centre_id):
+                self.assertContains(
+                    response, reverse("node_details", args=[node.id])
+                )
+
     def test_the_staleness_asked_for_reaches_the_findings(self):
         """What the analysis does with it is its own tests' business."""
         response = self.client.get(reverse("node_overview"), {"staleness": "never_seen"})
@@ -341,6 +351,13 @@ class DatasetAdminTests(TestCase):
 
 
 class NodeDetailViewTests(TestCase):
+    """One centre's page, where the overview's flag is followed to.
+
+    What is asserted here is that each finding reaches the screen: the
+    analysis has its own tests for what the findings say, and a finding
+    computed and not rendered is a finding that stayed in the database.
+    """
+
     def setUp(self):
         self.client.force_login(
             get_user_model().objects.create_superuser("diagnostician", password="s3cret")
@@ -366,17 +383,18 @@ class NodeDetailViewTests(TestCase):
             raw_json={"properties": {"barometer_height": 1624.0}},
         )
 
+    def page(self):
+        return self.client.get(reverse("node_details", args=[self.node.id]))
+
     def test_the_node_detail_page_loads(self):
-        response = self.client.get(reverse("node_details", args=[self.node.id]))
+        response = self.page()
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "0-404-0-KE001")
 
     def test_a_declared_station_that_has_never_transmitted_says_so(self):
         """The declaration is confirmed hourly; only the observation is news."""
-        response = self.client.get(reverse("node_details", args=[self.node.id]))
-
-        self.assertContains(response, "Never")
+        self.assertContains(self.page(), "Declared, never heard from")
 
     def test_a_declared_station_shows_when_it_last_transmitted(self):
         StationSource.objects.create(
@@ -386,10 +404,126 @@ class NodeDetailViewTests(TestCase):
             last_seen=at("2026-08-11T10:45:00"),
         )
 
-        response = self.client.get(reverse("node_details", args=[self.node.id]))
+        response = self.page()
 
-        self.assertContains(response, "2026-08-11 10:45:00")
-        self.assertNotContains(response, "Never")
+        self.assertContains(response, "2026-08-11 10:45")
+        self.assertNotContains(response, "Declared, never heard from")
+
+    def test_a_station_transmitting_that_no_registry_declares_is_on_the_page(self):
+        """A transmitting station is never invisible, declared or not."""
+        StationSource.objects.create(
+            station=Station.objects.create(wigos_id="0-404-0-KE999"),
+            source_type=StationSource.OBSERVED,
+            node=self.node,
+            last_seen=dj_timezone.now(),
+        )
+
+        response = self.page()
+
+        self.assertContains(response, "0-404-0-KE999")
+        self.assertContains(response, "Transmitting, not declared")
+
+    def test_a_dataset_shows_when_it_last_published_and_what_is_expected(self):
+        dataset = Dataset.objects.create(
+            node=self.node,
+            identifier="urn:wmo:md:ke-kmd:synop",
+            title="Surface observations",
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy="origin/a/wis2/ke-kmd/data/core/weather/synop",
+            raw_json={},
+            expected_interval_override_hours=6,
+        )
+        HourlyRollup.objects.create(
+            hour=at("2026-08-01T00:00:00"),
+            source=MessageSource.objects.create(
+                name="Global Broker",
+                source_type=MessageSource.GLOBAL_BROKER,
+                host="globalbroker.example.int",
+            ),
+            node=self.node,
+            dataset=dataset,
+            message_count=3,
+        )
+
+        response = self.page()
+
+        self.assertContains(response, "Surface observations")
+        self.assertContains(response, "2026-08-01 00:00")
+        self.assertContains(response, "Set by hand")
+        self.assertContains(response, "Silent")
+
+    def test_a_failing_sync_run_is_on_the_page_with_what_it_said(self):
+        """Missing data traced to a failing sync, without leaving the page."""
+        SyncLog.objects.create(
+            node=self.node,
+            sync_type=SyncLog.NODE_STATIONS,
+            status=SyncLog.FAILED,
+            error_message="Read timed out reading the station registry",
+        )
+
+        response = self.page()
+
+        self.assertContains(response, "Failed")
+        self.assertContains(response, "Read timed out reading the station registry")
+
+    def test_the_catalogue_run_the_datasets_come_from_is_on_the_page(self):
+        SyncLog.objects.create(
+            catalogue=GlobalDiscoveryCatalogue.objects.create(
+                centre_id="int-wmo-global-discovery",
+                name="WMO Global Discovery Catalogue",
+                base_url="https://gdc.example.int",
+                is_writer=True,
+            ),
+            sync_type=SyncLog.CATALOGUE,
+            status=SyncLog.FAILED,
+            error_message="The catalogue could not be read",
+        )
+
+        response = self.page()
+
+        self.assertContains(response, "The registry")
+        self.assertContains(response, "The catalogue could not be read")
+
+    def test_the_station_export_is_offered_only_where_the_registry_declared_one(self):
+        """The export covers declarations; a transmitting station is not one."""
+        StationSource.objects.filter(source_type=StationSource.NODE_REGISTRY).delete()
+        StationSource.objects.create(
+            station=Station.objects.get(wigos_id="0-404-0-KE001"),
+            source_type=StationSource.OBSERVED,
+            node=self.node,
+            last_seen=dj_timezone.now(),
+        )
+
+        response = self.page()
+
+        self.assertContains(response, "0-404-0-KE001")
+        self.assertNotContains(
+            response, reverse("get_node_stations_csv", args=[self.node.id])
+        )
+
+    def test_a_broker_that_does_not_answer_is_on_the_page_with_what_it_said(self):
+        MessageSource.objects.create(
+            name="ke-kmd origin broker",
+            source_type=MessageSource.ORIGIN_BROKER,
+            node=self.node,
+            centre_id="ke-kmd",
+            host="wis.kmd.test",
+            port=8883,
+            is_reachable=False,
+            last_error="Could not reach wis.kmd.test:8883",
+        )
+
+        response = self.page()
+
+        self.assertContains(response, "Not reachable")
+        self.assertContains(response, "wis.kmd.test:8883")
+        self.assertContains(response, "Could not reach wis.kmd.test:8883")
+
+    def test_a_centre_advertising_no_broker_of_its_own_is_not_called_unreachable(self):
+        response = self.page()
+
+        self.assertContains(response, "No broker advertised")
+        self.assertNotContains(response, "Not reachable")
 
     def test_the_station_csv_preview_loads(self):
         response = self.client.get(reverse("preview_node_stations_csv", args=[self.node.id]))
