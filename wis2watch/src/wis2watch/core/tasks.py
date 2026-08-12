@@ -7,6 +7,7 @@ from django.core.management import call_command
 from wis2watch.config.celery import app
 from .catalogue import sync_catalogues
 from .node_stations import sync_node_stations
+from .oscar import sync_oscar_stations
 from .propagation import evaluate_propagation
 from .retention import expire_raw_messages
 from .rollups import update_rollups
@@ -91,6 +92,22 @@ def run_sync_all_node_stations():
         run_sync_node_stations.delay(node_id)
 
     return node_ids
+
+
+@shared_task
+def run_sync_oscar_stations():
+    """Ask OSCAR/Surface what each monitored country declares.
+
+    Weekly is ample: OSCAR changes slowly, and a country's declared set moves in
+    months rather than hours. Failures are diagnostic state rather than task
+    failures -- a territory OSCAR could not be read for is recorded on the run's
+    own sync log, and the next scheduled run asks again.
+    """
+    sync_log = sync_oscar_stations()
+
+    logger.info("[OSCAR SYNC] %s", sync_log.summary)
+
+    return sync_log.id
 
 
 @shared_task

@@ -10,6 +10,7 @@ from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 from wagtail.snippets.models import register_snippet
 
 from .countries import monitored_country_code_for_centre_id
+from .interpretation.oscar import OPERATIONAL
 
 
 class GlobalDiscoveryCatalogue(TimeStampedModel):
@@ -419,6 +420,24 @@ class Station(TimeStampedModel):
 
 
 class StationSourceQuerySet(models.QuerySet):
+    def declared_in_oscar(self):
+        """What the monitored countries officially declare and still operate.
+
+        OSCAR is notoriously stale -- many of the stations it lists were
+        decommissioned years ago -- so only a station it reports as fully
+        operational counts as declared. Partly operational, closed, silent and
+        unknown are all left out: the declared-but-silent report is only
+        actionable if the stations in it are ones somebody expects to hear from.
+        """
+        return (
+            self.filter(
+                source_type=StationSource.OSCAR,
+                station__operating_status=OPERATIONAL,
+            )
+            .select_related("station")
+            .order_by("station__name")
+        )
+
     def declared_by_node_registry(self, node):
         """A node's own registry declarations, ready to list or export."""
         return (

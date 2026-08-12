@@ -22,13 +22,19 @@ so that the rules above are testable without the network.
 
 import logging
 
-from django.contrib.gis.geos import Point
 from django.db import transaction
 from django.utils import timezone as dj_timezone
 
 from .interpretation import extract_node_stations
 from .models import Station, StationSource, SyncLog
-from .sync import CREATED, ERRORED, UPDATED, SyncCounts, fetch_pages
+from .sync import (
+    CREATED,
+    ERRORED,
+    UPDATED,
+    SyncCounts,
+    declared_position,
+    fetch_pages,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -61,24 +67,6 @@ def fetch_station_pages(node):
     )
 
 
-def _declared_position(declared):
-    """Where the node places the station, or None if it places it nowhere.
-
-    Elevation stands at zero where the registry gives none: the canonical
-    location is three-dimensional, and a station's position is worth keeping
-    even when its height is not stated.
-    """
-    if declared.latitude is None or declared.longitude is None:
-        return None
-
-    return Point(
-        declared.longitude,
-        declared.latitude,
-        declared.elevation if declared.elevation is not None else 0,
-        srid=4326,
-    )
-
-
 def _fill_canonical_record(station, declared):
     """Fill in what nothing else has recorded about the station.
 
@@ -93,7 +81,7 @@ def _fill_canonical_record(station, declared):
         if getattr(declared, field) and not getattr(station, field)
     }
 
-    location = _declared_position(declared)
+    location = declared_position(declared)
     if location and station.location is None:
         filled["location"] = location
 

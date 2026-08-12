@@ -13,6 +13,7 @@ rather than assumed at the call site.
 """
 
 from django.conf import settings
+from django_countries import countries
 
 #: The 54 African UN member states, as ISO 3166 alpha-2 codes.
 AFRICA_COUNTRY_CODES = (
@@ -37,6 +38,19 @@ def get_monitored_country_codes():
         return AFRICA_COUNTRY_CODES
 
     return tuple(code.strip().upper() for code in configured if code.strip())
+
+
+def monitored_territory_codes():
+    """The monitored region as OSCAR/Surface names it: ISO 3166 alpha-3 codes.
+
+    OSCAR files a station under a territory rather than a country, and asks for
+    that territory by its three-letter code. A configured code that names no
+    country -- and so no territory OSCAR could answer for -- is left out rather
+    than sent and rejected.
+    """
+    named = (countries.alpha3(code) for code in get_monitored_country_codes())
+
+    return tuple(territory for territory in named if territory)
 
 
 def centre_id_prefix(centre_id):

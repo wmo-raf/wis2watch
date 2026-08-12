@@ -10,6 +10,9 @@ once, here, rather than once per sync:
 - **What became of the records.** The same four counts, and a run that stepped
   over a record it could not store succeeded only partly. That is what keeps
   two sync logs comparable when they are read side by side on a node's page.
+- **Where a source places a station.** Every source that declares a station
+  gives it a latitude, a longitude and sometimes an elevation, and the canonical
+  location is one three-dimensional point whichever source supplied it.
 
 What differs between the syncs -- which URL, which credentials, how long to
 wait -- stays with the sync that knows it.
@@ -18,6 +21,7 @@ wait -- stays with the sync that knows it.
 from dataclasses import dataclass
 
 import requests
+from django.contrib.gis.geos import Point
 from django.utils import timezone as dj_timezone
 
 from .interpretation import next_page_url
@@ -75,6 +79,24 @@ def fetch_pages(url, params=None, verify=True, timeout=FETCH_TIMEOUT, read_from=
     raise PagingDidNotTerminate(
         f"stopped paging {read_from} after {MAX_PAGES} pages; "
         "its next links do not terminate"
+    )
+
+
+def declared_position(declared):
+    """Where a source places a station, or None if it places it nowhere.
+
+    Elevation stands at zero where the source gives none: the canonical location
+    is three-dimensional, and a station's position is worth keeping even when its
+    height is not stated.
+    """
+    if declared.latitude is None or declared.longitude is None:
+        return None
+
+    return Point(
+        declared.longitude,
+        declared.latitude,
+        declared.elevation if declared.elevation is not None else 0,
+        srid=4326,
     )
 
 
