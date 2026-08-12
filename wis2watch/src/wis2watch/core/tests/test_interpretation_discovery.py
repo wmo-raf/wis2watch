@@ -1,11 +1,12 @@
 """WCMP2 discovery metadata extraction, against records captured from a GDC.
 
 The fixture is a real response from the Canadian Global Discovery Catalogue,
-trimmed to nine records that between them cover what the catalogue actually
+trimmed to ten records that between them cover what the catalogue actually
 returns: records whose topic lives in ``wmo:topicHierarchy``, records where it
 lives only in a link, records with no centre ID property, records whose own
-broker is advertised and records where only Global Brokers are, and records
-that carry no topic anywhere and so cannot be used at all.
+broker is advertised and records where only Global Brokers are, records
+carrying a canonical link and records carrying none, and records that carry no
+topic anywhere and so cannot be used at all.
 """
 
 from datetime import datetime, timezone
@@ -146,6 +147,58 @@ class NodeExtractionTests(NoNetworkTestCase):
         self.assertFalse(record.node.is_monitored)
 
 
+class NodeBaseUrlTests(NoNetworkTestCase):
+    """Where to ask a centre directly, read from where it serves its metadata."""
+
+    def test_the_base_url_is_the_scheme_and_host_of_the_canonical_link(self):
+        """``ke-meteo`` serves its metadata from ``/data/metadata`` on its own host."""
+        record = extract_discovery_record(
+            feature("urn:wmo:md:ke-meteo:synop-dataset-surface-observations")
+        )
+
+        self.assertEqual(record.node.base_url, "http://wis.meteo.go.ke")
+
+    def test_a_canonical_link_that_is_only_a_host_still_names_the_node(self):
+        """``tg-anamet`` advertises its wis2box as a bare host, and the file too."""
+        record = extract_discovery_record(
+            feature("urn:wmo:md:tg-anamet:core.surface-based-observations.synop")
+        )
+
+        self.assertEqual(record.node.base_url, "https://wis2.meteotogo.tg")
+
+    def test_a_record_with_no_canonical_link_names_no_base_url(self):
+        record = extract_discovery_record(
+            feature("urn:wmo:md:sz-swazimet:surface-based-observations.synop")
+        )
+
+        self.assertEqual(record.node.base_url, "")
+
+    def test_broker_links_are_not_mistaken_for_the_nodes_address(self):
+        """``cg-met`` advertises its own broker and no canonical link at all."""
+        record = extract_discovery_record(
+            feature("urn:wmo:md:cg-met:core.climate.surface-based-observations.climat")
+        )
+
+        self.assertEqual(record.node.base_url, "")
+
+    def test_a_canonical_link_that_is_not_web_addressed_is_passed_over(self):
+        """A host reached over anything but HTTP is not one the API answers on."""
+        source = feature("urn:wmo:md:ke-meteo:synop-dataset-surface-observations")
+        for link in source["links"]:
+            if link.get("rel") == "canonical":
+                link["href"] = "mqtts://everyone:everyone@wis.meteo.go.ke:8883"
+
+        self.assertEqual(extract_discovery_record(source).node.base_url, "")
+
+    def test_a_canonical_link_naming_no_host_is_passed_over(self):
+        source = feature("urn:wmo:md:ke-meteo:synop-dataset-surface-observations")
+        for link in source["links"]:
+            if link.get("rel") == "canonical":
+                link["href"] = "/data/metadata/urn:wmo:md:ke-meteo:synop.json"
+
+        self.assertEqual(extract_discovery_record(source).node.base_url, "")
+
+
 class OriginBrokerExtractionTests(NoNetworkTestCase):
     def test_the_nodes_own_broker_is_extracted_from_its_notification_link(self):
         record = extract_discovery_record(
@@ -225,7 +278,9 @@ class CollectionExtractionTests(NoNetworkTestCase):
         monitored = {r.node.centre_id for r in records if r.node.is_monitored}
         unmonitored = {r.node.centre_id for r in records if not r.node.is_monitored}
 
-        self.assertEqual(monitored, {"ke-meteo", "cg-met", "sz-swazimet", "gh-gmet"})
+        self.assertEqual(
+            monitored, {"ke-meteo", "cg-met", "sz-swazimet", "gh-gmet", "tg-anamet"}
+        )
         self.assertEqual(unmonitored, {"il-ims", "int-eumetsat", "us-cimss"})
 
     def test_a_collection_with_no_features_yields_nothing(self):
