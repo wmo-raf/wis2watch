@@ -1,8 +1,9 @@
 from django.urls import path, reverse
 from wagtail import hooks
 from wagtail.admin.menu import MenuItem
+from wagtail.snippets.models import register_snippet
 
-from wis2watch.core.viewsets import admin_viewsets
+from wis2watch.core.viewsets import DatasetViewSet, admin_viewsets
 from .views import (
     get_node_stations_as_csv,
     node_details,
@@ -45,6 +46,13 @@ def register_overview_menu_item():
 @hooks.register("register_admin_viewset")
 def register_viewsets():
     return admin_viewsets
+
+
+# Registered as a snippet with its own menu entry rather than through
+# `admin_viewsets`, because the snippets menu itself is hidden: without an
+# entry of its own, the one hand-settable thing about a dataset would be
+# reachable only by typing a URL.
+register_snippet(DatasetViewSet)
 
 
 @hooks.register("register_icons")

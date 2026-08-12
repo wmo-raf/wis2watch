@@ -3,8 +3,27 @@ from django.utils.translation import gettext_lazy as _
 from wagtail.admin.views import generic
 from wagtail.admin.viewsets.model import ModelViewSet
 from wagtail.admin.widgets import ListingButton
+from wagtail.permission_policies.base import ModelPermissionPolicy
+from wagtail.snippets.views.snippets import SnippetViewSet
 
-from .models import GlobalDiscoveryCatalogue, MessageSource, WIS2Node
+from .models import Dataset, GlobalDiscoveryCatalogue, MessageSource, WIS2Node
+
+
+class SyncManagedPermissionPolicy(ModelPermissionPolicy):
+    """What a person may do to records a sync owns: edit them, nothing more.
+
+    A dataset exists because a catalogue described it. Creating one by hand
+    would produce a record with no discovery metadata behind it, and deleting
+    one would take its history off the rollups that counted it -- while the
+    next sync put it straight back. Refusing both here is what keeps the admin
+    from offering an action that cannot end well.
+    """
+
+    def user_has_permission(self, user, action):
+        if action in {"add", "delete"}:
+            return False
+
+        return super().user_has_permission(user, action)
 
 
 class WIS2NodeIndexView(generic.IndexView):
@@ -57,6 +76,29 @@ class GlobalDiscoveryCatalogueViewSet(ModelViewSet):
     add_to_admin_menu = True
     menu_order = 120
     list_display = ["name", "centre_id", "is_writer", "is_active"]
+
+
+class DatasetViewSet(SnippetViewSet):
+    """The datasets the catalogue knows, so an expectation can be set by hand.
+
+    This is where a learned cadence gets corrected and where a dataset with
+    too little history to learn from gets told what to expect -- the one thing
+    about a sync-managed record that is a person's to say.
+    """
+
+    model = Dataset
+    base_url_path = "datasets"
+    icon = "list-ul"
+    menu_label = "Datasets"
+    add_to_admin_menu = True
+    menu_order = 130
+    list_display = ["title", "node", "status", "expected_interval_override_hours"]
+    list_filter = ["status", "node"]
+    search_fields = ["title", "identifier", "wmo_topic_hierarchy"]
+
+    @property
+    def permission_policy(self):
+        return SyncManagedPermissionPolicy(self.model)
 
 
 admin_viewsets = [

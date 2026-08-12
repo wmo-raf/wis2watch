@@ -89,9 +89,26 @@
         }
 
         .badge-not_attempted,
-        .badge-not_advertised {
+        .badge-not_advertised,
+        .badge-unknown {
             background: #eee;
             color: #555;
+        }
+
+        .badge-silent {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .badge-on_schedule {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .silence-detail {
+            margin-top: 4px;
+            color: #555;
+            font-size: 0.8em;
         }
 
         .broker-error {
@@ -146,6 +163,9 @@
                 <th title="{% trans "Whether this centre's own broker answers from outside" %}">
                     {% trans "Origin broker" %}
                 </th>
+                <th title="{% trans 'Each dataset judged against its own learned or stated cadence' %}">
+                    {% trans "Silence" %}
+                </th>
                 <th>{% trans "Status" %}</th>
             </tr>
             </thead>
@@ -176,6 +196,14 @@
                         {% if row.origin_last_error %}
                             <div class="broker-error" title="{{ row.origin_last_error }}">
                                 {{ row.origin_last_error|truncatechars:60 }}
+                            </div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ row.silence }}">{{ row.silence_label }}</span>
+                        {% if row.judged_dataset_count %}
+                            <div class="silence-detail">
+                                {% blocktrans with silent=row.silent_dataset_count judged=row.judged_dataset_count %}{{ silent }} of {{ judged }} datasets overdue{% endblocktrans %}
                             </div>
                         {% endif %}
                     </td>

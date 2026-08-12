@@ -5,6 +5,7 @@ from celery_singleton import Singleton
 from django.core.management import call_command
 
 from wis2watch.config.celery import app
+from .cadence import learn_cadence_baselines
 from .catalogue import sync_catalogues
 from .node_stations import sync_node_stations
 from .oscar import sync_oscar_stations
@@ -121,6 +122,23 @@ def run_update_rollups():
     counts = update_rollups()
 
     logger.info("[ROLLUPS] %s", counts.summary)
+
+    return counts.summary
+
+
+@shared_task
+def run_learn_cadence_baselines():
+    """Learn what each dataset's normal publishing rhythm is.
+
+    Daily is ample and deliberately unhurried: a rhythm is learned from months
+    of buckets and moves in weeks, so running it oftener would spend a scan of
+    the region's history to arrive at the same number. A missed run costs
+    nothing either -- the baselines already learned stand, and silence keeps
+    being judged against them.
+    """
+    counts = learn_cadence_baselines()
+
+    logger.info("[CADENCE] %s", counts.summary)
 
     return counts.summary
 

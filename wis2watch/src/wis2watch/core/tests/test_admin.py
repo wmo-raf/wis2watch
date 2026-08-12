@@ -6,7 +6,10 @@ from django.urls import reverse
 from django.utils import timezone as dj_timezone
 
 from wis2watch.core.models import (
+    CadenceBaseline,
+    Dataset,
     GlobalDiscoveryCatalogue,
+    HourlyRollup,
     MessageSource,
     NodeLastSeen,
     Station,
@@ -164,6 +167,103 @@ class NodeOverviewViewTests(TestCase):
 
         self.assertContains(response, "No broker advertised")
         self.assertNotContains(response, "Not reachable")
+
+    def test_a_centre_with_a_dataset_past_its_expectation_says_so_on_the_screen(self):
+        """A finding nobody can see is a finding that stayed in the database."""
+        dataset = Dataset.objects.create(
+            node=self.talking,
+            identifier="urn:wmo:md:ke-kmd:synop",
+            title="Surface observations",
+            wmo_data_policy="core",
+            wmo_topic_hierarchy="origin/a/wis2/ke-kmd/data/core/weather/synop",
+            raw_json={},
+            expected_interval_override_hours=6,
+        )
+        source = MessageSource.objects.create(
+            name="Global Broker",
+            source_type=MessageSource.GLOBAL_BROKER,
+            host="globalbroker.example.int",
+        )
+        HourlyRollup.objects.create(
+            hour=at("2026-08-01T00:00:00"),
+            source=source,
+            node=self.talking,
+            dataset=dataset,
+            message_count=3,
+        )
+
+        response = self.client.get(reverse("node_overview"))
+
+        self.assertContains(response, "Silent")
+        self.assertContains(response, "1 of 1 datasets overdue")
+
+    def test_a_centre_with_nothing_to_judge_is_not_called_silent_on_the_screen(self):
+        response = self.client.get(reverse("node_overview"))
+
+        self.assertContains(response, "Not judged")
+        self.assertNotContains(response, "Silent")
+
+
+class DatasetAdminTests(TestCase):
+    """Where a dataset's expected interval is set by hand.
+
+    The override is the answer for a dataset whose learned rhythm is wrong and
+    for one with too little history to have learned a rhythm at all, so it has
+    to be somewhere a person can actually reach.
+    """
+
+    def setUp(self):
+        self.client.force_login(
+            get_user_model().objects.create_superuser("diagnostician", password="s3cret")
+        )
+        self.node = WIS2Node.objects.create(centre_id="ke-kmd", name="Kenya Met")
+        self.dataset = Dataset.objects.create(
+            node=self.node,
+            identifier="urn:wmo:md:ke-kmd:synop",
+            title="Surface observations",
+            wmo_data_policy="core",
+            wmo_topic_hierarchy="origin/a/wis2/ke-kmd/data/core/weather/synop",
+            raw_json={},
+        )
+
+    def url(self, name, *args):
+        return reverse(f"wagtailsnippets_wis2watchcore_dataset:{name}", args=args)
+
+    def test_the_datasets_listing_loads(self):
+        response = self.client.get(self.url("list"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Surface observations")
+
+    def test_the_expected_interval_can_be_set_by_hand(self):
+        response = self.client.post(
+            self.url("edit", self.dataset.pk),
+            {"expected_interval_override_hours": "72"},
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.dataset.refresh_from_db()
+        self.assertEqual(self.dataset.expected_interval_override_hours, 72)
+
+    def test_what_the_catalogue_says_survives_setting_one(self):
+        """Everything but the expectation is the catalogue's to say."""
+        self.client.post(
+            self.url("edit", self.dataset.pk),
+            {
+                "expected_interval_override_hours": "72",
+                "title": "Something else entirely",
+            },
+        )
+
+        self.dataset.refresh_from_db()
+
+        self.assertEqual(self.dataset.title, "Surface observations")
+
+    def test_a_dataset_cannot_be_invented_by_hand(self):
+        """A dataset exists because a catalogue described it; the sync owns that."""
+        response = self.client.get(self.url("add"))
+
+        self.assertIn(response.status_code, (302, 403))
 
 
 class NodeDetailViewTests(TestCase):

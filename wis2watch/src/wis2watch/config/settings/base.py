@@ -331,9 +331,25 @@ WIS2WATCH_PROPAGATION_WINDOW_HOURS = env.int(
 )
 
 # How long a centre may be quiet before the node overview calls it stale. A
-# flat threshold for sorting the table; judging silence against each dataset's
-# own learned cadence is a separate and more careful question.
+# flat threshold, and only for sorting the table: whether a centre's quiet is
+# actually a fault is judged per dataset against its own cadence, below.
 WIS2WATCH_STALE_AFTER_HOURS = env.int("WIS2WATCH_STALE_AFTER_HOURS", 24)
+
+# How much history each dataset's publishing rhythm is learned from, in days.
+# Long, because that is what gives a daily or weekly dataset enough gaps to
+# have a rhythm at all. A dataset publishing less often than a few times in the
+# window is what the per-dataset manual override exists for.
+WIS2WATCH_CADENCE_WINDOW_DAYS = env.int("WIS2WATCH_CADENCE_WINDOW_DAYS", 90)
+
+# Which percentile of a dataset's own observed gaps becomes the interval it is
+# expected to publish within. High enough that the gaps it routinely has are
+# inside the expectation, low enough that a single past outage is not.
+WIS2WATCH_CADENCE_PERCENTILE = env.int("WIS2WATCH_CADENCE_PERCENTILE", 95)
+
+# How many observed gaps a dataset must show before an interval is learned from
+# it at all. Below this it is left without one and reported as unjudged rather
+# than given a guess.
+WIS2WATCH_CADENCE_MIN_OBSERVATIONS = env.int("WIS2WATCH_CADENCE_MIN_OBSERVATIONS", 3)
 
 # How many hourly buckets of traffic the node overview reports as recent
 # volume, ending with the hour in progress.
@@ -397,6 +413,12 @@ CELERY_BEAT_SCHEDULE = {
     'update-rollups': {
         'task': 'wis2watch.core.tasks.run_update_rollups',
         'schedule': 900.0,  # Every 15 minutes
+    },
+    # A publishing rhythm is learned from months of buckets and moves in weeks,
+    # so a daily run arrives at the same number a frequent one would.
+    'learn-cadence-baselines': {
+        'task': 'wis2watch.core.tasks.run_learn_cadence_baselines',
+        'schedule': 86400.0,  # Daily
     },
     'evaluate-propagation': {
         'task': 'wis2watch.core.tasks.run_evaluate_propagation',

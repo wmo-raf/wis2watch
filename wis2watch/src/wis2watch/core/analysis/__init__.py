@@ -19,11 +19,25 @@ from .overview import (
     default_volume_hours,
     node_overview,
 )
+from .silence import (
+    DatasetSilenceRow,
+    Expectation,
+    NodeSilence,
+    Silence,
+    dataset_silence,
+    silence_by_node,
+)
 
 __all__ = [
+    "DatasetSilenceRow",
+    "Expectation",
     "NodeOverviewRow",
+    "NodeSilence",
     "OriginReachability",
+    "Silence",
     "Staleness",
+    "dataset_silence",
     "default_volume_hours",
     "node_overview",
+    "silence_by_node",
 ]
