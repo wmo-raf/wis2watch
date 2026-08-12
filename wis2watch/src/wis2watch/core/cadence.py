@@ -19,6 +19,15 @@ shorter than most of a bursty dataset's real gaps and would report it silent
 between bursts; and rather than a maximum, which is whatever its worst outage
 ever was and would make the dataset unreportable ever after.
 
+That separation only comes with history. A percentile interpolates, so on the
+handful of gaps a barely-eligible dataset offers, the ninety-fifth sits close
+to the longest of them -- which is to say a sparse dataset is judged nearly as
+leniently as by its worst gap, and one outage in twenty still drags its
+interval up. Deliberate, in that direction: an expectation too loose reports
+nothing, while one too tight reports a centre that did nothing wrong. It
+sharpens as the dataset accumulates history, and how much history is behind
+any given interval is kept beside it as ``observations``.
+
 Every vantage point counts, deduplicated by hour. Whether the world received
 what a centre published is the propagation question and has its own report;
 the question here is whether the centre is publishing at all, and answering it
@@ -112,17 +121,17 @@ class CadenceCounts:
         return f"learned={self.learned}"
 
 
-def cadence_window_days():
+def default_window_days():
     """How much history a run learns from, unless told otherwise."""
     return getattr(settings, "WIS2WATCH_CADENCE_WINDOW_DAYS", DEFAULT_WINDOW_DAYS)
 
 
-def cadence_percentile():
+def default_percentile():
     """Which percentile of a dataset's gaps becomes its expectation."""
     return getattr(settings, "WIS2WATCH_CADENCE_PERCENTILE", DEFAULT_PERCENTILE)
 
 
-def required_observations():
+def default_min_observations():
     """How many gaps a dataset must show before anything is learned from it."""
     return getattr(
         settings, "WIS2WATCH_CADENCE_MIN_OBSERVATIONS", DEFAULT_MIN_OBSERVATIONS
@@ -137,7 +146,7 @@ def cadence_window_start(now, window_days=None):
     depending on the minute the job happened to run at, which would make the
     interval learned for a sparse dataset depend on the schedule.
     """
-    days = cadence_window_days() if window_days is None else window_days
+    days = default_window_days() if window_days is None else window_days
 
     return floor_to_hour(now - timedelta(days=days))
 
@@ -175,7 +184,7 @@ def learn_cadence_baselines(
     now = now or dj_timezone.now()
     since = cadence_window_start(now, window_days)
     required = (
-        required_observations() if min_observations is None else min_observations
+        default_min_observations() if min_observations is None else min_observations
     )
 
     baselines = [
@@ -188,7 +197,7 @@ def learn_cadence_baselines(
         for dataset_id, interval_hours, observations in _learned_intervals(
             since=since,
             until=cadence_window_end(now),
-            percentile=cadence_percentile() if percentile is None else percentile,
+            percentile=default_percentile() if percentile is None else percentile,
             required=required,
         )
     ]

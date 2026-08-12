@@ -316,11 +316,15 @@ class MessageSource(TimeStampedModel):
         return self.node.centre_id if self.node_id else ""
 
 
-@register_snippet
 class Dataset(TimeStampedModel):
     """
     A dataset a node claims to publish, as described by a WCMP2 discovery
     metadata record.
+
+    Registered for the admin by ``DatasetViewSet`` rather than here, because
+    what a person may do to a sync-managed record is part of what the record
+    is: its expectation is theirs to set, and everything else is the
+    catalogue's.
     """
 
     DATA_POLICY_CHOICES = [
@@ -370,10 +374,14 @@ class Dataset(TimeStampedModel):
     last_synced = models.DateTimeField(null=True, blank=True)
 
     # A dataset is sync-managed, so the edit form offers the one field a person
-    # is meant to set: what this tool should expect of it. Everything else is
-    # the catalogue's to say, and a hand-edit would be overwritten by the next
-    # sync anyway.
+    # is meant to set -- what this tool should expect of it -- and shows the
+    # rest for identification only. Everything else is the catalogue's to say,
+    # and a hand-edit would be overwritten by the next sync anyway.
     panels = [
+        FieldPanel("title", read_only=True),
+        FieldPanel("identifier", read_only=True),
+        FieldPanel("wmo_topic_hierarchy", read_only=True),
+        FieldPanel("status", read_only=True),
         FieldPanel("expected_interval_override_hours"),
     ]
 
@@ -810,6 +818,11 @@ class HourlyRollup(TimeStampedModel):
         ]
         indexes = [
             models.Index(fields=["node", "-hour"]),
+            # "When did this dataset last publish" is asked of every dataset in
+            # the region at once, every time the overview is opened. Leading on
+            # the dataset makes each of those answers one backwards walk of
+            # this index rather than a scan of the node's whole history.
+            models.Index(fields=["dataset", "-hour"]),
         ]
         verbose_name = _("Hourly Rollup")
         verbose_name_plural = _("Hourly Rollups")

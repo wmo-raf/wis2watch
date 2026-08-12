@@ -235,10 +235,19 @@ class NothingToJudgeTests(SilenceTestCase):
         self.assertEqual(row.silence, Silence.UNKNOWN)
 
 
-class BeyondTheWindowTests(SilenceTestCase):
-    """Datasets that published nothing the window can see."""
+class NeverHeardFromTests(SilenceTestCase):
+    """Datasets nothing has ever been seen publishing.
 
-    def test_a_dataset_absent_from_the_whole_window_is_silent(self):
+    What such a dataset is measured against is how far this tool's own records
+    go back, because that is the whole of what its absence is evidence of.
+    """
+
+    def records_reaching_back(self, hours):
+        """Records of the region publishing, starting that long ago."""
+        self.last_published(self.dataset("something-else"), NOW - timedelta(hours=hours))
+
+    def test_a_dataset_never_seen_publishing_is_silent(self):
+        self.records_reaching_back(40)
         self.learned(self.dataset(), 6)
 
         row = self.row()
@@ -246,16 +255,49 @@ class BeyondTheWindowTests(SilenceTestCase):
         self.assertIsNone(row.last_active_hour)
         self.assertTrue(row.is_silent)
 
-    def test_how_long_it_has_been_quiet_is_at_least_the_window(self):
+    def test_it_is_quiet_for_as_long_as_the_records_go_back(self):
+        self.records_reaching_back(40)
         self.learned(self.dataset(), 6)
 
-        self.assertGreaterEqual(self.row(window_days=90).hours_quiet, 24 * 90)
+        self.assertEqual(self.row().hours_quiet, 40)
 
     def test_a_dataset_that_may_simply_not_be_due_yet_is_not_called_silent(self):
-        """Expected less often than the window is long: absence proves nothing."""
+        """Expected less often than the records go back: absence proves nothing."""
+        self.records_reaching_back(40)
         self.dataset("annual", expects=24 * 365)
 
-        self.assertFalse(self.row("annual", window_days=90).is_silent)
+        self.assertFalse(self.row("annual").is_silent)
+
+    def test_a_tool_holding_no_records_at_all_calls_nothing_silent(self):
+        """A fresh deployment has not witnessed an outage, only its own start."""
+        self.learned(self.dataset(), 6)
+
+        self.assertFalse(self.row().is_silent)
+
+
+class LongMemoryTests(SilenceTestCase):
+    """How far back the last publication is looked for: all the way.
+
+    A trailing window is exactly what a monthly or yearly dataset defeats --
+    bound the search and a dataset's absence can never exceed what was looked
+    at, so the rarest datasets, which are the ones the override exists for,
+    would be the ones that could never be found silent.
+    """
+
+    def test_a_publication_older_than_any_window_is_still_the_one_it_last_made(self):
+        monthly = self.dataset("monthly", expects=24 * 30)
+        self.last_published(monthly, NOW - timedelta(days=200))
+
+        row = self.row("monthly")
+
+        self.assertEqual(row.last_active_hour, NOW - timedelta(days=200))
+        self.assertTrue(row.is_silent)
+
+    def test_a_yearly_dataset_still_within_its_interval_is_not_silent(self):
+        annual = self.dataset("annual", expects=24 * 365)
+        self.last_published(annual, NOW - timedelta(days=200))
+
+        self.assertFalse(self.row("annual").is_silent)
 
 
 class ScopeTests(SilenceTestCase):

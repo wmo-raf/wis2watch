@@ -53,9 +53,10 @@ DEFAULT_VOLUME_HOURS = 24
 BEFORE_ANYTHING = datetime.min.replace(tzinfo=timezone.utc)
 
 #: How long a centre may be quiet before the table calls it stale. A flat
-#: threshold, deliberately: judging silence against a dataset's own learned
-#: cadence is a later and much more careful question, and this table's job is
-#: to put the centres worth looking at first.
+#: threshold, deliberately: it is what the table sorts by, and its job is to
+#: put the centres worth looking at first. Whether a centre's quiet is actually
+#: a fault is the silence column's question, judged per dataset against its own
+#: cadence.
 DEFAULT_STALE_AFTER_HOURS = 24
 
 
@@ -129,7 +130,7 @@ class NodeOverviewRow:
     @property
     def silence_label(self):
         """What the centre's silence is called, for a table cell."""
-        return Silence.LABELS.get(self.silence, self.silence)
+        return Silence.label(self.silence)
 
     @property
     def origin_reachability_label(self):
