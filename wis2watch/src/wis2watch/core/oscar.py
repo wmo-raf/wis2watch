@@ -60,10 +60,6 @@ FACILITY_TYPES = {
     "Air (mobile)": "airMobile",
 }
 
-#: What OSCAR describes that the canonical record also holds. Written over where
-#: OSCAR has something to say, left alone where it has not.
-OFFICIAL_FIELDS = ("name", "facility_type", "territory", "wmo_region", "operating_status")
-
 
 class TerritoryDidNotFitOnePage(Exception):
     """Raised when OSCAR answers a territory in more than one page.
@@ -99,11 +95,6 @@ def fetch_territory_stations(territory):
     return payload
 
 
-def facility_type(station_type):
-    """The WIGOS facility type an OSCAR station type names, if it names one."""
-    return FACILITY_TYPES.get(station_type, "")
-
-
 def _record_official_description(station, declared):
     """Describe the station as its country officially declares it.
 
@@ -113,7 +104,7 @@ def _record_official_description(station, declared):
     """
     described = {
         "name": declared.name,
-        "facility_type": facility_type(declared.station_type),
+        "facility_type": FACILITY_TYPES.get(declared.station_type, ""),
         "territory": declared.territory,
         "wmo_region": declared.wmo_region,
         "operating_status": declared.operating_status,
@@ -150,7 +141,9 @@ def apply_declared_station(declared):
     """
     try:
         with transaction.atomic():
-            station, _ = Station.objects.get_or_create(wigos_id=declared.wigos_id)
+            station, _ = Station.objects.resolve(
+                declared.wigos_id, *declared.other_wigos_ids
+            )
 
             _record_official_description(station, declared)
 

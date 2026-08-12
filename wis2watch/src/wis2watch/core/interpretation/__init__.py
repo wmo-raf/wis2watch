@@ -35,7 +35,12 @@ from .notifications import (
     station_attribution,
 )
 from .ogcapi import next_page_url
-from .oscar import OscarStation, extract_oscar_station, extract_oscar_stations
+from .oscar import (
+    OPERATIONAL,
+    OscarStation,
+    extract_oscar_station,
+    extract_oscar_stations,
+)
 from .timestamps import parse_timestamp
 from .topics import CACHE, ORIGIN, ParsedTopic, parse_topic, subscription_topic
 
@@ -43,6 +48,7 @@ __all__ = [
     "BrokerConnection",
     "CACHE",
     "DEFAULT_PORTS",
+    "OPERATIONAL",
     "DiscoveredDataset",
     "DiscoveredNode",
     "DiscoveryRecord",

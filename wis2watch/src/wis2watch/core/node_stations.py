@@ -105,7 +105,7 @@ def apply_declared_station(node, declared):
     """
     try:
         with transaction.atomic():
-            station, _ = Station.objects.get_or_create(wigos_id=declared.wigos_id)
+            station, _ = Station.objects.resolve(declared.wigos_id)
 
             _fill_canonical_record(station, declared)
 

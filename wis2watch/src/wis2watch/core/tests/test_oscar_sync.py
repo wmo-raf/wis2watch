@@ -49,7 +49,7 @@ DECLARED = {
 }
 
 #: The ones OSCAR reports as fully operational, and so the declared set.
-OPERATIONAL = {
+DECLARED_OPERATIONAL = {
     "0-404-300-402261127AS63663",
     "0-404-300-261370680RA34105",
     "0-404-300-301570787AS00074",
@@ -178,6 +178,14 @@ class DeclaredStationTests(OscarStationsTestCase):
         )
         self.assertFalse(Station.objects.filter(wigos_id="0-404-0-63663").exists())
 
+    def test_the_identifiers_a_station_is_also_known_by_are_recorded(self):
+        """ALUPE transmits as `0-404-0-63663`; OSCAR files it under neither."""
+        self.sync()
+
+        station = Station.objects.get(wigos_id="0-404-300-402261127AS63663")
+
+        self.assertEqual(station.other_wigos_ids, ["0-404-0-63663"])
+
     def test_the_declared_position_is_kept_with_its_elevation(self):
         self.sync()
 
@@ -243,7 +251,7 @@ class OperationalStatusTests(OscarStationsTestCase):
                     "station__wigos_id", flat=True
                 )
             ),
-            OPERATIONAL,
+            DECLARED_OPERATIONAL,
         )
 
     def test_a_status_the_capture_does_not_carry_is_still_not_operational(self):
@@ -287,6 +295,27 @@ class MergedRecordTests(OscarStationsTestCase):
         station = Station.objects.get(wigos_id="0-20008-0-MLD")
 
         self.assertEqual(Station.objects.filter(wigos_id="0-20008-0-MLD").count(), 1)
+        self.assertEqual(
+            set(station.sources.values_list("source_type", flat=True)),
+            {StationSource.OSCAR, StationSource.NODE_REGISTRY},
+        )
+
+    def test_a_station_known_by_another_of_its_identifiers_is_not_declared_twice(self):
+        """Kenya transmits ALUPE as `0-404-0-63663`, which OSCAR files second."""
+        self.node_declaring("0-404-0-63663")
+
+        self.sync()
+
+        station = Station.objects.get(wigos_id="0-404-0-63663")
+
+        # The station the node already knew, and the twelve OSCAR alone declares.
+        self.assertEqual(Station.objects.count(), len(DECLARED))
+        self.assertFalse(
+            Station.objects.filter(wigos_id="0-404-300-402261127AS63663").exists()
+        )
+        self.assertEqual(
+            station.other_wigos_ids, ["0-404-300-402261127AS63663"]
+        )
         self.assertEqual(
             set(station.sources.values_list("source_type", flat=True)),
             {StationSource.OSCAR, StationSource.NODE_REGISTRY},
