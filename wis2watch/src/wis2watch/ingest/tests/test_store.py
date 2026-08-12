@@ -23,7 +23,7 @@ from wis2watch.core.models import (
     StationSource,
     WIS2Node,
 )
-from wis2watch.core.tests.support import load_jsonl_fixture
+from wis2watch.core.tests.support import in_region, load_jsonl_fixture
 from wis2watch.ingest.store import store_notifications
 
 CAPTURE = "global_broker_notifications.jsonl"
@@ -35,9 +35,6 @@ KE_STATION = "0-20000-0-63708"
 
 DJ_TOPIC = "origin/a/wis2/dj-anm/data/recommended/weather/aviation/taf"
 BR_TOPIC = "origin/a/wis2/br-inmet/data/core/weather/surface-based-observations/synop"
-
-#: The centres in the capture that belong to no monitored country.
-OUT_OF_REGION = ("br-inmet", "ca-eccc-msc")
 
 
 def captured():
@@ -498,11 +495,7 @@ class BatchTests(StoreTestCase):
         Canadian centres alongside the African ones -- which is exactly what a
         wildcard sweep is offered, and what the store refuses.
         """
-        return [
-            (topic, payload)
-            for topic, payload in self.received()
-            if topic.split("/")[3] not in OUT_OF_REGION
-        ]
+        return in_region(self.received())
 
     def test_the_regions_traffic_is_stored(self):
         counts = store_notifications(self.source, self.received())

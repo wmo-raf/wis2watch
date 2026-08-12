@@ -22,15 +22,12 @@ from wis2watch.core.models import (
     NotificationMessage,
     WIS2Node,
 )
-from wis2watch.core.tests.support import load_jsonl_fixture, origin_broker
+from wis2watch.core.tests.support import in_region, load_jsonl_fixture, origin_broker
 from wis2watch.ingest.client import RECONNECT_MAX_DELAY
 from wis2watch.ingest.store import store_notifications
 from wis2watch.ingest.supervisor import Supervisor
 
 CAPTURE = "global_broker_notifications.jsonl"
-
-#: The centres in the capture that belong to no monitored country.
-OUT_OF_REGION = ("br-inmet", "ca-eccc-msc")
 
 
 def captured_messages(limit=None):
@@ -41,20 +38,6 @@ def captured_messages(limit=None):
         records = records[:limit]
 
     return [(record["topic"], record["payload"]) for record in records]
-
-
-def in_region(received):
-    """The received traffic belonging to a monitored country.
-
-    A capture off a Global Broker carries the world, and the store keeps the
-    region -- so what a drain leaves behind is this, not everything it was
-    handed.
-    """
-    return [
-        (topic, payload)
-        for topic, payload in received
-        if topic.split("/")[3] not in OUT_OF_REGION
-    ]
 
 
 class FakeListener:
@@ -144,6 +127,7 @@ class SweepUnderControl:
 
     def __init__(self):
         self.is_running = False
+        self.is_over_now = False
         self.observed = {}
         self.finished = False
         self._changed = False
@@ -159,8 +143,17 @@ class SweepUnderControl:
     def topics(self):
         return (self.SWEEP_TOPIC,) if self.is_running else ()
 
+    def is_over(self, now=None):
+        return self.is_running and self.is_over_now
+
     def service(self, now=None):
+        if self.is_over(now):
+            self.finish(now)
+
+            return True
+
         changed, self._changed = self._changed, False
+
         return changed
 
     def observe(self, centres, now=None):
@@ -816,6 +809,21 @@ class WildcardSweepTests(SupervisorTestCase):
         self.supervisor.drain_listeners()
 
         self.assertEqual(NotificationMessage.objects.count(), len(delivered))
+
+    def test_what_arrived_at_the_end_of_a_window_is_still_offered_to_it(self):
+        """The tail of every window would otherwise be drained after it closed."""
+        broker = self.broker()
+        self.node("ke-meteo")
+        sweep = self.sweep_under_control()
+        self.supervisor.start_listeners()
+        sweep.open()
+
+        sweep.is_over_now = True
+        self.listeners[broker].received = captured_messages()
+        self.supervisor.service_sweep()
+
+        self.assertEqual(sorted(sweep.observed), ["dj-anm", "ng-nimet"])
+        self.assertTrue(sweep.finished)
 
     def test_shutting_down_mid_sweep_closes_the_run(self):
         self.broker()

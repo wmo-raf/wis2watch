@@ -303,15 +303,22 @@ class Supervisor:
         registry refresh would make the window whatever the refresh happened
         to make it.
 
-        Serviced after the drain, so that what arrived during the window is
-        stored while the sweep is still open to hear about it.
+        A window about to close is drained once more first. What a listener
+        received in the last moments of a sweep is otherwise stored on the
+        next pass, by which time the sweep has closed and the centres it named
+        belong to no run -- a loss of the tail of every window, and the window
+        is the only time anything is listening for them at all.
 
-        The connection is recycled first: opening and closing a window are the
-        only writes this loop makes on an hourly cadence, and a region quiet
-        enough to have gone a whole interval without a drain is exactly where
-        a connection left open since the last one would have gone stale.
+        The database connection is recycled first: opening and closing a
+        window are the only writes this loop makes on an hourly cadence, and a
+        region quiet enough to have gone a whole interval without a drain is
+        exactly where a connection left open since the last one would have
+        gone stale.
         """
         close_old_connections()
+
+        if self._sweep.is_over():
+            self.drain_listeners()
 
         if self._sweep.service():
             self.refresh_global_brokers()

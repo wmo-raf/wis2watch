@@ -34,11 +34,14 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Exists, OuterRef
 from django.utils import timezone as dj_timezone
 
-from ..core.countries import monitored_country_code_for_centre_id
-from ..core.interpretation import sweep_topic
+from ..core.interpretation import (
+    monitored_country_code_for_centre_id,
+    sweep_topic,
+)
 from ..core.models import SyncLog, UnregisteredCentre, WIS2Node
 from ..core.sync import CREATED, ERRORED, UPDATED, SyncCounts
 
@@ -70,7 +73,25 @@ def sweep_duration_seconds():
     )
 
 
-def record_unregistered_centre(centre_id, topic, now):
+def _last_sweep_started_at():
+    """When the last recorded sweep began, or None if none ever has.
+
+    The schedule is read back from the runs rather than kept in the process,
+    because the process is restarted -- by a deploy, by a crash, by a machine
+    going away -- and an interval counted from startup would mean a process
+    restarting oftener than the interval never sweeping at all. That failure
+    is silent and permanent: the blind spot the sweep exists to close simply
+    stays open.
+    """
+    return (
+        SyncLog.objects.filter(sync_type=SyncLog.WILDCARD_SWEEP)
+        .order_by("-started_at")
+        .values_list("started_at", flat=True)
+        .first()
+    )
+
+
+def _record_unregistered_centre(centre_id, topic, now):
     """Write down a centre publishing without a registry record.
 
     A row per centre, updated in place: what is worth reporting is that the
@@ -80,31 +101,37 @@ def record_unregistered_centre(centre_id, topic, now):
     A row is reopened when a centre is seen again, because the observation is
     what the finding rests on: a centre being heard from with no record behind
     it says the gap is open now, whatever a previous run concluded.
+
+    Each centre is written in its own savepoint, so one the database refuses --
+    a centre ID longer than the column, a topic longer than the sample -- is
+    stepped over rather than left poisoning the transaction the rest of the
+    sweep is writing in.
     """
-    centre, created = UnregisteredCentre.objects.get_or_create(
-        centre_id=centre_id,
-        defaults={
-            "country": monitored_country_code_for_centre_id(centre_id),
-            "sample_topic": topic,
-            "first_seen_at": now,
-            "last_seen_at": now,
-        },
-    )
+    with transaction.atomic():
+        centre, created = UnregisteredCentre.objects.get_or_create(
+            centre_id=centre_id,
+            defaults={
+                "country": monitored_country_code_for_centre_id(centre_id),
+                "sample_topic": topic,
+                "first_seen_at": now,
+                "last_seen_at": now,
+            },
+        )
 
-    if created:
-        return CREATED
+        if created:
+            return CREATED
 
-    centre.last_seen_at = now
-    centre.sample_topic = topic
-    centre.registered_at = None
-    centre.save(
-        update_fields=["last_seen_at", "sample_topic", "registered_at", "modified"]
-    )
+        centre.last_seen_at = now
+        centre.sample_topic = topic
+        centre.registered_at = None
+        centre.save(
+            update_fields=["last_seen_at", "sample_topic", "registered_at", "modified"]
+        )
 
     return UPDATED
 
 
-def close_centres_the_registry_has_caught_up_with(now):
+def _close_centres_the_registry_has_caught_up_with(now):
     """Close the findings whose centre the registry now knows about.
 
     A centre registered since it was found may not publish again during any
@@ -137,15 +164,15 @@ class WildcardSweep:
     """
 
     def __init__(self, now=None):
-        # The first sweep is one interval away rather than immediate. A
-        # process that is restarting repeatedly would otherwise ask for the
-        # world's traffic every time it came up, which is the one condition
-        # under which that is least affordable.
-        self._due_from = now or dj_timezone.now()
+        # When this process came up, which is what the schedule falls back to
+        # when nothing has ever swept. What the last run was is read from the
+        # log instead, and only when the schedule is first consulted: the
+        # supervisor builds this before it has any business querying.
+        self._started_from = now or dj_timezone.now()
+        self._due_from = None
         self._started_at = None
         self._log = None
-        self._counts = None
-        self._seen = set()
+        self._outcomes = {}
 
     @property
     def is_running(self):
@@ -155,6 +182,20 @@ class WildcardSweep:
     def topics(self):
         """The topic filters a Global Broker connection carries for the sweep."""
         return (sweep_topic(),) if self.is_running else ()
+
+    def is_over(self, now=None):
+        """Whether an open window has run its length.
+
+        Asked separately from ``service`` so the caller can store what has
+        just arrived before the window is closed: what a listener received in
+        the last moments of a sweep is drained on the next pass, by which time
+        a closed sweep would no longer be listening for what it named.
+        """
+        now = now or dj_timezone.now()
+
+        return self.is_running and now - self._started_at >= timedelta(
+            seconds=sweep_duration_seconds()
+        )
 
     def service(self, now=None):
         """Start or finish the sweep if it is time to.
@@ -167,19 +208,34 @@ class WildcardSweep:
         now = now or dj_timezone.now()
 
         if self.is_running:
-            if now - self._started_at < timedelta(seconds=sweep_duration_seconds()):
+            if not self.is_over(now):
                 return False
 
             self.finish(now)
 
             return True
 
-        if now - self._due_from < timedelta(seconds=sweep_interval_seconds()):
+        if now < self._due_at(now):
             return False
 
         self._start(now)
 
         return True
+
+    def _due_at(self, now):
+        """The moment the next sweep may open.
+
+        Counted from the last recorded run, so a restart resumes the schedule
+        rather than beginning it again -- the same rule as everything else
+        this process does, which reads its state back rather than remembering
+        it. The first sweep of a deployment that has never swept is an
+        interval away rather than immediate, so that a process restarting
+        repeatedly does not ask for the world's traffic each time it comes up.
+        """
+        if self._due_from is None:
+            self._due_from = _last_sweep_started_at() or self._started_from
+
+        return self._due_from + timedelta(seconds=sweep_interval_seconds())
 
     def observe(self, centres, now=None):
         """Record the unregistered centres a flush of traffic named.
@@ -193,6 +249,12 @@ class WildcardSweep:
 
         A centre the database refuses is counted and stepped over: one bad row
         must not cost the rest of what a sweep found.
+
+        A centre is written down every time it is heard, so that its last-seen
+        keeps up, and counted once for the window however often that is. A
+        centre publishing steadily is heard on every drain of a sweep, and a
+        run reporting it as sixty updates would be describing the drain
+        interval rather than the region.
         """
         if not self.is_running or not centres:
             return
@@ -200,13 +262,25 @@ class WildcardSweep:
         now = now or dj_timezone.now()
 
         for centre_id, topic in sorted(centres.items()):
-            self._seen.add(centre_id)
-
             try:
-                self._counts.record(record_unregistered_centre(centre_id, topic, now))
+                self._record_outcome(
+                    centre_id, _record_unregistered_centre(centre_id, topic, now)
+                )
             except Exception as exc:
                 logger.warning("Could not record centre %s: %s", centre_id, exc)
-                self._counts.record(ERRORED)
+                self._record_outcome(centre_id, ERRORED)
+
+    def _record_outcome(self, centre_id, outcome):
+        """Note what became of one centre, once for the window.
+
+        A centre this window created stays created however often it is heard
+        again, and one that could not be written stops counting as an error
+        the moment a later flush gets it down.
+        """
+        if self._outcomes.get(centre_id) in (CREATED, UPDATED):
+            return
+
+        self._outcomes[centre_id] = outcome
 
     def finish(self, now=None):
         """Close the window and the run's log. A no-op outside a sweep.
@@ -218,20 +292,20 @@ class WildcardSweep:
             return
 
         now = now or dj_timezone.now()
-        log, counts, seen = self._log, self._counts, self._seen
+        log, outcomes = self._log, self._outcomes
 
         self._started_at = None
         self._log = None
-        self._counts = None
-        self._seen = set()
+        self._outcomes = {}
 
-        if log is None:
-            return
+        counts = SyncCounts(found=len(outcomes))
 
-        counts.found = len(seen)
+        for outcome in outcomes.values():
+            counts.record(outcome)
+
         # A finding the registry has caught up with is one the report no
         # longer carries, which is what this run deleted.
-        log.items_deleted = close_centres_the_registry_has_caught_up_with(now)
+        log.items_deleted = _close_centres_the_registry_has_caught_up_with(now)
         counts.close(log, counts.status)
 
         logger.info(
@@ -241,19 +315,24 @@ class WildcardSweep:
     def _start(self, now):
         """Open a window, and a log for whatever it finds.
 
-        The log is opened failed and closed successful, as every sync here is,
-        so a process that dies mid-sweep leaves a run that plainly did not
-        finish rather than a silent gap in the record.
+        The log is written before the window opens, so a wildcard filter can
+        never be carried without a record that it was: the log is both the
+        outcome of this run and how the next process to come up knows when the
+        last sweep was. A log that cannot be written leaves the window shut,
+        and the next pass tries again.
+
+        It is opened failed and closed successful, as every sync here is, so a
+        process that dies mid-sweep leaves a run that plainly did not finish
+        rather than a silent gap in the record.
         """
-        self._started_at = now
-        self._due_from = now
-        self._counts = SyncCounts()
-        self._seen = set()
         self._log = SyncLog.objects.create(
             sync_type=SyncLog.WILDCARD_SWEEP,
             status=SyncLog.FAILED,
             started_at=now,
         )
+        self._started_at = now
+        self._due_from = now
+        self._outcomes = {}
 
         logger.info(
             "Wildcard sweep started for %ss on %s",

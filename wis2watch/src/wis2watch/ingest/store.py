@@ -73,7 +73,7 @@ class StoreCounts:
     unknown_dataset: int = 0
     out_of_region: int = 0
     discarded: int = 0
-    unregistered_centres: dict = field(default_factory=dict)
+    unregistered_centres: dict[str, str] = field(default_factory=dict)
 
     @property
     def summary(self):
@@ -208,7 +208,7 @@ def prepare_notification(source, topic, payload, lookup=None):
     )
 
 
-def observed_centre_id(record):
+def _observed_centre_id(record):
     """The centre a prepared record's topic names, or an empty string.
 
     A topic that is not a WIS2 topic names no centre, and nothing is inferred
@@ -345,7 +345,7 @@ def store_notifications(source, received):
             counts.discarded += 1
             continue
 
-        centre_id = observed_centre_id(record)
+        centre_id = _observed_centre_id(record)
 
         if record.node_id is None and centre_id:
             if not is_monitored_centre_id(centre_id):

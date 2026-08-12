@@ -12,6 +12,7 @@ testing the clock.
 """
 
 from datetime import timedelta
+from unittest import mock
 
 from django.test import TestCase, override_settings
 
@@ -95,6 +96,82 @@ class SweepScheduleTests(SweepTestCase):
 
         self.assertFalse(self.sweep.is_running)
         self.assertEqual(SyncLog.objects.count(), 0)
+
+    def test_an_open_window_says_when_it_is_over_before_it_closes(self):
+        """The caller has to store the last of the traffic before that."""
+        self.open_sweep()
+
+        self.assertFalse(self.sweep.is_over(now=after(3600 + 59)))
+        self.assertTrue(self.sweep.is_over(now=after(3600 + 60)))
+        self.assertTrue(self.sweep.is_running)
+
+    def test_a_closed_sweep_is_not_over(self):
+        self.assertFalse(self.sweep.is_over(now=after(7200)))
+
+
+@override_settings(
+    WIS2WATCH_SWEEP_INTERVAL_SECONDS=3600, WIS2WATCH_SWEEP_DURATION_SECONDS=60
+)
+class ScheduleSurvivesRestartTests(TestCase):
+    """The schedule is read back from the runs, not counted from startup.
+
+    A process restarting oftener than the interval would otherwise never sweep
+    at all -- and that failure is silent: the blind spot the sweep exists to
+    close simply stays open while everything reports itself healthy.
+    """
+
+    def swept_at(self, moment):
+        """A sweep that has already run, as its log records it."""
+        return SyncLog.objects.create(
+            sync_type=SyncLog.WILDCARD_SWEEP,
+            status=SyncLog.SUCCESS,
+            started_at=moment,
+        )
+
+    def test_a_restart_resumes_the_interval_from_the_last_run(self):
+        self.swept_at(after(0))
+
+        restarted = WildcardSweep(now=after(60))
+
+        self.assertFalse(restarted.service(now=after(3599)))
+        self.assertTrue(restarted.service(now=after(3600)))
+
+    def test_a_process_restarting_oftener_than_the_interval_still_sweeps(self):
+        self.swept_at(after(0))
+
+        for restarted_at in range(60, 3600, 300):
+            restarted = WildcardSweep(now=after(restarted_at))
+            self.assertFalse(restarted.service(now=after(restarted_at)))
+
+        overdue = WildcardSweep(now=after(3600))
+
+        self.assertTrue(overdue.service(now=after(3600)))
+
+    def test_a_sweep_missed_while_the_process_was_down_runs_at_once(self):
+        self.swept_at(after(0))
+
+        restarted = WildcardSweep(now=after(9000))
+
+        self.assertTrue(restarted.service(now=after(9000)))
+
+    def test_a_deployment_that_has_never_swept_waits_an_interval(self):
+        """A crash loop must not ask for the world's traffic every time."""
+        fresh = WildcardSweep(now=after(0))
+
+        self.assertFalse(fresh.service(now=after(3599)))
+        self.assertTrue(fresh.service(now=after(3600)))
+
+    def test_only_a_sweeps_own_runs_are_read_back(self):
+        SyncLog.objects.create(
+            sync_type=SyncLog.OSCAR_STATIONS,
+            status=SyncLog.SUCCESS,
+            started_at=after(3000),
+        )
+        self.swept_at(after(0))
+
+        restarted = WildcardSweep(now=after(60))
+
+        self.assertTrue(restarted.service(now=after(3600)))
 
 
 class UnregisteredCentreTests(SweepTestCase):
@@ -212,16 +289,45 @@ class SweepLogTests(SweepTestCase):
         self.assertEqual(log.items_created, 2)
         self.assertIsNotNone(log.completed_at)
 
-    def test_a_centre_seen_repeatedly_is_found_once(self):
+    def test_a_centre_heard_throughout_a_window_is_counted_once(self):
+        """A centre publishing steadily is heard on every drain of a sweep."""
         self.open_sweep()
-        self.sweep.observe({"dj-anm": DJ_TOPIC}, now=after(3610))
-        self.sweep.observe({"dj-anm": DJ_TOPIC}, now=after(3620))
+
+        for second in range(3610, 3650):
+            self.sweep.observe({"dj-anm": DJ_TOPIC}, now=after(second))
 
         self.sweep.service(now=after(3660))
 
         self.assertEqual(self.log().items_found, 1)
         self.assertEqual(self.log().items_created, 1)
-        self.assertEqual(self.log().items_updated, 1)
+        self.assertEqual(self.log().items_updated, 0)
+
+    def test_a_centre_carried_over_from_an_earlier_sweep_counts_as_updated(self):
+        self.open_sweep()
+        self.sweep.observe({"dj-anm": DJ_TOPIC}, now=after(3610))
+        self.sweep.service(now=after(3660))
+
+        self.sweep.service(now=after(7200))
+        self.sweep.observe({"dj-anm": DJ_TOPIC}, now=after(7210))
+        self.sweep.service(now=after(7260))
+
+        latest = SyncLog.objects.filter(sync_type=SyncLog.WILDCARD_SWEEP).first()
+        self.assertEqual(latest.items_found, 1)
+        self.assertEqual(latest.items_created, 0)
+        self.assertEqual(latest.items_updated, 1)
+
+    def test_what_a_run_found_adds_up_to_what_became_of_it(self):
+        self.open_sweep()
+        self.sweep.observe({"dj-anm": DJ_TOPIC, "ng-nimet": KE_TOPIC}, now=after(3610))
+        self.sweep.observe({"dj-anm": DJ_TOPIC}, now=after(3620))
+
+        self.sweep.service(now=after(3660))
+
+        log = self.log()
+        self.assertEqual(
+            log.items_found,
+            log.items_created + log.items_updated + log.items_errored,
+        )
 
     def test_a_sweep_that_heard_nothing_is_still_a_successful_run(self):
         """A region with no unregistered centres is a finding of its own."""
@@ -263,3 +369,39 @@ class SweepLogTests(SweepTestCase):
         self.assertEqual(self.log().items_errored, 1)
         self.assertEqual(self.log().items_created, 1)
         self.assertEqual(self.log().status, SyncLog.PARTIAL)
+
+    def test_a_centre_written_on_a_later_flush_stops_counting_as_an_error(self):
+        self.open_sweep()
+
+        with mock.patch(
+            "wis2watch.ingest.sweep._record_unregistered_centre",
+            side_effect=RuntimeError("the database went away"),
+        ):
+            self.sweep.observe({"dj-anm": DJ_TOPIC}, now=after(3610))
+
+        self.sweep.observe({"dj-anm": DJ_TOPIC}, now=after(3620))
+        self.sweep.service(now=after(3660))
+
+        self.assertEqual(self.log().items_errored, 0)
+        self.assertEqual(self.log().items_created, 1)
+
+    def test_no_window_opens_when_its_log_cannot_be_written(self):
+        """A wildcard filter must never be carried with no record that it was."""
+        with mock.patch.object(
+            SyncLog.objects, "create", side_effect=RuntimeError("the database went away")
+        ):
+            with self.assertRaises(RuntimeError):
+                self.sweep.service(now=after(3600))
+
+        self.assertFalse(self.sweep.is_running)
+        self.assertEqual(self.sweep.topics(), ())
+
+    def test_a_window_that_could_not_open_is_tried_again(self):
+        with mock.patch.object(
+            SyncLog.objects, "create", side_effect=RuntimeError("the database went away")
+        ):
+            with self.assertRaises(RuntimeError):
+                self.sweep.service(now=after(3600))
+
+        self.assertTrue(self.sweep.service(now=after(3601)))
+        self.assertTrue(self.sweep.is_running)

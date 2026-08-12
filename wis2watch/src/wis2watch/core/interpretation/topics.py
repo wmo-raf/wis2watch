@@ -79,8 +79,8 @@ def subscription_topic(centre_id, prefix=ORIGIN):
     )
 
 
-def sweep_topic(prefix=ORIGIN):
-    """The topic filter covering every centre publishing under one prefix.
+def sweep_topic():
+    """The topic filter covering every centre publishing at origin.
 
     The one filter in the project that names no centre. A centre absent from
     the registry cannot be subscribed to by name -- nothing knows it exists --
@@ -88,9 +88,13 @@ def sweep_topic(prefix=ORIGIN):
     which of it belongs to the monitored region. That is why the sweep this
     serves is bounded in time: for as long as it is carried, the connection is
     offered the whole world's traffic.
+
+    Origin only. A Global Cache mirrors what a centre published at origin, so
+    sweeping the cache prefix as well would double the traffic to hear the
+    same centres.
     """
     return "/".join(
-        (prefix,)
+        (ORIGIN,)
         + STANDARD_SEGMENT
         + (SINGLE_LEVEL_WILDCARD, MULTI_LEVEL_WILDCARD)
     )

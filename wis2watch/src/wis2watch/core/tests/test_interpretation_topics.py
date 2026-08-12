@@ -112,26 +112,8 @@ class SubscriptionTopicTests(NoNetworkTestCase):
 class SweepTopicTests(NoNetworkTestCase):
     """The one filter that names no centre, for the centres nothing names."""
 
-    def test_the_sweep_asks_for_every_centre_under_the_origin_prefix(self):
+    def test_the_sweep_asks_for_every_centre_publishing_at_origin(self):
         self.assertEqual(sweep_topic(), "origin/a/wis2/+/#")
-
-    def test_the_cache_prefix_is_swept_separately(self):
-        self.assertEqual(sweep_topic(prefix=CACHE), "cache/a/wis2/+/#")
-
-    def test_the_sweep_filter_matches_the_traffic_of_every_captured_centre(self):
-        captured = load_jsonl_fixture("global_broker_notifications.jsonl")
-        origin_topics = [
-            m["topic"] for m in captured if parse_topic(m["topic"]).is_origin
-        ]
-
-        swept = sweep_topic().removesuffix("+/#")
-        matched = {parse_topic(t).centre_id for t in origin_topics if t.startswith(swept)}
-
-        self.assertEqual(matched, {parse_topic(t).centre_id for t in origin_topics})
-
-    def test_the_sweep_stops_at_the_wis2_traffic_it_can_read(self):
-        """A wildcard is the point; a wildcard over everything is not."""
-        self.assertTrue(sweep_topic().startswith("origin/a/wis2/"))
 
 
 class CapturedTopicTests(NoNetworkTestCase):

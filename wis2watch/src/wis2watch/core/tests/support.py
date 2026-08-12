@@ -17,6 +17,7 @@ from unittest import mock
 
 from django.test import SimpleTestCase
 
+from ..interpretation import parse_topic
 from ..models import MessageSource
 
 FIXTURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
@@ -70,6 +71,22 @@ def failing_fetch(message):
         yield  # pragma: no cover - never reached, keeps this a generator
 
     return fetch
+
+
+#: The centres in the captured Global Broker traffic that belong to no
+#: monitored country. The capture is real, so it carries the rest of the world
+#: alongside the region -- which is what the store refuses, and therefore what
+#: any test counting stored rows has to allow for.
+OUT_OF_REGION = ("br-inmet", "ca-eccc-msc")
+
+
+def in_region(received):
+    """The ``(topic, payload)`` pairs published by a monitored country."""
+    return [
+        (topic, payload)
+        for topic, payload in received
+        if parse_topic(topic).centre_id not in OUT_OF_REGION
+    ]
 
 
 def origin_broker(node, **kwargs):
