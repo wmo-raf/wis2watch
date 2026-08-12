@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from celery import shared_task
 from celery.schedules import crontab
 from celery.utils.log import get_task_logger
@@ -9,6 +11,7 @@ from .cadence import learn_cadence_baselines
 from .catalogue import sync_catalogues
 from .node_stations import sync_node_stations
 from .oscar import sync_oscar_stations
+from .probes import nodes_advertising_links, probe_node_links, probed_hour
 from .propagation import evaluate_propagation
 from .retention import expire_raw_messages
 from .rollups import update_rollups
@@ -157,6 +160,55 @@ def run_evaluate_propagation():
     logger.info("[PROPAGATION] %s", counts.summary)
 
     return counts.summary
+
+
+@shared_task
+def run_probe_node_links(node_id, hour):
+    """Ask one centre for a bounded sample of the files it advertised.
+
+    ``hour`` is passed in as an ISO timestamp rather than worked out here, so
+    that every node in a fan-out samples the same hour however long the queue
+    takes to reach it -- otherwise a run that spilled over an hour boundary
+    would leave some centres' hours checked twice and others not at all.
+
+    Failures are not retried. The next hour asks again, and a centre whose
+    server is down is precisely what the probe is meant to record rather than
+    to work around.
+    """
+    from .models import WIS2Node
+
+    counts = probe_node_links(
+        WIS2Node.objects.get(id=node_id), hour=datetime.fromisoformat(hour)
+    )
+
+    return counts.summary
+
+
+@shared_task
+def run_probe_canonical_links():
+    """Check that the files this hour's notifications advertised can be had.
+
+    One task per centre rather than one run over the region: each probe is an
+    HTTP request against a different centre, and the ones worth finding out
+    about are exactly the ones that hang. Fanning out keeps a centre whose
+    server never answers from holding up everybody else's checks.
+
+    Only centres that advertised a link in the hour are queued, so a region of
+    quiet nodes costs one query rather than a task apiece.
+
+    A missed hour is not made up. The sample is of what was published then, and
+    the point is a continuing picture of retrievability rather than a complete
+    audit of every file.
+    """
+    hour = probed_hour()
+    node_ids = list(nodes_advertising_links(hour))
+
+    logger.info("[LINK PROBES] queueing %s nodes for %s", len(node_ids), hour)
+
+    for node_id in node_ids:
+        run_probe_node_links.delay(node_id, hour.isoformat())
+
+    return node_ids
 
 
 @shared_task

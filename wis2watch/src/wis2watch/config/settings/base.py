@@ -15,6 +15,7 @@ import os
 
 import dj_database_url
 import environ
+from celery.schedules import crontab
 
 from wis2watch.version import VERSION
 
@@ -341,6 +342,19 @@ WIS2WATCH_PROPAGATION_WINDOW_HOURS = env.int(
     "WIS2WATCH_PROPAGATION_WINDOW_HOURS", 48
 )
 
+# How many advertised files each centre is asked for per hour. This is the one
+# job that makes requests of the monitored centres themselves rather than of a
+# broker, so it is a sample and not a sweep: a tool that puts a centre's web
+# server under load to check on it is a fault report of its own.
+WIS2WATCH_LINK_PROBE_SAMPLE_SIZE = env.int("WIS2WATCH_LINK_PROBE_SAMPLE_SIZE", 5)
+
+# How long a centre's server is given to answer a probe, in seconds. A slow
+# answer is itself recorded, so this is long enough that only a server which has
+# effectively stopped answering trips it.
+WIS2WATCH_LINK_PROBE_TIMEOUT_SECONDS = env.int(
+    "WIS2WATCH_LINK_PROBE_TIMEOUT_SECONDS", 15
+)
+
 # How long a centre may be quiet before the node overview calls it stale. A
 # flat threshold, and only for sorting the table: whether a centre's quiet is
 # actually a fault is judged per dataset against its own cadence, below.
@@ -434,6 +448,12 @@ CELERY_BEAT_SCHEDULE = {
     'evaluate-propagation': {
         'task': 'wis2watch.core.tasks.run_evaluate_propagation',
         'schedule': 900.0,  # Every 15 minutes
+    },
+    # Hourly, a few minutes past, because a run samples the last hour that is
+    # over and there is nothing to gain by asking the moment it closes.
+    'probe-canonical-links': {
+        'task': 'wis2watch.core.tasks.run_probe_canonical_links',
+        'schedule': crontab(minute=5),
     },
     'expire-raw-messages': {
         'task': 'wis2watch.core.tasks.run_expire_raw_messages',

@@ -1045,6 +1045,142 @@ class PropagationGap(models.Model):
         return f"{self.notification_id} published @ {self.published_at}"
 
 
+class LinkProbeQuerySet(models.QuerySet):
+    def unretrievable(self):
+        """Probes that found the advertised file was not there to be had.
+
+        Everything except the two answers that are not the centre's problem: a
+        file that came back, and a server that would not answer a headers-only
+        request at all.
+        """
+        return self.exclude(
+            outcome__in=[LinkProbe.RETRIEVABLE, LinkProbe.NOT_PROBEABLE]
+        )
+
+
+class LinkProbe(models.Model):
+    """What became of one lightweight request for a file a notification
+    advertised.
+
+    This is the failure every message-flow metric misses. A notification is
+    published perfectly, propagates perfectly, and counts towards every green
+    number this tool holds -- and the file it points at cannot be fetched. The
+    only way to learn that is to ask for it.
+
+    Asking means a headers-only request: whether the file is there, what the
+    server said, how long it took and whether its certificate stands up. No
+    body is ever requested, and no hash is checked against the notification's,
+    which keeps this inside the boundary the tool draws around itself --
+    notifications only, never the data.
+
+    The outcome is what the row is for. "Could not be fetched" is not a
+    finding anyone can act on; a 404 goes to the centre's data publishing, an
+    expired certificate goes to whoever runs its web server, and a connection
+    that never opens goes to its network. So the transport failures are
+    distinguished from the HTTP answers, and both from a server that declines
+    headers-only requests -- which says nothing about the file at all.
+
+    ``hour`` is the UTC hour the sampled notifications were published in, kept
+    beside the probe rather than derived from it, because it is what the
+    per-node bound is counted against: it is the sample that is bounded, and
+    the sample belongs to an hour of a centre's traffic, not to whenever a run
+    happened to get to it.
+
+    Its own ``probed_at`` rather than the usual created and modified pair: a
+    probe is one observation and is never revised. Another answer is another
+    row, which is the point -- a file that was there at noon and gone at one
+    is two facts.
+    """
+
+    RETRIEVABLE = "retrievable"
+    MISSING = "missing"
+    FORBIDDEN = "forbidden"
+    SERVER_ERROR = "server_error"
+    UNEXPECTED_STATUS = "unexpected_status"
+    NOT_PROBEABLE = "not_probeable"
+    TLS_ERROR = "tls_error"
+    UNREACHABLE = "unreachable"
+    TIMEOUT = "timeout"
+    BAD_URL = "bad_url"
+
+    OUTCOME_CHOICES = [
+        (RETRIEVABLE, _("Retrievable")),
+        (MISSING, _("Missing")),
+        (FORBIDDEN, _("Access denied")),
+        (SERVER_ERROR, _("Server error")),
+        (UNEXPECTED_STATUS, _("Unexpected status")),
+        (NOT_PROBEABLE, _("Server refuses headers-only requests")),
+        (TLS_ERROR, _("Certificate or TLS failure")),
+        (UNREACHABLE, _("Connection failed")),
+        (TIMEOUT, _("Timed out")),
+        (BAD_URL, _("Link is not a fetchable URL")),
+    ]
+
+    node = models.ForeignKey(
+        WIS2Node,
+        on_delete=models.CASCADE,
+        related_name="link_probes",
+    )
+    dataset = models.ForeignKey(
+        Dataset,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="link_probes",
+        help_text=_("Null where the topic belongs to no dataset the registry knows"),
+    )
+
+    notification_id = models.CharField(
+        max_length=255,
+        help_text=_("The notification that advertised this link"),
+    )
+    url = models.URLField(
+        max_length=1000,
+        help_text=_("The canonical link, as the notification gave it"),
+    )
+
+    outcome = models.CharField(max_length=20, choices=OUTCOME_CHOICES)
+    status_code = models.PositiveSmallIntegerField(
+        null=True,
+        blank=True,
+        help_text=_("Null where no HTTP response came back at all"),
+    )
+    latency_ms = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        help_text=_("How long the request took, including a failure"),
+    )
+    error = models.TextField(
+        blank=True,
+        help_text=_("What the transport failure said, in its own words"),
+    )
+
+    hour = models.DateTimeField(
+        help_text=_("Start of the UTC hour the sampled notifications fall in"),
+    )
+    probed_at = models.DateTimeField(
+        help_text=_("When the request was made"),
+    )
+
+    objects = LinkProbeQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-probed_at"]
+        indexes = [
+            models.Index(fields=["node", "-probed_at"]),
+            # The bound is counted per node and hour before every run, so this
+            # is on the read path of the sampling itself rather than only of
+            # whatever reports the results.
+            models.Index(fields=["node", "hour"]),
+            models.Index(fields=["outcome"]),
+        ]
+        verbose_name = _("Link Probe")
+        verbose_name_plural = _("Link Probes")
+
+    def __str__(self):
+        return f"{self.url}: {self.outcome}"
+
+
 class UnregisteredCentreQuerySet(models.QuerySet):
     def unregistered(self):
         """The centres the registry still does not know about.
