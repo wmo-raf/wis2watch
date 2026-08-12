@@ -25,6 +25,11 @@
             max-width: 80ch;
         }
 
+        .report-bound {
+            border-left: 3px solid #ddd;
+            padding-left: 10px;
+        }
+
         .report-table {
             width: 100%;
             border-collapse: collapse;
@@ -97,6 +102,15 @@
     <p class="report-description">{{ report.description }}</p>
 
     {% block report_note %}{% endblock %}
+
+    {% comment %}
+        Above the table and above the empty state both: a report can bound
+        what it lists and have nothing left to show, and an empty state that
+        went unqualified would read as nothing to report.
+    {% endcomment %}
+    {% if bound_note %}
+        <p class="report-note report-bound">{{ bound_note }}</p>
+    {% endif %}
 
     {% if rows %}
         <table class="listing report-table">

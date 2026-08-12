@@ -30,6 +30,15 @@ being listed is given a grace period before it is let go, and what a run found
 is written down whether or not anything was worth sending -- the clock has to
 keep running on the mornings there is no mail.
 
+One of those absences no grace period can rescue, because it is permanent: a
+propagation gap passes the horizon its evidence ends at, past which nothing
+can check it either way ever again. A centre leaving the report that way has
+had nothing new go missing for the whole forensic window, so the news is not
+false -- but it is not the fix it reads as either, and nothing here can tell
+the two apart. So each report's own account of what it has bounded is carried
+into the mail beside its news, where the gaps that caused such a clearing are
+the very ones it counts.
+
 The reports are read from the same registry the index and the routing read, so
 a sixth report joins the digest by existing. What each one considers a finding,
 and what identifies it, is the report's own to say: see ``describe_row`` in
@@ -89,6 +98,13 @@ class ReportChanges:
     ``seen`` is every finding the report holds now, by key, including the ones
     already reported. It is what a run writes down to say these were still
     being found today, which is what the grace period is measured from.
+
+    ``bound`` is what the report holds and does not list, where it bounds
+    anything. It is carried because it is the one thing that can qualify the
+    news beside it: the propagation report stops listing a centre whose gaps
+    have passed the horizon its evidence ends at, and a centre that leaves
+    that way is cleared here for want of anything left to check rather than
+    because anybody fixed it.
     """
 
     slug: str
@@ -97,6 +113,7 @@ class ReportChanges:
     seen: list[str]
     new: list[Notice]
     resolved: list[Notice]
+    bound: str | None = None
 
     @property
     def found(self):
@@ -333,6 +350,7 @@ def _changes_for(report, *, now):
             for key, finding in reported.items()
             if key not in found and finding.last_seen_at <= gone_by
         ],
+        bound=report.describe_bound(now=now),
     )
 
 

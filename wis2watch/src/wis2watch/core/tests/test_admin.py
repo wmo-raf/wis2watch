@@ -1,3 +1,4 @@
+from datetime import timedelta
 from unittest import mock
 
 from django.contrib.auth import get_user_model
@@ -416,6 +417,38 @@ class GapReportViewTests(TestCase):
         response = self.client.get(reverse("gap_report", args=["declared-but-silent"]))
 
         self.assertContains(response, "has been heard transmitting")
+
+    def test_a_report_that_bounds_what_it_lists_says_so_on_the_page(self):
+        """Above the table and above the empty state both.
+
+        A propagation report bounded at the horizon its evidence ends at can
+        end up listing nothing while still holding gaps nobody has seen. Left
+        to the empty state alone it would announce that everything published
+        has reached the Global Broker, which is the one thing it does not know.
+        """
+        origin = MessageSource.objects.create(
+            name="ke-kmd origin broker",
+            source_type=MessageSource.ORIGIN_BROKER,
+            node=self.node,
+            centre_id="ke-kmd",
+            host="wis.kmd.test",
+            is_reachable=True,
+        )
+        long_ago = dj_timezone.now() - timedelta(days=30)
+        PropagationGap.objects.create(
+            node=self.node,
+            origin_source=origin,
+            notification_id="4b1d",
+            topic="origin/a/wis2/ke-kmd/data/core/weather/synop",
+            published_at=long_ago,
+            observed_at_origin=long_ago,
+            detected_at=long_ago,
+        )
+
+        response = self.client.get(reverse("gap_report", args=["propagation-gaps"]))
+
+        self.assertEqual(response.context["page_obj"].paginator.count, 0)
+        self.assertContains(response, "not listed")
 
     def test_a_report_nothing_is_called_is_not_found(self):
         response = self.client.get(reverse("gap_report", args=["stations-i-invented"]))

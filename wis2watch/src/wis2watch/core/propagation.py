@@ -258,10 +258,13 @@ def _close_arrivals(*, since):
     the moment this run noticed, so what the row says is how late the message
     was, not how often the job runs.
 
-    Only gaps inside the window are revisited. An older one cannot be closed
-    because the rows that would close it have been expired, and leaving it
-    open is the honest end of that: it was missing everywhere the tool could
-    still look.
+    Only gaps inside the window are revisited. Past the raw retention window
+    an older one can never be closed at all, because the rows that would close
+    it have been expired -- and leaving it open is the honest end of that: it
+    was missing everywhere the tool could still look. What that gap stops
+    being is something to send somebody to a centre about, which is the gap
+    report's to say rather than this run's; see ``beyond_evidence`` on the
+    model.
     """
     arrived = _seen_on_a_global_broker(since)
 

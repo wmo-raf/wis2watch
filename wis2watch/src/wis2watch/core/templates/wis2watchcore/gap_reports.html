@@ -59,6 +59,13 @@
             font-size: 0.9em;
         }
 
+        .report-bound {
+            border-left: 3px solid #ddd;
+            padding-left: 10px;
+            font-size: 0.85em;
+            color: #666;
+        }
+
         .reports-back {
             margin-top: 30px;
         }
@@ -80,6 +87,10 @@
                     </span>
                 </div>
                 <p class="report-description">{{ summary.description }}</p>
+                {# A count that leaves something out says so where it is read. #}
+                {% if summary.bound %}
+                    <p class="report-description report-bound">{{ summary.bound }}</p>
+                {% endif %}
             </li>
         {% endfor %}
     </ul>

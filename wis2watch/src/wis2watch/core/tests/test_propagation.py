@@ -25,6 +25,7 @@ from wis2watch.core.models import (
     WIS2Node,
 )
 from wis2watch.core.propagation import evaluate_propagation
+from wis2watch.core.retention import raw_retention_cutoff
 from wis2watch.core.tests.support import at, origin_broker
 
 
@@ -459,3 +460,86 @@ class RepeatedRunTests(PropagationTestCase):
         self.evaluate()
 
         self.assertEqual(self.missing(), ["lost-one"])
+
+
+class EvidenceHorizonTests(PropagationTestCase):
+    """Which of the recorded gaps the tool can still stand behind.
+
+    A gap is written down because the rows that prove it expire, and past the
+    raw retention window they have: the Global Broker copy that would close it
+    is gone, so nothing can settle it either way ever again. The row stays --
+    it is the last thing holding the UUID -- but it has stopped being
+    something the tool is judging, and a gap this tool merely stopped being
+    able to check must not read like one the world is still not carrying.
+    """
+
+    def gap(self, notification_id, *, published):
+        return PropagationGap.objects.create(
+            node=self.kenya,
+            origin_source=self.kenya_origin,
+            notification_id=notification_id,
+            topic=f"origin/a/wis2/{self.kenya.centre_id}/data/core/weather",
+            published_at=published,
+            observed_at_origin=published,
+            detected_at=published + timedelta(minutes=20),
+        )
+
+    def within(self, now=NOW):
+        return [
+            gap.notification_id
+            for gap in PropagationGap.objects.within_evidence(now).order_by(
+                "notification_id"
+            )
+        ]
+
+    def beyond(self, now=NOW):
+        return [
+            gap.notification_id
+            for gap in PropagationGap.objects.beyond_evidence(now).order_by(
+                "notification_id"
+            )
+        ]
+
+    @override_settings(WIS2WATCH_RAW_RETENTION_DAYS=14)
+    def test_the_two_sides_of_the_retention_cutoff_are_told_apart(self):
+        self.gap("last-fortnight", published=NOW - timedelta(days=20))
+        self.gap("this-morning", published=NOW - timedelta(hours=2))
+
+        self.assertEqual(self.within(), ["this-morning"])
+        self.assertEqual(self.beyond(), ["last-fortnight"])
+
+    @override_settings(WIS2WATCH_RAW_RETENTION_DAYS=14)
+    def test_a_gap_published_on_the_cutoff_is_still_being_judged(self):
+        """The boundary belongs to the side whose rows are still held."""
+        self.gap("on-the-hour", published=raw_retention_cutoff(now=NOW))
+
+        self.assertEqual(self.within(), ["on-the-hour"])
+        self.assertEqual(self.beyond(), [])
+
+    @override_settings(WIS2WATCH_RAW_RETENTION_DAYS=30)
+    def test_the_horizon_follows_how_long_raw_messages_are_kept(self):
+        """An installation keeping messages longer can check for longer."""
+        self.gap("last-fortnight", published=NOW - timedelta(days=20))
+
+        self.assertEqual(self.within(), ["last-fortnight"])
+        self.assertEqual(self.beyond(), [])
+
+    @override_settings(WIS2WATCH_RAW_RETENTION_DAYS=14)
+    def test_a_gap_passes_the_horizon_as_time_goes_on(self):
+        """Nothing has to run for a gap to stop being checkable."""
+        self.gap("this-morning", published=NOW - timedelta(hours=2))
+
+        later = NOW + timedelta(days=15)
+
+        self.assertEqual(self.within(later), [])
+        self.assertEqual(self.beyond(later), ["this-morning"])
+
+    @override_settings(WIS2WATCH_RAW_RETENTION_DAYS=14)
+    def test_a_gap_past_the_horizon_is_still_open_and_still_recorded(self):
+        """Bounding what the reports lead with is not forgetting it happened."""
+        self.gap("last-fortnight", published=NOW - timedelta(days=20))
+
+        self.assertEqual(
+            [gap.notification_id for gap in PropagationGap.objects.open()],
+            ["last-fortnight"],
+        )

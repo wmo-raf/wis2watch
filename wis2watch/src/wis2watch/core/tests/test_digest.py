@@ -22,6 +22,7 @@ from wis2watch.core.interpretation import OPERATIONAL
 from wis2watch.core.models import (
     HourlyRollup,
     MessageSource,
+    PropagationGap,
     ReportedFinding,
     Station,
     StationSource,
@@ -43,6 +44,14 @@ TOMORROW = NOW + timedelta(days=1)
 
 #: Long enough after that a finding still missing has really gone.
 PAST_THE_GRACE = NOW + timedelta(hours=GRACE_HOURS + 1)
+
+#: How long raw messages are kept in these tests, and therefore how long a
+#: propagation gap can still be checked either way.
+RETENTION_DAYS = 14
+
+#: Long enough after that a gap recorded at ``NOW`` can no longer be checked
+#: at all: the Global Broker rows that would settle it have been expired.
+PAST_THE_HORIZON = NOW + timedelta(days=RETENTION_DAYS + 1)
 
 
 @override_settings(
@@ -300,6 +309,68 @@ class WhatCountsAsAFindingTests(DigestTestCase):
         change = self.changes_for("unattributed-messages")
 
         self.assertEqual([notice.key for notice in change.new], ["ke-meteo"])
+
+
+@override_settings(WIS2WATCH_RAW_RETENTION_DAYS=RETENTION_DAYS)
+class RetiredFindingTests(DigestTestCase):
+    """News a bounded report gave the digest for want of anything to check.
+
+    The propagation report stops listing a gap once it has passed the horizon
+    its evidence ends at, and no grace period can rescue that absence because
+    it is not one that ends: nothing will ever settle the gap either way. The
+    centre is cleared here having had nothing new go missing for the whole
+    forensic window, which is not a fix anybody made and not a fault anybody
+    can still be shown. So the mail carries what the report bounded beside the
+    news it gave -- and the gaps that caused the clearing are the ones counted
+    in it.
+    """
+
+    def gap_at(self, centre_id, *, hours_ago=2):
+        """A centre with one notification the world has not carried."""
+        node = WIS2Node.objects.create(centre_id=centre_id, name=centre_id.upper())
+        origin = MessageSource.objects.create(
+            name=f"{centre_id} origin broker",
+            source_type=MessageSource.ORIGIN_BROKER,
+            node=node,
+            centre_id=centre_id,
+            host=f"wis.{centre_id}.example.int",
+            is_reachable=True,
+        )
+        PropagationGap.objects.create(
+            node=node,
+            origin_source=origin,
+            notification_id=f"{centre_id}-d9a1",
+            topic=f"origin/a/wis2/{centre_id}/data/core/weather",
+            published_at=NOW - timedelta(hours=hours_ago),
+            observed_at_origin=NOW - timedelta(hours=hours_ago),
+            detected_at=NOW,
+        )
+
+        return node
+
+    def test_a_centre_whose_gaps_pass_the_horizon_stops_being_found(self):
+        self.gap_at("ke-meteo")
+        self.send()
+
+        change = self.changes_for("propagation-gaps", now=PAST_THE_HORIZON)
+
+        self.assertEqual([notice.key for notice in change.resolved], ["ke-meteo"])
+
+    def test_the_mail_says_what_the_report_it_read_had_bounded(self):
+        self.gap_at("ke-meteo")
+        self.send()
+
+        self.send(now=PAST_THE_HORIZON)
+
+        self.assertIn("Cleared:", self.body())
+        self.assertIn("1 older gap is not listed", self.body())
+
+    def test_a_report_bounding_nothing_qualifies_nothing(self):
+        self.publishing_unregistered("ml-meteo")
+
+        self.send()
+
+        self.assertNotIn("not listed", self.body())
 
 
 class BoundedEmailTests(DigestTestCase):
