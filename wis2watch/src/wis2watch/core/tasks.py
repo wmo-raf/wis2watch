@@ -7,8 +7,10 @@ from celery_singleton import Singleton
 from django.core.management import call_command
 
 from wis2watch.config.celery import app
+from .alerts import check_hard_failures
 from .cadence import learn_cadence_baselines
 from .catalogue import sync_catalogues
+from .digest import send_digest
 from .node_stations import sync_node_stations
 from .oscar import sync_oscar_stations
 from .probes import nodes_advertising_links, probe_node_links, probed_hour
@@ -216,6 +218,39 @@ def run_probe_canonical_links():
         run_probe_node_links.delay(node_id, hour.isoformat())
 
     return node_ids
+
+
+@app.task(base=Singleton)
+def run_send_daily_digest():
+    """Mail the diagnostician what the reports have found since yesterday.
+
+    A singleton, because what makes the digest readable is that a finding is
+    carried once: two runs overlapping would each read the findings before
+    either had recorded them, and send the same list twice over two subjects
+    that both claimed to be what changed.
+
+    A missed run costs nothing but a day's delay. The digest is a difference
+    against what has been reported rather than against yesterday, so the next
+    run carries everything the missed one would have, and nothing twice.
+    """
+    return send_digest().summary
+
+
+@app.task(base=Singleton)
+def run_check_hard_failures():
+    """Look for the two ways this tool itself stops working.
+
+    A singleton for the same reason as the digest, and a sharper one: the
+    record of an outage is what keeps it to a single message, and two runs
+    reading it before either had written would both find it unannounced.
+
+    Runs far oftener than the thresholds it judges against, since a check that
+    ran every five minutes could not tell a five-minute outage from a
+    twenty-minute one. Failures are recorded with when they began rather than
+    when they were noticed, so a missed beat delays the message without
+    misdating what it says.
+    """
+    return check_hard_failures().summary
 
 
 @shared_task

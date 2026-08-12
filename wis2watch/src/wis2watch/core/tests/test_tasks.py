@@ -11,7 +11,9 @@ syncs, and against a seeded database for the probes.
 from datetime import timedelta
 from unittest import mock
 
+from django.core import mail
 from django.test import TestCase
+from django.utils import timezone as dj_timezone
 
 from wis2watch.core.models import (
     LinkProbe,
@@ -22,8 +24,10 @@ from wis2watch.core.models import (
 )
 from wis2watch.core.probes import ProbeResult, probed_hour
 from wis2watch.core.tasks import (
+    run_check_hard_failures,
     run_probe_canonical_links,
     run_probe_node_links,
+    run_send_daily_digest,
     run_sync_all_node_stations,
     run_sync_node_stations,
     run_sync_oscar_stations,
@@ -173,3 +177,37 @@ class OscarStationTaskTests(TestCase):
             )
 
             self.assertEqual(run_sync_oscar_stations(), sync.return_value.id)
+
+
+class NotificationTaskTests(TestCase):
+    """The two runs that talk to somebody rather than to the database.
+
+    What they send is asserted against a seeded database elsewhere. What is
+    here is that a quiet region is not mailed about: on an installation where
+    nothing has gone wrong, both of these run every day and every minute
+    respectively, and neither may produce a message.
+    """
+
+    def test_a_digest_with_nothing_to_say_is_not_sent(self):
+        self.assertEqual(run_send_daily_digest(), "new=0 cleared=0 reports=0")
+        self.assertEqual(mail.outbox, [])
+
+    def test_a_check_finding_nothing_wrong_reports_nothing_wrong(self):
+        broker = MessageSource.objects.create(
+            name="Global Broker",
+            source_type=MessageSource.GLOBAL_BROKER,
+            host="globalbroker.example.int",
+            is_reachable=True,
+        )
+        NotificationMessage.objects.create(
+            source=broker,
+            notification_id="just-arrived",
+            topic="origin/a/wis2/ke-meteo/data/core/weather",
+            time=dj_timezone.now(),
+            raw_json={},
+        )
+
+        self.assertEqual(
+            run_check_hard_failures(), "opened=0 announced=0 cleared=0 standing=0"
+        )
+        self.assertEqual(mail.outbox, [])

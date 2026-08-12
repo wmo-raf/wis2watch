@@ -1,0 +1,15 @@
+{% load i18n tz %}{% translate "What has changed in the region since the last digest. Findings already reported are left out." %}
+{% for change in digest.changed %}
+== {{ change.title }} ==
+{% blocktranslate with found=change.found %}{{ found }} standing now.{% endblocktranslate %} {{ change.url }}
+{% if change.new_sample %}
+{% translate "New:" %}
+{% for notice in change.new_sample %}  * {{ notice.summary }}
+{% endfor %}{% if change.new_withheld %}{% blocktranslate with withheld=change.new_withheld %}  ... and {{ withheld }} more, on the report itself.{% endblocktranslate %}
+{% endif %}{% endif %}{% if change.resolved_sample %}
+{% translate "Cleared:" %}
+{% for notice in change.resolved_sample %}  * {{ notice.summary }}
+{% endfor %}{% if change.resolved_withheld %}{% blocktranslate with withheld=change.resolved_withheld %}  ... and {{ withheld }} more.{% endblocktranslate %}
+{% endif %}{% endif %}{% endfor %}
+--
+{% blocktranslate with generated_at=digest.generated_at|utc|date:"Y-m-d H:i" %}WIS2Watch, {{ generated_at }} UTC.{% endblocktranslate %} {{ gap_reports_url }}
