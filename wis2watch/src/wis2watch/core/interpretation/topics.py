@@ -22,6 +22,9 @@ CACHE = "cache"
 #: The MQTT wildcard matching a centre's whole hierarchy, however deep.
 MULTI_LEVEL_WILDCARD = "#"
 
+#: The MQTT wildcard matching exactly one topic level -- one centre, here.
+SINGLE_LEVEL_WILDCARD = "+"
+
 
 @dataclass(frozen=True)
 class ParsedTopic:
@@ -73,6 +76,23 @@ def subscription_topic(centre_id, prefix=ORIGIN):
         (prefix,)
         + STANDARD_SEGMENT
         + (centre_id.strip().lower(), MULTI_LEVEL_WILDCARD)
+    )
+
+
+def sweep_topic(prefix=ORIGIN):
+    """The topic filter covering every centre publishing under one prefix.
+
+    The one filter in the project that names no centre. A centre absent from
+    the registry cannot be subscribed to by name -- nothing knows it exists --
+    so the only way to hear one is to ask for everything and decide afterwards
+    which of it belongs to the monitored region. That is why the sweep this
+    serves is bounded in time: for as long as it is carried, the connection is
+    offered the whole world's traffic.
+    """
+    return "/".join(
+        (prefix,)
+        + STANDARD_SEGMENT
+        + (SINGLE_LEVEL_WILDCARD, MULTI_LEVEL_WILDCARD)
     )
 
 

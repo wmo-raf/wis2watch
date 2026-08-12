@@ -42,7 +42,14 @@ from .oscar import (
     extract_oscar_stations,
 )
 from .timestamps import parse_timestamp
-from .topics import CACHE, ORIGIN, ParsedTopic, parse_topic, subscription_topic
+from .topics import (
+    CACHE,
+    ORIGIN,
+    ParsedTopic,
+    parse_topic,
+    subscription_topic,
+    sweep_topic,
+)
 
 __all__ = [
     "BrokerConnection",
@@ -75,4 +82,5 @@ __all__ = [
     "parse_topic",
     "station_attribution",
     "subscription_topic",
+    "sweep_topic",
 ]

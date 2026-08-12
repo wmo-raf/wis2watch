@@ -12,17 +12,29 @@ that no registry declares is created here, along with the record that it was
 observed transmitting, because a station nobody declares is precisely the one
 worth asking a centre about.
 
+One thing is refused: traffic from a centre that is neither in the registry nor
+in the monitored region. This tool watches a region, and the wildcard sweep is
+briefly offered the whole world's; keeping what the sweep turns up outside the
+region would trade unbounded storage for messages nobody will ever ask about.
+The region is decided from the centre ID prefix alone, since a centre nothing
+knows about has nothing else to decide it by, and the centres in the region
+that the registry has no record of are reported back as the finding they are.
+
 Only the message's own publication time is stored as ``time``. It is fixed for
 a given notification, which is what lets the same notification seen from two
 vantage points be matched, and what makes a redelivery a no-op.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from django.db.models import Q
 
-from ..core.interpretation import parse_notification, parse_topic
+from ..core.interpretation import (
+    is_monitored_centre_id,
+    parse_notification,
+    parse_topic,
+)
 from ..core.models import (
     Dataset,
     NodeLastSeen,
@@ -46,20 +58,30 @@ class StoreCounts:
 
     ``unattributed`` and ``unknown_dataset`` count accepted messages -- they are
     reported quantities, not errors. ``discarded`` counts what could not be
-    stored at all.
+    stored at all, and ``out_of_region`` what was refused for belonging to
+    another part of the world.
+
+    ``unregistered_centres`` names the centres of the monitored region the
+    registry has no record of, against a topic each was seen publishing on.
+    It is reported rather than written here because it is a finding about the
+    region rather than about a message, and it is the sweep that runs long
+    enough to have found it.
     """
 
     accepted: int = 0
     unattributed: int = 0
     unknown_dataset: int = 0
+    out_of_region: int = 0
     discarded: int = 0
+    unregistered_centres: dict = field(default_factory=dict)
 
     @property
     def summary(self):
         """What the flush came to, in one line, for a log."""
         return (
             f"accepted={self.accepted} unattributed={self.unattributed} "
-            f"unknown_dataset={self.unknown_dataset} discarded={self.discarded}"
+            f"unknown_dataset={self.unknown_dataset} "
+            f"out_of_region={self.out_of_region} discarded={self.discarded}"
         )
 
 
@@ -186,6 +208,18 @@ def prepare_notification(source, topic, payload, lookup=None):
     )
 
 
+def observed_centre_id(record):
+    """The centre a prepared record's topic names, or an empty string.
+
+    A topic that is not a WIS2 topic names no centre, and nothing is inferred
+    from one: it arrived on a filter this process asked for, and what it is
+    doing there is a question the stored row is the evidence for.
+    """
+    parsed = parse_topic(record.topic)
+
+    return parsed.centre_id if parsed else ""
+
+
 def _insert(records):
     """Write prepared records, letting redeliveries fall away.
 
@@ -283,6 +317,13 @@ def store_notifications(source, received):
 
     A message the flush cannot prepare is counted and stepped over: one
     malformed notification must not cost the flush it arrived in.
+
+    A message from a centre that is neither registered nor in the monitored
+    region is refused for the same reason nothing subscribes to the world: it
+    is another region's traffic, and this tool answers questions about one.
+    A registered node is kept whatever its centre ID begins with, since a node
+    added by hand under a prefix that names no country is still one somebody
+    asked to watch.
     """
     counts = StoreCounts()
     lookup = RegistryLookup()
@@ -303,6 +344,15 @@ def store_notifications(source, received):
             )
             counts.discarded += 1
             continue
+
+        centre_id = observed_centre_id(record)
+
+        if record.node_id is None and centre_id:
+            if not is_monitored_centre_id(centre_id):
+                counts.out_of_region += 1
+                continue
+
+            counts.unregistered_centres[centre_id] = record.topic
 
         records.append(record)
         counts.accepted += 1

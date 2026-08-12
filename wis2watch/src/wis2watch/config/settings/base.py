@@ -305,6 +305,17 @@ WIS2WATCH_ORIGIN_RECONNECT_MAX_SECONDS = env.int(
     "WIS2WATCH_ORIGIN_RECONNECT_MAX_SECONDS", 3600
 )
 
+# How long between periodic wildcard sweeps of the Global Broker, in seconds.
+# The sweep is what finds centres of the monitored region publishing without a
+# catalogue record: the per-centre subscriptions are built from the registry
+# and so cannot name a centre nothing knows about.
+WIS2WATCH_SWEEP_INTERVAL_SECONDS = env.int("WIS2WATCH_SWEEP_INTERVAL_SECONDS", 3600)
+
+# How long one sweep carries its wildcard filter, in seconds. Bounded, because
+# for as long as it is carried the connection is offered the whole world's
+# traffic; what falls outside the monitored region is dropped as it is stored.
+WIS2WATCH_SWEEP_DURATION_SECONDS = env.int("WIS2WATCH_SWEEP_DURATION_SECONDS", 60)
+
 # How long raw notification messages are kept, in days. Deliberately short:
 # raw messages answer "what went wrong recently", while the permanent record of
 # the region lives in the hourly rollups, which are never expired.
