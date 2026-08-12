@@ -45,6 +45,15 @@ run_setup_commands_if_configured(){
     /wis2watch/app/src/wis2watch/manage.py migrate
   fi
 
+  # The WIS2 Global Services this release ships with. Beside the migration
+  # rather than inside it: a deployment that applies its migrations out of band
+  # still has to end up with the services, or it comes up watching nothing.
+  # Only the containers that run this function seed -- not the worker, the beat
+  # or the ingest -- so there is no concurrent seed to design around, and the
+  # command creates only what is missing.
+  echo "python /wis2watch/app/src/wis2watch/manage.py seed_global_services"
+  /wis2watch/app/src/wis2watch/manage.py seed_global_services
+
   # collect staticfiles
   if [ "$COLLECT_STATICFILES_ON_STARTUP" = "true" ] ; then
     echo "python /wis2watch/app/src/wis2watch/manage.py collectstatic --noinput"

@@ -48,7 +48,6 @@ from .store import store_notifications
 from .subscriptions import (
     active_global_broker_sources,
     active_origin_broker_sources,
-    ensure_global_broker_source,
     global_broker_subscriptions,
     origin_broker_subscriptions,
 )
@@ -229,13 +228,11 @@ class Supervisor:
     def start_listeners(self):
         """Connect to every broker the registry knows about.
 
-        Seeding the Global Broker happens here rather than on every refresh
-        because it is a create-only convenience for a fresh deployment; once
-        the record exists the admin owns it, and re-checking each minute would
-        only cost a query.
+        The Global Brokers themselves are seeded on start by the container
+        that migrates, so this process only ever reads them: which one to dial
+        is an admin decision, and a second opinion held here could only
+        disagree with it.
         """
-        ensure_global_broker_source()
-
         self.refresh_from_registry()
 
         if not self._held(MessageSource.GLOBAL_BROKER):

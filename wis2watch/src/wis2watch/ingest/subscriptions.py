@@ -19,23 +19,16 @@ centre, its own. The difference between what it carries and what the Global
 Broker carries is the propagation signal, which is why both connections exist.
 
 The brokers themselves are ``MessageSource`` records like any other. The Global
-Broker is seeded from settings the first time so a fresh deployment ingests
-without anyone opening the admin -- create-only, so that once the record exists
-the admin owns it -- and origin brokers are written by the catalogue sync from
-what each node's discovery metadata advertises.
+Brokers are seeded on start from :mod:`wis2watch.core.global_services`, so a
+fresh deployment ingests without anyone opening the admin, and origin brokers
+are written by the catalogue sync from what each node's discovery metadata
+advertises. Which of them this process connects to is read from the database
+alone: an address in env that the database disagreed with would be a
+configuration nothing acts on and nothing reports.
 """
 
-import logging
-
-from django.conf import settings
-
-from ..core.interpretation import CACHE, ORIGIN, parse_broker_url, subscription_topic
+from ..core.interpretation import CACHE, ORIGIN, subscription_topic
 from ..core.models import MessageSource, WIS2Node
-
-logger = logging.getLogger(__name__)
-
-#: What a seeded Global Broker is called, before anyone renames it.
-DEFAULT_GLOBAL_BROKER_NAME = "Global Broker"
 
 #: The prefixes a Global Broker connection carries for every monitored centre:
 #: what the centre published, and what the Global Caches made of it. Origin
@@ -147,37 +140,3 @@ def cache_source_for(broker):
     )
 
     return source
-
-
-def ensure_global_broker_source():
-    """The configured Global Broker, created if it is not there yet.
-
-    Returns None when no usable broker URL is configured, which is a valid
-    state: a deployment may configure its brokers through the admin instead.
-    """
-    existing = MessageSource.objects.filter(
-        source_type=MessageSource.GLOBAL_BROKER,
-        node__isnull=True,
-    ).order_by("pk").first()
-
-    if existing:
-        return existing
-
-    url = getattr(settings, "WIS2WATCH_GLOBAL_BROKER_URL", "")
-    connection = parse_broker_url(url)
-
-    if connection is None:
-        if url:
-            logger.warning("Configured Global Broker URL is not a broker URL: %s", url)
-
-        return None
-
-    return MessageSource.objects.create(
-        name=f"{DEFAULT_GLOBAL_BROKER_NAME} ({connection.host})",
-        source_type=MessageSource.GLOBAL_BROKER,
-        host=connection.host,
-        port=connection.port,
-        use_tls=connection.use_tls,
-        username=connection.username,
-        password=connection.password,
-    )

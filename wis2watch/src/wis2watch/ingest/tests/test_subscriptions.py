@@ -6,7 +6,7 @@ tests exercise that against a seeded registry, because the failure that matters
 confidently wrong answer rather than an exception.
 """
 
-from django.test import TestCase, override_settings
+from django.test import TestCase
 
 from wis2watch.core.models import MessageSource, WIS2Node
 from wis2watch.core.tests.support import origin_broker
@@ -14,12 +14,9 @@ from wis2watch.ingest.subscriptions import (
     active_global_broker_sources,
     active_origin_broker_sources,
     cache_source_for,
-    ensure_global_broker_source,
     global_broker_subscriptions,
     origin_broker_subscriptions,
 )
-
-METEO_FRANCE = "mqtts://everyone:everyone@globalbroker.meteo.fr:8883"
 
 
 def node(centre_id, **kwargs):
@@ -89,49 +86,6 @@ class SubscriptionsFromRegistryTests(TestCase):
             global_broker_subscriptions(),
             ("origin/a/wis2/ke-meteo/#", "cache/a/wis2/ke-meteo/#"),
         )
-
-
-@override_settings(WIS2WATCH_GLOBAL_BROKER_URL=METEO_FRANCE)
-class GlobalBrokerSourceTests(TestCase):
-    """The Global Broker as a message source, seeded once from settings."""
-
-    def test_the_broker_is_created_from_the_configured_url(self):
-        source = ensure_global_broker_source()
-
-        self.assertEqual(source.source_type, MessageSource.GLOBAL_BROKER)
-        self.assertEqual(source.host, "globalbroker.meteo.fr")
-        self.assertEqual(source.port, 8883)
-        self.assertTrue(source.use_tls)
-        self.assertEqual(source.username, "everyone")
-        self.assertEqual(source.password, "everyone")
-        self.assertIsNone(source.node)
-
-    def test_seeding_twice_leaves_one_broker(self):
-        first = ensure_global_broker_source()
-        second = ensure_global_broker_source()
-
-        self.assertEqual(first.pk, second.pk)
-        self.assertEqual(MessageSource.objects.count(), 1)
-
-    def test_a_broker_edited_in_the_admin_is_left_alone(self):
-        source = ensure_global_broker_source()
-        source.host = "globalbroker.example.int"
-        source.save()
-
-        ensure_global_broker_source()
-        source.refresh_from_db()
-
-        self.assertEqual(source.host, "globalbroker.example.int")
-
-    @override_settings(WIS2WATCH_GLOBAL_BROKER_URL="")
-    def test_no_configured_url_seeds_nothing(self):
-        self.assertIsNone(ensure_global_broker_source())
-        self.assertEqual(MessageSource.objects.count(), 0)
-
-    @override_settings(WIS2WATCH_GLOBAL_BROKER_URL="https://not-a-broker.example")
-    def test_a_url_that_is_not_a_broker_seeds_nothing(self):
-        self.assertIsNone(ensure_global_broker_source())
-        self.assertEqual(MessageSource.objects.count(), 0)
 
 
 class ActiveGlobalBrokerTests(TestCase):
