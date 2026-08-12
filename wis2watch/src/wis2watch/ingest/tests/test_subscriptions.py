@@ -13,6 +13,7 @@ from wis2watch.core.tests.support import origin_broker
 from wis2watch.ingest.subscriptions import (
     active_global_broker_sources,
     active_origin_broker_sources,
+    cache_source_for,
     ensure_global_broker_source,
     global_broker_subscriptions,
     origin_broker_subscriptions,
@@ -26,15 +27,20 @@ def node(centre_id, **kwargs):
 
 
 class SubscriptionsFromRegistryTests(TestCase):
-    """One filter per registered centre -- the region, not the world."""
+    """Two filters per registered centre -- the region, not the world."""
 
-    def test_each_registered_centre_gets_its_own_topic_filter(self):
+    def test_each_registered_centre_is_asked_for_at_origin_and_from_the_caches(self):
         node("ke-meteo")
         node("ng-nimet")
 
         self.assertEqual(
             global_broker_subscriptions(),
-            ("origin/a/wis2/ke-meteo/#", "origin/a/wis2/ng-nimet/#"),
+            (
+                "origin/a/wis2/ke-meteo/#",
+                "cache/a/wis2/ke-meteo/#",
+                "origin/a/wis2/ng-nimet/#",
+                "cache/a/wis2/ng-nimet/#",
+            ),
         )
 
     def test_an_empty_registry_subscribes_to_nothing(self):
@@ -46,30 +52,43 @@ class SubscriptionsFromRegistryTests(TestCase):
 
         node("dj-anm")
 
-        self.assertEqual(before, ("origin/a/wis2/ke-meteo/#",))
+        self.assertEqual(
+            before, ("origin/a/wis2/ke-meteo/#", "cache/a/wis2/ke-meteo/#")
+        )
         self.assertEqual(
             global_broker_subscriptions(),
-            ("origin/a/wis2/dj-anm/#", "origin/a/wis2/ke-meteo/#"),
+            (
+                "origin/a/wis2/dj-anm/#",
+                "cache/a/wis2/dj-anm/#",
+                "origin/a/wis2/ke-meteo/#",
+                "cache/a/wis2/ke-meteo/#",
+            ),
         )
 
     def test_a_centre_removed_from_the_registry_is_dropped(self):
         node("ke-meteo")
         node("ng-nimet").delete()
 
-        self.assertEqual(global_broker_subscriptions(), ("origin/a/wis2/ke-meteo/#",))
+        self.assertEqual(
+            global_broker_subscriptions(),
+            ("origin/a/wis2/ke-meteo/#", "cache/a/wis2/ke-meteo/#"),
+        )
 
     def test_no_filter_ever_subscribes_to_the_whole_broker(self):
         node("ke-meteo")
 
         for topic in global_broker_subscriptions():
             self.assertNotIn("/#/", topic)
-            self.assertTrue(topic.startswith("origin/a/wis2/"))
+            self.assertIn("/a/wis2/ke-meteo/", topic)
 
     def test_a_node_whose_own_site_is_unreachable_is_still_watched(self):
         """Node status describes the node's website, never its broker traffic."""
         node("ke-meteo", status="error")
 
-        self.assertEqual(global_broker_subscriptions(), ("origin/a/wis2/ke-meteo/#",))
+        self.assertEqual(
+            global_broker_subscriptions(),
+            ("origin/a/wis2/ke-meteo/#", "cache/a/wis2/ke-meteo/#"),
+        )
 
 
 @override_settings(WIS2WATCH_GLOBAL_BROKER_URL=METEO_FRANCE)
@@ -141,6 +160,80 @@ class ActiveGlobalBrokerTests(TestCase):
         )
 
         self.assertEqual(list(active_global_broker_sources()), [])
+
+
+class CacheVantagePointTests(TestCase):
+    """What a Global Broker's ``cache/`` traffic is stored against.
+
+    One connection, two vantage points. The cache pickup gets a source of its
+    own so that the copy a Global Cache republished is a row beside the
+    centre's own publication rather than a redelivery of it.
+    """
+
+    def setUp(self):
+        self.broker = MessageSource.objects.create(
+            name="Global Broker",
+            source_type=MessageSource.GLOBAL_BROKER,
+            host="globalbroker.example.int",
+            port=8883,
+            use_tls=True,
+            username="everyone",
+            password="everyone",
+        )
+
+    def test_a_broker_gains_a_cache_vantage_point_of_its_own(self):
+        cache = cache_source_for(self.broker)
+
+        self.assertEqual(cache.source_type, MessageSource.GLOBAL_CACHE)
+        self.assertEqual(cache.carried_by, self.broker)
+        self.assertNotEqual(cache.pk, self.broker.pk)
+
+    def test_asking_twice_leaves_one_vantage_point(self):
+        first = cache_source_for(self.broker)
+        second = cache_source_for(self.broker)
+
+        self.assertEqual(first.pk, second.pk)
+        self.assertEqual(
+            MessageSource.objects.filter(
+                source_type=MessageSource.GLOBAL_CACHE
+            ).count(),
+            1,
+        )
+
+    def test_each_broker_carries_its_own_cache_vantage_point(self):
+        other = MessageSource.objects.create(
+            name="Another Global Broker",
+            source_type=MessageSource.GLOBAL_BROKER,
+            host="globalbroker.example.org",
+        )
+
+        self.assertNotEqual(
+            cache_source_for(self.broker).pk, cache_source_for(other).pk
+        )
+
+    def test_it_records_where_the_traffic_arrived_from_but_no_credentials(self):
+        """Nothing dials it, so it carries the address and not the password."""
+        cache = cache_source_for(self.broker)
+
+        self.assertEqual(cache.host, "globalbroker.example.int")
+        self.assertEqual(cache.port, 8883)
+        self.assertTrue(cache.use_tls)
+        self.assertEqual(cache.username, "")
+        self.assertEqual(cache.password, "")
+
+    def test_it_is_not_dialled_as_a_broker_of_either_kind(self):
+        cache_source_for(self.broker)
+
+        self.assertEqual(
+            [source.pk for source in active_global_broker_sources()], [self.broker.pk]
+        )
+        self.assertEqual(list(active_origin_broker_sources()), [])
+
+    def test_a_broker_deleted_takes_its_cache_vantage_point_with_it(self):
+        cache_source_for(self.broker)
+        self.broker.delete()
+
+        self.assertEqual(MessageSource.objects.count(), 0)
 
 
 def broker_for(centre_id, **kwargs):

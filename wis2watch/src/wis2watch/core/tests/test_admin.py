@@ -53,6 +53,25 @@ class AdminSmokeTests(TestCase):
 
                 self.assertEqual(response.status_code, 200)
 
+    def test_the_broker_list_offers_the_connections_and_not_what_they_carry(self):
+        """A Global Cache pickup has no address, credential or switch to set."""
+        broker = MessageSource.objects.create(
+            name="Global Broker",
+            source_type=MessageSource.GLOBAL_BROKER,
+            host="globalbroker.example.int",
+        )
+        MessageSource.objects.create(
+            name="Global Cache via Global Broker",
+            source_type=MessageSource.GLOBAL_CACHE,
+            carried_by=broker,
+            host=broker.host,
+        )
+
+        response = self.client.get(reverse(MessageSourceViewSet().get_url_name("index")))
+
+        self.assertContains(response, "Global Broker")
+        self.assertNotContains(response, "Global Cache via")
+
     def test_a_node_can_be_created_by_hand(self):
         response = self.client.post(
             reverse(WIS2NodeViewSet().get_url_name("add")),
@@ -202,6 +221,61 @@ class NodeOverviewViewTests(TestCase):
 
         self.assertContains(response, "Not judged")
         self.assertNotContains(response, "Silent")
+
+    def published_core_data(self, *, cached):
+        """A centre whose core data the caches did or did not carry."""
+        broker = MessageSource.objects.create(
+            name="Global Broker",
+            source_type=MessageSource.GLOBAL_BROKER,
+            host="globalbroker.example.int",
+        )
+        dataset = Dataset.objects.create(
+            node=self.talking,
+            identifier="urn:wmo:md:ke-kmd:synop",
+            title="Surface observations",
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy="origin/a/wis2/ke-kmd/data/core/weather/synop",
+            raw_json={},
+        )
+        seen_at = dj_timezone.now().replace(minute=0, second=0, microsecond=0)
+
+        for source in (broker, *([self.cache_of(broker)] if cached else [])):
+            HourlyRollup.objects.create(
+                hour=seen_at,
+                source=source,
+                node=self.talking,
+                dataset=dataset,
+                message_count=3,
+            )
+
+    def cache_of(self, broker):
+        return MessageSource.objects.create(
+            name=f"Global Cache via {broker.name}",
+            source_type=MessageSource.GLOBAL_CACHE,
+            carried_by=broker,
+            host=broker.host,
+        )
+
+    def test_a_centre_the_caches_carried_says_so_on_the_screen(self):
+        self.published_core_data(cached=True)
+
+        response = self.client.get(reverse("node_overview"))
+
+        self.assertContains(response, "Cached")
+
+    def test_a_centre_whose_core_data_no_cache_carried_says_so_on_the_screen(self):
+        """The last link in the chain, and a finding only this column can show."""
+        self.published_core_data(cached=False)
+
+        response = self.client.get(reverse("node_overview"))
+
+        self.assertContains(response, "Not cached")
+
+    def test_a_centre_that_has_published_nothing_is_not_reported_as_uncached(self):
+        response = self.client.get(reverse("node_overview"))
+
+        self.assertContains(response, "Nothing to cache")
+        self.assertNotContains(response, "Not cached")
 
 
 class DatasetAdminTests(TestCase):

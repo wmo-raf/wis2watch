@@ -58,8 +58,24 @@ class WIS2NodeViewSet(ModelViewSet):
     list_display = ["centre_id", "name", "country", "status"]
 
 
+class MessageSourceIndexView(generic.IndexView):
+    """The broker list, showing what is actually connected to.
+
+    A Global Cache pickup is a vantage point read off a Global Broker
+    connection's ``cache/`` topics rather than a broker of its own, so it has
+    no address to correct, no credential to set and nothing that deactivating
+    it would stop. Listed here it would offer an operator three controls that
+    do nothing. What it is carrying is on the node overview instead, per
+    centre, which is the question anyone actually has about it.
+    """
+
+    def get_base_queryset(self):
+        return super().get_base_queryset().connections()
+
+
 class MessageSourceViewSet(ModelViewSet):
     model = MessageSource
+    index_view_class = MessageSourceIndexView
     base_url_path = "message-sources"
     icon = "site"
     menu_label = "Brokers"

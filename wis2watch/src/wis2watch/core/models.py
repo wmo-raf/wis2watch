@@ -206,22 +206,43 @@ class WIS2Node(TimeStampedModel):
         return list(self.datasets.values_list("wmo_topic_hierarchy", flat=True))
 
 
+class MessageSourceQuerySet(models.QuerySet):
+    def connections(self):
+        """The sources something actually dials.
+
+        A vantage point carried by another source -- Global Cache pickup, read
+        off a Global Broker connection's ``cache/`` topics -- is never
+        connected to. It has no address of its own to correct, no reachability
+        to report and nothing that deactivating it would stop, so anywhere the
+        admin or the monitor is describing connections it is not one of them.
+        """
+        return self.filter(carried_by__isnull=True)
+
+
 class MessageSource(TimeStampedModel):
     """
     A vantage point from which WIS2 notification messages are observed.
 
-    Both a Global Broker and a node's own origin broker are message sources.
-    Modelling them as one entity is what makes "published at origin but never
-    seen on the Global Broker" expressible: the same notification observed from
-    two sources is two rows that can be matched, not one row that overwrites
-    the other.
+    A Global Broker, a node's own origin broker and the Global Caches' pickup
+    of a centre's data are all message sources. Modelling them as one entity is
+    what makes "published at origin but never seen on the Global Broker" -- and
+    "carried by the Global Broker but never cached" -- expressible: the same
+    notification observed from three vantage points is three rows that can be
+    matched, not one row that overwrites the others.
+
+    A vantage point is not always a connection of its own. Global Cache pickup
+    is read off the ``cache/`` topics of a Global Broker connection, so its
+    source records which connection carries it rather than an address anything
+    dials; ``carried_by`` is what says so.
     """
 
     GLOBAL_BROKER = "global_broker"
+    GLOBAL_CACHE = "global_cache"
     ORIGIN_BROKER = "origin_broker"
 
     SOURCE_TYPE_CHOICES = [
         (GLOBAL_BROKER, _("Global Broker")),
+        (GLOBAL_CACHE, _("Global Cache")),
         (ORIGIN_BROKER, _("Origin Broker")),
     ]
 
@@ -243,6 +264,17 @@ class MessageSource(TimeStampedModel):
         blank=True,
         related_name="message_sources",
         help_text=_("The node this broker belongs to, for origin brokers"),
+    )
+    carried_by = models.ForeignKey(
+        "self",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="carried_sources",
+        help_text=_(
+            "The broker connection this vantage point's traffic arrives on, "
+            "for vantage points that are not dialled separately"
+        ),
     )
 
     host = models.CharField(max_length=255)
@@ -266,11 +298,18 @@ class MessageSource(TimeStampedModel):
     last_connected_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True)
 
+    objects = MessageSourceQuerySet.as_manager()
+
     panels = [
         FieldPanel("name"),
         FieldPanel("source_type"),
         FieldPanel("centre_id"),
         FieldPanel("node"),
+        # Read-only because it is not a choice anyone makes: a carried vantage
+        # point is created by the ingest against the connection that carries
+        # it, and repointing it in the admin would say the traffic arrived
+        # somewhere it did not.
+        FieldPanel("carried_by", read_only=True),
         MultiFieldPanel(
             [
                 FieldPanel("host"),
@@ -294,6 +333,15 @@ class MessageSource(TimeStampedModel):
                 fields=["node", "source_type"],
                 condition=models.Q(node__isnull=False),
                 name="unique_source_type_per_node",
+            ),
+            # A connection carries one vantage point of any given kind. What
+            # the Global Broker's ``cache/`` topics deliver is one thing seen
+            # one way, and a second row for it would split a centre's cache
+            # pickup across two sources that each looked complete.
+            models.UniqueConstraint(
+                fields=["carried_by", "source_type"],
+                condition=models.Q(carried_by__isnull=False),
+                name="unique_source_type_per_carrier",
             ),
         ]
         verbose_name = _("Message Source")
@@ -327,9 +375,12 @@ class Dataset(TimeStampedModel):
     catalogue's.
     """
 
+    CORE = "core"
+    RECOMMENDED = "recommended"
+
     DATA_POLICY_CHOICES = [
-        ("core", "Core"),
-        ("recommended", "Recommended"),
+        (CORE, "Core"),
+        (RECOMMENDED, "Recommended"),
     ]
 
     ACTIVE = "active"

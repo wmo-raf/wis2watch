@@ -13,6 +13,7 @@ them.
 """
 
 from .overview import (
+    CachePickup,
     NodeOverviewRow,
     OriginReachability,
     Staleness,
@@ -29,6 +30,7 @@ from .silence import (
 )
 
 __all__ = [
+    "CachePickup",
     "DatasetSilenceRow",
     "Expectation",
     "NodeOverviewRow",

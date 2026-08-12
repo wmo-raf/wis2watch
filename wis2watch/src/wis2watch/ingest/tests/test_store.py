@@ -173,6 +173,120 @@ class NodeAttributionTests(StoreTestCase):
         self.assertIsNone(record.dataset)
 
 
+class CacheVantagePointTests(StoreTestCase):
+    """What a Global Cache republished is a copy, counted apart from the original.
+
+    Both arrive on the one Global Broker connection. The captured traffic these
+    tests run on shows why the distinction has to be made in storage: one
+    Kenyan publication comes back as two cached messages, one per cache that
+    carried it, each with a UUID of its own and the centre's own publication
+    time. Stored against the broker's source, a centre's volume would be
+    whatever the caches did with it.
+    """
+
+    def cache_source(self):
+        return MessageSource.objects.get(source_type=MessageSource.GLOBAL_CACHE)
+
+    def cached_copies_of(self, topic=KE_TOPIC):
+        """Every cached message the capture holds for a centre's publication."""
+        origin = message_on(topic)["payload"]
+
+        return [
+            (message["topic"], message["payload"])
+            for message in captured()
+            if message["topic"].startswith("cache/")
+            and message["payload"]["properties"]["data_id"]
+            == origin["properties"]["data_id"]
+        ]
+
+    def test_a_cached_message_is_stored_against_a_source_of_its_own(self):
+        record = self.store(KE_CACHE_TOPIC)
+
+        self.assertEqual(record.source.source_type, MessageSource.GLOBAL_CACHE)
+        self.assertEqual(record.source.carried_by, self.source)
+
+    def test_a_message_the_centre_published_stays_on_the_broker_it_arrived_on(self):
+        record = self.store(KE_TOPIC)
+
+        self.assertEqual(record.source, self.source)
+        self.assertFalse(
+            MessageSource.objects.filter(
+                source_type=MessageSource.GLOBAL_CACHE
+            ).exists()
+        )
+
+    def test_every_cache_that_carried_a_publication_lands_on_the_one_source(self):
+        """Two caches, two copies, and none of them the centre's own volume."""
+        copies = self.cached_copies_of()
+
+        store_notifications(self.source, [message_pair(KE_TOPIC), *copies])
+
+        self.assertEqual(len(copies), 2)
+        self.assertEqual(
+            NotificationMessage.objects.filter(source=self.source).count(), 1
+        )
+        self.assertEqual(
+            NotificationMessage.objects.filter(source=self.cache_source()).count(), 2
+        )
+
+    def test_a_cached_copy_keeps_the_publication_it_was_made_from(self):
+        """A cache stamps its own UUID; what stays the same is the centre's."""
+        original = store_one(self.source, *message_pair(KE_TOPIC))
+        copy = store_one(self.source, *self.cached_copies_of()[0])
+
+        self.assertNotEqual(copy.notification_id, original.notification_id)
+        self.assertEqual(copy.data_id, original.data_id)
+        self.assertEqual(copy.time, original.time)
+        self.assertEqual(copy.node, original.node)
+
+    def test_a_flush_of_cached_traffic_creates_one_vantage_point(self):
+        store_notifications(
+            self.source,
+            [
+                published_at("2026-08-11T10:00:00Z", topic=KE_CACHE_TOPIC),
+                published_at("2026-08-11T11:00:00Z", topic=KE_CACHE_TOPIC),
+            ],
+        )
+
+        self.assertEqual(
+            MessageSource.objects.filter(
+                source_type=MessageSource.GLOBAL_CACHE
+            ).count(),
+            1,
+        )
+        self.assertEqual(
+            NotificationMessage.objects.filter(source=self.cache_source()).count(), 2
+        )
+
+    def test_cache_pickup_is_counted_apart_from_the_rest_of_a_flush(self):
+        counts = store_notifications(
+            self.source, [message_pair(KE_TOPIC), *self.cached_copies_of()]
+        )
+
+        self.assertEqual(counts.accepted, 3)
+        self.assertEqual(counts.cached, 2)
+
+    def test_how_a_centre_publishes_is_counted_over_what_it_published(self):
+        """Otherwise a centre's unattributed rate is the caches' doing."""
+        counts = store_notifications(
+            self.source, [message_pair(KE_TOPIC), *self.cached_copies_of()]
+        )
+
+        self.assertEqual(counts.unknown_dataset, 1)
+        self.assertEqual(counts.unattributed, 0)
+
+    def test_a_centre_heard_only_through_a_cache_is_still_heard_from(self):
+        """The cached copy carries the centre's own publication time."""
+        store_notifications(
+            self.source, [published_at("2026-08-11T10:00:00Z", topic=KE_CACHE_TOPIC)]
+        )
+
+        self.assertEqual(
+            NodeLastSeen.objects.get(node=self.node).last_message_at.isoformat(),
+            "2026-08-11T10:00:00+00:00",
+        )
+
+
 class RegionTests(StoreTestCase):
     """The tool watches a region, so it stores a region.
 
@@ -529,11 +643,16 @@ class BatchTests(StoreTestCase):
         )
 
     def test_traffic_no_dataset_claims_is_counted_as_unknown(self):
+        """Counted over what the centres published; a cache only repeats it."""
         self.dataset()
 
         counts = store_notifications(self.source, self.received())
 
-        self.assertEqual(counts.unknown_dataset, len(self.in_region()) - 3)
+        published = [
+            topic for topic, _ in self.in_region() if topic.startswith("origin/")
+        ]
+
+        self.assertEqual(counts.unknown_dataset, len(published) - 1)
 
     def test_a_message_that_cannot_be_stored_does_not_lose_the_batch(self):
         received = self.received()

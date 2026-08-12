@@ -90,9 +90,20 @@
 
         .badge-not_attempted,
         .badge-not_advertised,
+        .badge-nothing_to_cache,
         .badge-unknown {
             background: #eee;
             color: #555;
+        }
+
+        .badge-picked_up {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .badge-not_picked_up {
+            background: #fff3cd;
+            color: #856404;
         }
 
         .badge-silent {
@@ -163,6 +174,9 @@
                 <th title="{% trans "Whether this centre's own broker answers from outside" %}">
                     {% trans "Origin broker" %}
                 </th>
+                <th title="{% trans "Whether the Global Caches carried this centre's core data. Only core data is cached, so a centre publishing none has nothing to pick up." %}">
+                    {% trans "Global Cache" %}
+                </th>
                 <th title="{% trans 'Each dataset judged against its own learned or stated cadence' %}">
                     {% trans "Silence" %}
                 </th>
@@ -196,6 +210,17 @@
                         {% if row.origin_last_error %}
                             <div class="broker-error" title="{{ row.origin_last_error }}">
                                 {{ row.origin_last_error|truncatechars:60 }}
+                            </div>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <span class="badge badge-{{ row.cache_pickup }}">
+                            {{ row.cache_pickup_label }}
+                        </span>
+                        {% if row.core_message_count %}
+                            <div class="silence-detail"
+                                 title="{% trans 'Every Global Cache carrying a centre republishes its data, so cached copies outnumber the publications they were made from' %}">
+                                {% blocktrans with cached=row.cache_message_count core=row.core_message_count %}{{ core }} core published, {{ cached }} cached copies{% endblocktrans %}
                             </div>
                         {% endif %}
                     </td>

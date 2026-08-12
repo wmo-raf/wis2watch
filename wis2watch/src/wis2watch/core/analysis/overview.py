@@ -5,6 +5,12 @@ broker answers from outside. Read together they separate "gone quiet" from
 "publishing where no one can see it", which is the distinction the whole tool
 is built around.
 
+Beside them is the far end of the same chain: whether the Global Caches picked
+the centre's core data up. A centre whose notifications reach the Global Broker
+and are never cached has announced data the world cannot retrieve from anywhere
+but the centre itself -- which is a different failure from either of the other
+two, and invisible in both of their columns.
+
 Two different quiets are reported side by side, because they answer different
 questions. Staleness is how long it is since the centre published anything at
 all, against one flat threshold, and is what the table sorts by. Silence is
@@ -101,6 +107,41 @@ class OriginReachability:
     LABELS = dict(CHOICES)
 
 
+class CachePickup:
+    """Whether the Global Caches are carrying a centre's core data.
+
+    Three states, because the absence of cache traffic means nothing on its
+    own. Only core data is cached, so a centre publishing recommended data
+    alone -- and a centre that has published nothing at all in the window --
+    has nothing that a cache was supposed to pick up, and reporting either as
+    a failure would fill the column with centres that are doing exactly what
+    they should.
+
+    What is judged is core data the registry knows the dataset of. Traffic on
+    a topic no catalogue record claims cannot be told core from recommended
+    without one, so it is left out of the expectation rather than guessed at:
+    an unregistered dataset is already reported as its own finding.
+
+    The cache count beside the state is copies, not publications: every Global
+    Cache carrying a centre's data republishes it, so a healthy centre's cached
+    count runs to a multiple of what it published. What is being read here is
+    whether the caches are carrying the centre at all, which is why the state
+    is three words rather than a ratio.
+    """
+
+    PICKED_UP = "picked_up"
+    NOT_PICKED_UP = "not_picked_up"
+    NOTHING_TO_CACHE = "nothing_to_cache"
+
+    CHOICES = [
+        (NOT_PICKED_UP, _("Not cached")),
+        (NOTHING_TO_CACHE, _("Nothing to cache")),
+        (PICKED_UP, _("Cached")),
+    ]
+
+    LABELS = dict(CHOICES)
+
+
 @dataclass(frozen=True)
 class NodeOverviewRow:
     """One centre's line in the overview."""
@@ -114,6 +155,9 @@ class NodeOverviewRow:
     hours_since_last_seen: float | None
     staleness: str
     recent_message_count: int
+    core_message_count: int
+    cache_message_count: int
+    cache_pickup: str
     dataset_count: int
     station_count: int
     origin_reachability: str
@@ -131,6 +175,11 @@ class NodeOverviewRow:
     def silence_label(self):
         """What the centre's silence is called, for a table cell."""
         return Silence.label(self.silence)
+
+    @property
+    def cache_pickup_label(self):
+        """What the centre's cache pickup is called, for a table cell."""
+        return CachePickup.LABELS.get(self.cache_pickup, self.cache_pickup)
 
     @property
     def origin_reachability_label(self):
@@ -215,22 +264,39 @@ def _annotated_nodes(*, since):
     against each other, which is the kind of wrong number that looks
     plausible.
     """
-    recent_messages = (
-        HourlyRollup.objects.filter(
-            node=OuterRef("pk"),
-            hour__gte=since,
-            # The world's view of the centre, and only that. The same
-            # notification is also observed at the node's own broker, so
-            # adding the vantage points together would double the number --
-            # and a centre publishing at origin while nothing reaches the
-            # Global Broker is meant to read as no traffic here. That is the
-            # propagation gap, which is why the column says where it looked.
-            source__source_type=MessageSource.GLOBAL_BROKER,
+
+    def volume(**where):
+        """Messages of one kind, in the window, for the centre of the row.
+
+        Each vantage point is asked for separately rather than pivoted out of
+        one pass, for the same reason the counts below are separate
+        subqueries: the numbers have to stay independent of each other, and a
+        centre with no rows of a given kind has to come back as nothing rather
+        than fall out of the row.
+        """
+        return (
+            HourlyRollup.objects.filter(node=OuterRef("pk"), hour__gte=since, **where)
+            .values("node")
+            .annotate(total=Sum("message_count"))
+            .values("total")
         )
-        .values("node")
-        .annotate(total=Sum("message_count"))
-        .values("total")
+
+    # The world's view of the centre, and only that. The same publication is
+    # also observed at the node's own broker and again on every cache that
+    # carried it, so adding the vantage points together would report one
+    # message as many -- and a centre publishing at origin while nothing
+    # reaches the Global Broker is meant to read as no traffic here. That is
+    # the propagation gap, which is why the column says where it looked.
+    recent_messages = volume(source__source_type=MessageSource.GLOBAL_BROKER)
+
+    # What a cache was supposed to pick up, and what one did. Only core data
+    # is cached, so the first is the expectation the second is read against;
+    # both are counted from the same vantage point they were observed at.
+    core_messages = volume(
+        source__source_type=MessageSource.GLOBAL_BROKER,
+        dataset__wmo_data_policy=Dataset.CORE,
     )
+    cached_messages = volume(source__source_type=MessageSource.GLOBAL_CACHE)
 
     datasets = (
         Dataset.objects.filter(node=OuterRef("pk"))
@@ -262,6 +328,8 @@ def _annotated_nodes(*, since):
     return WIS2Node.objects.annotate(
         last_seen_at=Subquery(last_seen[:1]),
         recent_message_count=Coalesce(Subquery(recent_messages), 0),
+        core_message_count=Coalesce(Subquery(core_messages), 0),
+        cache_message_count=Coalesce(Subquery(cached_messages), 0),
         dataset_count=Coalesce(Subquery(datasets), 0),
         station_count=Coalesce(Subquery(stations), 0),
         has_origin_broker=Exists(origin_broker),
@@ -285,6 +353,9 @@ def _row(node, *, now, stale_after, silence):
         hours_since_last_seen=quiet_for,
         staleness=_staleness(quiet_for, stale_after),
         recent_message_count=node.recent_message_count,
+        core_message_count=node.core_message_count,
+        cache_message_count=node.cache_message_count,
+        cache_pickup=_cache_pickup(node),
         dataset_count=node.dataset_count,
         station_count=node.station_count,
         origin_reachability=_origin_reachability(node),
@@ -293,6 +364,23 @@ def _row(node, *, now, stale_after, silence):
         silent_dataset_count=node_silence.silent_dataset_count,
         judged_dataset_count=node_silence.judged_dataset_count,
     )
+
+
+def _cache_pickup(node):
+    """Whether the Global Caches carried this centre's core data.
+
+    Read from the window the volume column covers, so the two columns are
+    talking about the same stretch of time: a centre reported as publishing
+    core data and not being cached is one whose recent traffic can be looked
+    at directly.
+    """
+    if node.cache_message_count:
+        return CachePickup.PICKED_UP
+
+    if node.core_message_count:
+        return CachePickup.NOT_PICKED_UP
+
+    return CachePickup.NOTHING_TO_CACHE
 
 
 def _origin_reachability(node):

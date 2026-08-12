@@ -12,6 +12,18 @@ that no registry declares is created here, along with the record that it was
 observed transmitting, because a station nobody declares is precisely the one
 worth asking a centre about.
 
+The connection a message arrived on is likewise not the vantage point it is
+stored against. One Global Broker connection carries a centre's own
+publication under ``origin/`` and every Global Cache's republication of it
+under ``cache/``. A cached copy keeps the centre's data identifier and its
+publication time but stamps a UUID of its own, and several caches carry the
+same data, so one publication arrives as several messages that nothing can
+match back to it. Counted against the connection's own source they would
+multiply what a centre appears to have published by however many caches happen
+to be watching it. So ``cache/`` traffic is stored against a vantage point of
+its own: it is countable there, and every count of what a centre published
+stays about the centre.
+
 One thing is refused: traffic from a centre that is neither in the registry nor
 in the monitored region. This tool watches a region, and the wildcard sweep is
 briefly offered the whole world's; keeping what the sweep turns up outside the
@@ -37,12 +49,14 @@ from ..core.interpretation import (
 )
 from ..core.models import (
     Dataset,
+    MessageSource,
     NodeLastSeen,
     NotificationMessage,
     Station,
     StationSource,
     WIS2Node,
 )
+from .subscriptions import cache_source_for
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +70,24 @@ class StoreCounts:
     per-source uniqueness constraint, and asking the database how many landed
     would cost a scan of a hypertable to learn something no one needs.
 
-    ``unattributed`` and ``unknown_dataset`` count accepted messages -- they are
-    reported quantities, not errors. ``discarded`` counts what could not be
-    stored at all, and ``out_of_region`` what was refused for belonging to
-    another part of the world.
+    ``unattributed``, ``unknown_dataset`` and ``cached`` count accepted
+    messages -- they are reported quantities, not errors. ``discarded`` counts
+    what could not be stored at all, and ``out_of_region`` what was refused for
+    belonging to another part of the world.
+
+    ``cached`` is how much of a flush was a Global Cache's republication rather
+    than a centre's own publication -- typically more than the rest of it,
+    since every cache carrying a centre's data republishes it. Named in the log
+    because a flush that suddenly carries none of it is the region's cache
+    pickup stopping.
+
+    The other two are counted over what the centres published, cache copies
+    left out. Both are statements about how a centre publishes -- that it omits
+    the station identifier, that it publishes on a topic its catalogue record
+    never named -- and a cached copy repeats whatever the original said.
+    Counting the copies would multiply a centre's unattributed rate by the
+    number of caches watching it, which would say more about the caches than
+    about the centre.
 
     ``unregistered_centres`` names the centres of the monitored region the
     registry has no record of, against a topic each was seen publishing on.
@@ -71,6 +99,7 @@ class StoreCounts:
     accepted: int = 0
     unattributed: int = 0
     unknown_dataset: int = 0
+    cached: int = 0
     out_of_region: int = 0
     discarded: int = 0
     unregistered_centres: dict[str, str] = field(default_factory=dict)
@@ -80,13 +109,13 @@ class StoreCounts:
         """What the flush came to, in one line, for a log."""
         return (
             f"accepted={self.accepted} unattributed={self.unattributed} "
-            f"unknown_dataset={self.unknown_dataset} "
+            f"unknown_dataset={self.unknown_dataset} cached={self.cached} "
             f"out_of_region={self.out_of_region} discarded={self.discarded}"
         )
 
 
 class RegistryLookup:
-    """Registry lookups, remembered for the length of one flush.
+    """The records a flush resolves over and over, remembered for its length.
 
     A flush is overwhelmingly the same few centres and topics repeated, so
     resolving each one once turns a per-message cost into a per-topic one. The
@@ -98,6 +127,28 @@ class RegistryLookup:
         self._nodes = {}
         self._datasets = {}
         self._stations = {}
+        self._vantages = {}
+
+    def vantage(self, source, parsed):
+        """The source a message arriving on this topic belongs to.
+
+        A connection is not a vantage point. The one Global Broker connection
+        carries what a centre published and what the Global Caches made of it,
+        and the two have to be told apart somewhere; the topic prefix is the
+        only thing that distinguishes them, since everything else about the
+        cached copy is the original.
+
+        A topic that is not a WIS2 topic at all belongs to the connection it
+        arrived on. Nothing can be said about where it came from beyond that,
+        and the stored row is the evidence.
+        """
+        if parsed is None or not parsed.is_cache:
+            return source
+
+        if source.pk not in self._vantages:
+            self._vantages[source.pk] = cache_source_for(source)
+
+        return self._vantages[source.pk]
 
     def node(self, centre_id):
         """The centre as a registered node, or None.
@@ -169,6 +220,11 @@ class RegistryLookup:
 def prepare_notification(source, topic, payload, lookup=None):
     """A received message as an unsaved ``NotificationMessage``, or None.
 
+    ``source`` is the connection the message arrived on; which vantage point
+    the row is stored against is read off the topic, since one connection
+    carries both a centre's own publication and the caches' republication of
+    it.
+
     None means the message cannot be identified in time -- no UUID, or no
     usable publication time -- and so could not be de-duplicated or matched
     across vantage points if it were stored.
@@ -191,7 +247,7 @@ def prepare_notification(source, topic, payload, lookup=None):
     )
 
     return NotificationMessage(
-        source=source,
+        source=lookup.vantage(source, parsed),
         node=lookup.node(parsed.centre_id) if parsed else None,
         dataset=lookup.dataset(
             parsed.as_origin().raw if parsed else "", notification.metadata_id
@@ -230,11 +286,20 @@ def _insert(records):
 
 
 def _record_last_seen(records):
-    """Move each node's last-seen up to the latest message it just published.
+    """Move each node's last-seen up to the latest publication just observed.
 
     Maintaining this on ingest is what keeps the headline question -- which
     centres have gone quiet -- an indexed lookup per node rather than a scan
     of a hypertable that grows with the region's traffic.
+
+    Every vantage point counts, cached copies included. What is being read is
+    when the centre last published, and the time on the row is the centre's own
+    publication time whichever vantage point carried it: a cache republishing
+    an hour-old notification is evidence the centre published an hour ago, not
+    evidence of anything happening now. Adding vantage points together would
+    be wrong -- which is why the volume counts do not -- but taking the latest
+    of them cannot be, and the centre heard only through a cache is one this
+    would otherwise call silent.
 
     Time only moves forward. Brokers redeliver, a sweep runs alongside the
     per-centre subscriptions, and a message can arrive after a later one; none
@@ -278,10 +343,13 @@ def _record_observed_stations(records):
     a centre with no catalogue record still has stations, and losing them
     would hide exactly the traffic worth asking about.
 
-    Time only moves forward, for the reasons ``_record_last_seen`` gives about
-    a node's. The two are kept apart rather than generalised: they answer
-    different questions, and the row a station's answer lives on is one of the
-    three provenance records, which a node's is not.
+    Time only moves forward, and every vantage point counts, for the reasons
+    ``_record_last_seen`` gives about a node's -- a cached copy carries the
+    station's own transmission time, and taking the latest of what several
+    vantage points saw cannot overstate it. The two are kept apart rather than
+    generalised: they answer different questions, and the row a station's
+    answer lives on is one of the three provenance records, which a node's is
+    not.
     """
     latest = {}
 
@@ -356,6 +424,10 @@ def store_notifications(source, received):
 
         records.append(record)
         counts.accepted += 1
+
+        if record.source.source_type == MessageSource.GLOBAL_CACHE:
+            counts.cached += 1
+            continue
 
         if not record.wigos_station_id:
             counts.unattributed += 1
