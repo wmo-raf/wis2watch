@@ -46,84 +46,15 @@ from ..models import (
     WIS2Node,
 )
 from ..rollups import floor_to_hour
-from .silence import NodeSilence, Silence, silence_by_node
+from .reachability import OriginReachability
+from .silence import BEFORE_ANYTHING, NodeSilence, Silence, hours_between, silence_by_node
+from .staleness import Staleness, default_stale_after_hours
 
 #: How much recent traffic the table reports on, in hours. Volume comes from
 #: the rollups, so the window is a whole number of hourly buckets ending with
 #: the one in progress -- there is no finer answer to be had, and pretending
 #: otherwise would make the column's heading a lie by a few minutes.
 DEFAULT_VOLUME_HOURS = 24
-
-#: Sorts before any real last-seen time, so the centres nothing has ever been
-#: heard from head the table and still tie-break by centre ID among themselves.
-BEFORE_ANYTHING = datetime.min.replace(tzinfo=timezone.utc)
-
-#: How long a centre may be quiet before the table calls it stale. A flat
-#: threshold, deliberately: it is what the table sorts by, and its job is to
-#: put the centres worth looking at first. Whether a centre's quiet is actually
-#: a fault is the silence column's question, judged per dataset against its own
-#: cadence.
-DEFAULT_STALE_AFTER_HOURS = 24
-
-
-class Staleness:
-    """How concerning a centre's quiet is."""
-
-    ACTIVE = "active"
-    STALE = "stale"
-    NEVER_SEEN = "never_seen"
-
-    CHOICES = [
-        (NEVER_SEEN, _("Never seen")),
-        (STALE, _("Stale")),
-        (ACTIVE, _("Active")),
-    ]
-
-    LABELS = dict(CHOICES)
-
-
-class OriginReachability:
-    """What is known about a centre's own broker, from outside.
-
-    Four states, because two of them are absences that mean different things.
-    A broker nothing has attempted yet is not a broker that failed, and a
-    centre whose catalogue record advertises no broker at all is neither --
-    calling any of these "unreachable" would report a fault that has not been
-    observed.
-    """
-
-    REACHABLE = "reachable"
-    UNREACHABLE = "unreachable"
-    NOT_ATTEMPTED = "not_attempted"
-    NOT_ADVERTISED = "not_advertised"
-
-    CHOICES = [
-        (UNREACHABLE, _("Not reachable")),
-        (NOT_ATTEMPTED, _("Not attempted yet")),
-        (NOT_ADVERTISED, _("No broker advertised")),
-        (REACHABLE, _("Reachable")),
-    ]
-
-    LABELS = dict(CHOICES)
-
-    @classmethod
-    def of(cls, is_reachable, *, advertised=True):
-        """What a broker's stored reachability amounts to.
-
-        Read from the one field and from whether there is a broker at all,
-        because the overview and a centre's own page ask the same question of
-        the same record by different routes -- one annotated across the whole
-        region, one for a single node -- and two spellings of "null means not
-        attempted" would eventually disagree on the row that mattered.
-        """
-        if not advertised:
-            return cls.NOT_ADVERTISED
-
-        if is_reachable is None:
-            return cls.NOT_ATTEMPTED
-
-        return cls.REACHABLE if is_reachable else cls.UNREACHABLE
-
 
 class CachePickup:
     """Whether the Global Caches are carrying a centre's core data.
@@ -205,11 +136,6 @@ class NodeOverviewRow:
         return OriginReachability.LABELS.get(
             self.origin_reachability, self.origin_reachability
         )
-
-
-def default_stale_after_hours():
-    """How long a centre may be quiet before the table calls it stale."""
-    return getattr(settings, "WIS2WATCH_STALE_AFTER_HOURS", DEFAULT_STALE_AFTER_HOURS)
 
 
 def default_volume_hours():
@@ -406,14 +332,6 @@ def _origin_reachability(node):
     return OriginReachability.of(
         node.origin_reachable, advertised=node.has_origin_broker
     )
-
-
-def hours_between(last_seen_at, now):
-    """How many hours a centre has been quiet, or None if it never spoke."""
-    if last_seen_at is None:
-        return None
-
-    return (now - last_seen_at).total_seconds() / 3600
 
 
 def _staleness(quiet_for, stale_after):

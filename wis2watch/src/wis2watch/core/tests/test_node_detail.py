@@ -14,6 +14,7 @@ because the query started from the declarations.
 
 from datetime import timedelta
 
+from django.contrib.gis.geos import Point
 from django.test import TestCase
 
 from wis2watch.core.analysis import (
@@ -21,11 +22,13 @@ from wis2watch.core.analysis import (
     OriginReachability,
     Silence,
     StationStanding,
+    SyncScope,
     node_detail,
 )
 from wis2watch.core.models import (
     CadenceBaseline,
     Dataset,
+    GlobalDiscoveryCatalogue,
     HourlyRollup,
     MessageSource,
     NodeLastSeen,
@@ -56,6 +59,14 @@ class NodeDetailTestCase(TestCase):
             NodeLastSeen.objects.create(node=node, last_message_at=last_seen)
 
         return node
+
+    def catalogue(self, centre_id="int-wmo-global-discovery", is_writer=False):
+        return GlobalDiscoveryCatalogue.objects.create(
+            centre_id=centre_id,
+            name=centre_id,
+            base_url=f"https://{centre_id}.example.int",
+            is_writer=is_writer,
+        )
 
     def dataset(self, name="synop", *, node=None, expects=None, status=Dataset.ACTIVE):
         node = node or self.kenya
@@ -153,9 +164,19 @@ class DatasetTests(NodeDetailTestCase):
         row = self.by_title()["synop"]
 
         self.assertEqual(row.last_active_hour, NOW - timedelta(hours=30))
-        self.assertEqual(row.expected_interval_hours, 6)
-        self.assertEqual(row.expectation, Expectation.LEARNED)
-        self.assertEqual(row.silence, Silence.SILENT)
+        self.assertEqual(row.quiet.expected_interval_hours, 6)
+        self.assertEqual(row.quiet.expectation, Expectation.LEARNED)
+        self.assertEqual(row.quiet.silence, Silence.SILENT)
+
+    def test_a_dataset_carries_what_the_catalogue_says_of_it(self):
+        """The registry's own description, beside the judgement of it."""
+        self.dataset("synop")
+
+        row = self.by_title()["synop"]
+
+        self.assertEqual(row.identifier, "urn:wmo:md:ke-meteo:synop")
+        self.assertEqual(row.topic, "origin/a/wis2/ke-meteo/data/core/synop")
+        self.assertEqual(row.policy, Dataset.CORE)
 
     def test_a_stated_expectation_is_the_one_the_page_judges_against(self):
         climate = self.dataset("climate", expects=24 * 30)
@@ -164,17 +185,17 @@ class DatasetTests(NodeDetailTestCase):
 
         row = self.by_title()["climate"]
 
-        self.assertEqual(row.expected_interval_hours, 24 * 30)
-        self.assertEqual(row.expectation, Expectation.OVERRIDDEN)
-        self.assertEqual(row.silence, Silence.ON_SCHEDULE)
+        self.assertEqual(row.quiet.expected_interval_hours, 24 * 30)
+        self.assertEqual(row.quiet.expectation, Expectation.OVERRIDDEN)
+        self.assertEqual(row.quiet.silence, Silence.ON_SCHEDULE)
 
     def test_a_dataset_with_nothing_to_expect_of_it_is_not_called_silent(self):
         self.last_published(self.dataset("synop"), 500)
 
         row = self.by_title()["synop"]
 
-        self.assertIsNone(row.expected_interval_hours)
-        self.assertEqual(row.silence, Silence.UNKNOWN)
+        self.assertIsNone(row.quiet.expected_interval_hours)
+        self.assertEqual(row.quiet.silence, Silence.UNKNOWN)
 
     def test_another_centres_datasets_are_not_this_centres(self):
         djibouti = self.node("dj-anm")
@@ -186,12 +207,18 @@ class DatasetTests(NodeDetailTestCase):
     def test_a_dataset_the_catalogue_no_longer_lists_is_shown_apart_from_the_rest(self):
         """Retired datasets stay on the page, and no silence is claimed of them."""
         self.dataset("synop")
-        self.dataset("withdrawn", status=Dataset.DELETED)
+        withdrawn = self.dataset("withdrawn", status=Dataset.DELETED)
+        self.last_published(withdrawn, 300)
 
         detail = self.detail()
 
         self.assertEqual([row.title for row in detail.datasets], ["synop"])
-        self.assertEqual([dataset.title for dataset in detail.retired_datasets], ["withdrawn"])
+
+        retired = detail.retired_datasets[0]
+
+        self.assertEqual(retired.title, "withdrawn")
+        self.assertIsNone(retired.quiet)
+        self.assertEqual(retired.last_active_hour, NOW - timedelta(hours=300))
 
 
 class StationTests(NodeDetailTestCase):
@@ -208,6 +235,16 @@ class StationTests(NodeDetailTestCase):
 
         self.assertEqual(row.last_transmitted, NOW - timedelta(hours=3))
         self.assertEqual(row.standing, StationStanding.TRANSMITTING)
+
+    def test_a_station_heard_from_long_ago_is_not_called_transmitting(self):
+        """Green for a station last heard from in March is how one is missed."""
+        self.declare("0-20000-0-63708")
+        self.transmitted("0-20000-0-63708", hours_ago=30 * 24)
+
+        row = self.by_wigos_id()["0-20000-0-63708"]
+
+        self.assertEqual(row.standing, StationStanding.GONE_QUIET)
+        self.assertEqual(row.hours_quiet, 30 * 24)
 
     def test_a_declared_station_nothing_has_heard_from_is_named(self):
         self.declare("0-20000-0-63708")
@@ -270,6 +307,20 @@ class StationTests(NodeDetailTestCase):
 
         self.assertEqual(self.detail().stations, [])
 
+    def test_a_station_carries_where_it_is_and_what_kind_it_is(self):
+        """A silent station is followed up by whoever can reach the site."""
+        station = self.declare("0-20000-0-63708")
+        Station.objects.filter(pk=station.pk).update(
+            facility_type="landFixed",
+            location=Point(36.75, -1.30, 1798.0, srid=4326),
+        )
+
+        row = self.by_wigos_id()["0-20000-0-63708"]
+
+        self.assertEqual(row.facility_type, "Land Fixed")
+        self.assertEqual((row.longitude, row.latitude), (36.75, -1.30))
+        self.assertEqual(row.elevation, 1798.0)
+
     def test_the_silent_come_first_and_among_them_the_longest_quiet(self):
         self.declare("0-20000-0-00001")
         self.transmitted("0-20000-0-00001", hours_ago=1)
@@ -281,6 +332,16 @@ class StationTests(NodeDetailTestCase):
             [row.wigos_id for row in self.detail().stations],
             ["0-20000-0-00003", "0-20000-0-00002", "0-20000-0-00001"],
         )
+
+    def test_what_the_export_covers_is_counted_apart_from_what_is_listed(self):
+        """The export is the registry's declarations; the list is more than them."""
+        self.declare("0-20000-0-63708")
+        self.transmitted("0-20000-0-63999")
+
+        detail = self.detail()
+
+        self.assertEqual(len(detail.stations), 2)
+        self.assertEqual(detail.declared_station_count, 1)
 
 
 class SyncRunTests(NodeDetailTestCase):
@@ -311,8 +372,9 @@ class SyncRunTests(NodeDetailTestCase):
 
         runs = self.detail().sync_runs
 
-        self.assertEqual(runs[0].pk, failed.pk)
+        self.assertEqual(runs[0].run_id, failed.pk)
         self.assertEqual(runs[0].error_message, "Connection refused")
+        self.assertEqual(runs[0].scope, SyncScope.CENTRE)
 
     def test_only_a_bounded_number_of_runs_is_read(self):
         for hours_ago in range(1, 8):
@@ -329,8 +391,8 @@ class SyncRunTests(NodeDetailTestCase):
 
         runs = self.detail(runs_per_type=3).sync_runs
 
-        self.assertIn(stations.pk, [run.pk for run in runs])
-        self.assertEqual(runs[-1].pk, stations.pk)
+        self.assertIn(stations.pk, [run.run_id for run in runs])
+        self.assertEqual(runs[-1].run_id, stations.pk)
 
     def test_another_centres_runs_are_not_this_centres(self):
         djibouti = self.node("dj-anm")
@@ -340,6 +402,38 @@ class SyncRunTests(NodeDetailTestCase):
         self.assertEqual(len(self.detail().sync_runs), 1)
 
     def test_a_centre_nothing_has_synced_reports_no_runs(self):
+        self.assertEqual(self.detail().sync_runs, [])
+
+    def test_the_run_that_creates_the_centres_datasets_is_on_the_page(self):
+        """A catalogue sync is recorded against the catalogue, not the node.
+
+        It is the run that populates every centre's datasets, topics and
+        broker address, so leaving it out would answer "why are this centre's
+        datasets missing" with a table that structurally cannot contain the
+        answer.
+        """
+        run = SyncLog.objects.create(
+            catalogue=self.catalogue(is_writer=True),
+            sync_type=SyncLog.CATALOGUE,
+            status=SyncLog.FAILED,
+            started_at=NOW - timedelta(hours=2),
+            error_message="The catalogue could not be read",
+        )
+
+        runs = {row.run_id: row for row in self.detail().sync_runs}
+
+        self.assertIn(run.pk, runs)
+        self.assertEqual(runs[run.pk].scope, SyncScope.REGISTRY)
+
+    def test_a_catalogue_that_writes_nothing_is_not_read_as_the_registrys(self):
+        """A read-only catalogue's runs say nothing about what was registered."""
+        SyncLog.objects.create(
+            catalogue=self.catalogue(centre_id="fr-meteofrance-global-discovery"),
+            sync_type=SyncLog.CATALOGUE,
+            status=SyncLog.SUCCESS,
+            started_at=NOW - timedelta(hours=2),
+        )
+
         self.assertEqual(self.detail().sync_runs, [])
 
 

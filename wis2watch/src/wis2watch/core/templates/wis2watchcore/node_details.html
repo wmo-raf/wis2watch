@@ -112,6 +112,7 @@
         }
 
         .badge-undeclared,
+        .badge-gone_quiet,
         .badge-partial {
             background: #fff3cd;
             color: #856404;
@@ -263,9 +264,10 @@
                 </span>
             </div>
             <div class="info-item">
-                <span class="info-label">{% trans "Connection attempted" %}</span>
-                <span class="info-value">
-                    {% if detail.origin.is_active %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}
+                <span class="info-label">{% trans "Connections enabled" %}</span>
+                <span class="info-value"
+                      title="{% trans 'Whether this tool is set to dial this broker at all. A disabled broker is never attempted, so nothing is learned about it.' %}">
+                    {% if detail.origin.connections_enabled %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}
                 </span>
             </div>
             <div class="info-item">
@@ -300,6 +302,7 @@
                 <thead>
                 <tr>
                     <th>{% trans "Dataset" %}</th>
+                    <th>{% trans "Policy" %}</th>
                     <th>{% trans "Last published" %}</th>
                     <th class="numeric">{% trans "Quiet for" %}</th>
                     <th>{% trans "Expected every" %}</th>
@@ -310,8 +313,16 @@
                 {% for row in detail.datasets %}
                     <tr>
                         <td>
-                            {{ row.title }}
+                            <span title="{{ row.identifier }}">{{ row.title }}</span>
                             <div class="row-detail"><code>{{ row.topic }}</code></div>
+                            {% if row.last_synced %}
+                                <div class="row-detail">
+                                    {% blocktrans with synced=row.last_synced|date:"Y-m-d H:i" %}catalogue read {{ synced }}{% endblocktrans %}
+                                </div>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge badge-{{ row.policy }}">{{ row.policy_label }}</span>
                         </td>
                         <td>
                             {% if row.last_active_hour %}
@@ -324,25 +335,25 @@
                             {% endif %}
                         </td>
                         <td class="numeric">
-                            {% blocktrans with hours=row.hours_quiet|floatformat:1 %}{{ hours }}h{% endblocktrans %}
+                            {% blocktrans with hours=row.quiet.hours_quiet|floatformat:1 %}{{ hours }}h{% endblocktrans %}
                         </td>
                         <td>
-                            {% if row.expected_interval_hours %}
-                                {% blocktrans with hours=row.expected_interval_hours|floatformat:1 %}{{ hours }}h{% endblocktrans %}
+                            {% if row.quiet.expected_interval_hours %}
+                                {% blocktrans with hours=row.quiet.expected_interval_hours|floatformat:1 %}{{ hours }}h{% endblocktrans %}
                                 <div class="row-detail">
-                                    {{ row.expectation_label }}{% if row.observations %},
-                                    {% blocktrans with gaps=row.observations %}from {{ gaps }} observed gaps{% endblocktrans %}{% endif %}
+                                    {{ row.quiet.expectation_label }}{% if row.quiet.observations %},
+                                    {% blocktrans with gaps=row.quiet.observations %}from {{ gaps }} observed gaps{% endblocktrans %}{% endif %}
                                 </div>
                             {% else %}
                                 —
-                                <div class="row-detail">{{ row.expectation_label }}</div>
+                                <div class="row-detail">{{ row.quiet.expectation_label }}</div>
                             {% endif %}
                         </td>
                         <td>
-                            <span class="badge badge-{{ row.silence }}">{{ row.silence_label }}</span>
+                            <span class="badge badge-{{ row.quiet.silence }}">{{ row.quiet.silence_label }}</span>
                             {% if row.is_silent %}
                                 <div class="row-detail">
-                                    {% blocktrans with hours=row.overdue_hours|floatformat:1 %}{{ hours }}h past due{% endblocktrans %}
+                                    {% blocktrans with hours=row.quiet.overdue_hours|floatformat:1 %}{{ hours }}h past due{% endblocktrans %}
                                 </div>
                             {% endif %}
                         </td>
@@ -368,20 +379,28 @@
                 <tr>
                     <th>{% trans "Dataset" %}</th>
                     <th>{% trans "Status" %}</th>
+                    <th>{% trans "Last published" %}</th>
                     <th>{% trans "Last synced" %}</th>
                 </tr>
                 </thead>
                 <tbody>
-                {% for dataset in detail.retired_datasets %}
+                {% for row in detail.retired_datasets %}
                     <tr>
                         <td>
-                            {{ dataset.title }}
-                            <div class="row-detail"><code>{{ dataset.wmo_topic_hierarchy }}</code></div>
+                            <span title="{{ row.identifier }}">{{ row.title }}</span>
+                            <div class="row-detail"><code>{{ row.topic }}</code></div>
                         </td>
                         <td>
-                            <span class="badge badge-{{ dataset.status }}">{{ dataset.get_status_display }}</span>
+                            <span class="badge badge-{{ row.status }}">{{ row.status_label }}</span>
                         </td>
-                        <td>{{ dataset.last_synced|date:"Y-m-d H:i"|default:"—" }}</td>
+                        <td>
+                            {% if row.last_active_hour %}
+                                {{ row.last_active_hour|date:"Y-m-d H:i" }}
+                            {% else %}
+                                {% trans "never seen publishing" %}
+                            {% endif %}
+                        </td>
+                        <td>{{ row.last_synced|date:"Y-m-d H:i"|default:"—" }}</td>
                     </tr>
                 {% endfor %}
                 </tbody>
@@ -393,14 +412,14 @@
     <div class="detail-section">
         <div class="section-header">
             <h3>
-                {% trans "Stations" %} ({{ station_count }})
+                {% trans "Stations" %} ({{ detail.stations|length }})
                 {% if detail.silent_station_count %}
                     <span class="badge badge-never_transmitted">
-                        {% blocktrans with silent=detail.silent_station_count %}{{ silent }} never heard from{% endblocktrans %}
+                        {% blocktrans with silent=detail.silent_station_count %}{{ silent }} not heard from lately{% endblocktrans %}
                     </span>
                 {% endif %}
             </h3>
-            {% if station_count %}
+            {% if detail.declared_station_count %}
                 <div>
                     <a href="{% url 'preview_node_stations_csv' node.id %}"
                        class="button bicolor button--icon button-secondary button-small">
@@ -424,7 +443,7 @@
             {% endif %}
         </div>
         <p class="section-note">
-            {% trans "Every station this centre declares or has been heard transmitting for, the longest quiet first. A station transmitting that the centre's registry declares nowhere is listed too — it is a registration gap, not an absence." %}
+            {% trans "Every station this centre declares or has been heard transmitting for, the longest quiet first. A station transmitting that the centre's registry declares nowhere is listed too — it is a registration gap, not an absence. The CSV export covers the registry's declarations alone." %}
         </p>
 
         {% if detail.stations %}
@@ -434,6 +453,8 @@
                     <th>{% trans "WIGOS ID" %}</th>
                     <th>{% trans "Name" %}</th>
                     <th>{% trans "Local ID" %}</th>
+                    <th>{% trans "Facility type" %}</th>
+                    <th>{% trans "Location" %}</th>
                     <th>{% trans "Last transmitted" %}</th>
                     <th>{% trans "Standing" %}</th>
                 </tr>
@@ -444,15 +465,32 @@
                         <td><code>{{ row.wigos_id }}</code></td>
                         <td>{{ row.display_name }}</td>
                         <td>{{ row.local_id|default:"—" }}</td>
+                        <td>{{ row.facility_type|default:"—" }}</td>
+                        <td>
+                            {% if row.latitude is not None %}
+                                {{ row.latitude|floatformat:4 }}°, {{ row.longitude|floatformat:4 }}°
+                                {% if row.elevation %}
+                                    ({{ row.elevation|floatformat:0 }}m)
+                                {% endif %}
+                            {% else %}
+                                —
+                            {% endif %}
+                        </td>
                         <td>
                             {% if row.last_transmitted %}
                                 {{ row.last_transmitted|date:"Y-m-d H:i" }}
+                                <div class="row-detail">
+                                    {% blocktrans with hours=row.hours_quiet|floatformat:1 %}{{ hours }}h ago{% endblocktrans %}
+                                </div>
                             {% else %}
                                 {% trans "never" %}
                             {% endif %}
                         </td>
                         <td>
                             <span class="badge badge-{{ row.standing }}">{{ row.standing_label }}</span>
+                            {% if row.standing == "gone_quiet" and not row.declared_by_registry %}
+                                <div class="row-detail">{% trans "not declared by the registry" %}</div>
+                            {% endif %}
                         </td>
                     </tr>
                 {% endfor %}
@@ -469,7 +507,7 @@
     <div class="detail-section">
         <h3>{% trans "Recent sync runs" %}</h3>
         <p class="section-note">
-            {% trans "What this tool last managed to read from the centre. A dataset missing here and nowhere else is this tool's failure rather than the centre's." %}
+            {% trans "What this tool last managed to read, from the centre itself and from the catalogue its datasets and broker address come from. A dataset missing here and nowhere else is this tool's failure rather than the centre's." %}
         </p>
 
         {% if detail.sync_runs %}
@@ -478,6 +516,7 @@
                 <tr>
                     <th>{% trans "Started" %}</th>
                     <th>{% trans "Run" %}</th>
+                    <th>{% trans "Covers" %}</th>
                     <th>{% trans "Outcome" %}</th>
                     <th class="numeric">{% trans "Found" %}</th>
                     <th class="numeric">{% trans "Created" %}</th>
@@ -489,9 +528,10 @@
                 {% for run in detail.sync_runs %}
                     <tr>
                         <td>{{ run.started_at|date:"Y-m-d H:i" }}</td>
-                        <td>{{ run.get_sync_type_display }}</td>
+                        <td>{{ run.kind_label }}</td>
+                        <td>{{ run.scope_label }}</td>
                         <td>
-                            <span class="badge badge-{{ run.status }}">{{ run.get_status_display }}</span>
+                            <span class="badge badge-{{ run.status }}">{{ run.status_label }}</span>
                             {% if run.error_message %}
                                 <div class="row-error" title="{{ run.error_message }}">
                                     {{ run.error_message|truncatechars:80 }}

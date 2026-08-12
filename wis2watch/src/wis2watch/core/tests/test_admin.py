@@ -415,7 +415,7 @@ class NodeDetailViewTests(TestCase):
             station=Station.objects.create(wigos_id="0-404-0-KE999"),
             source_type=StationSource.OBSERVED,
             node=self.node,
-            last_seen=at("2026-08-11T10:45:00"),
+            last_seen=dj_timezone.now(),
         )
 
         response = self.page()
@@ -465,6 +465,41 @@ class NodeDetailViewTests(TestCase):
 
         self.assertContains(response, "Failed")
         self.assertContains(response, "Read timed out reading the station registry")
+
+    def test_the_catalogue_run_the_datasets_come_from_is_on_the_page(self):
+        SyncLog.objects.create(
+            catalogue=GlobalDiscoveryCatalogue.objects.create(
+                centre_id="int-wmo-global-discovery",
+                name="WMO Global Discovery Catalogue",
+                base_url="https://gdc.example.int",
+                is_writer=True,
+            ),
+            sync_type=SyncLog.CATALOGUE,
+            status=SyncLog.FAILED,
+            error_message="The catalogue could not be read",
+        )
+
+        response = self.page()
+
+        self.assertContains(response, "The registry")
+        self.assertContains(response, "The catalogue could not be read")
+
+    def test_the_station_export_is_offered_only_where_the_registry_declared_one(self):
+        """The export covers declarations; a transmitting station is not one."""
+        StationSource.objects.filter(source_type=StationSource.NODE_REGISTRY).delete()
+        StationSource.objects.create(
+            station=Station.objects.get(wigos_id="0-404-0-KE001"),
+            source_type=StationSource.OBSERVED,
+            node=self.node,
+            last_seen=dj_timezone.now(),
+        )
+
+        response = self.page()
+
+        self.assertContains(response, "0-404-0-KE001")
+        self.assertNotContains(
+            response, reverse("get_node_stations_csv", args=[self.node.id])
+        )
 
     def test_a_broker_that_does_not_answer_is_on_the_page_with_what_it_said(self):
         MessageSource.objects.create(

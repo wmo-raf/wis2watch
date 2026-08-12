@@ -158,15 +158,12 @@ def node_details(request, node_id):
         {"url": "", "label": node.name},
     ]
 
-    detail = node_detail(node)
-
     context = {
         "breadcrumbs_items": breadcrumbs_items,
         "node": node,
         "nodes_index_url": nodes_index_url,
         "overview_url": reverse_lazy("node_overview"),
-        "detail": detail,
-        "station_count": len(detail.stations),
+        "detail": node_detail(node),
     }
 
     return render(request, 'wis2watchcore/node_details.html', context)

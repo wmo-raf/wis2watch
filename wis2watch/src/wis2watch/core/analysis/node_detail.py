@@ -28,9 +28,24 @@ from django.db.models import Exists, OuterRef, Subquery
 from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext_lazy as _
 
-from ..models import Dataset, MessageSource, NodeLastSeen, Station, StationSource, SyncLog
-from .overview import BEFORE_ANYTHING, OriginReachability, hours_between
-from .silence import DatasetSilenceRow, dataset_silence
+from ..models import (
+    Dataset,
+    GlobalDiscoveryCatalogue,
+    MessageSource,
+    NodeLastSeen,
+    Station,
+    StationSource,
+    SyncLog,
+)
+from .reachability import OriginReachability
+from .silence import (
+    BEFORE_ANYTHING,
+    DatasetSilenceRow,
+    dataset_silence,
+    hours_between,
+    with_last_active_hour,
+)
+from .staleness import default_stale_after_hours
 
 #: How many of each kind of sync run the page reads. Enough to show a run that
 #: has begun failing against the ones before it, and few enough that the page
@@ -45,24 +60,53 @@ from .silence import DatasetSilenceRow, dataset_silence
 DEFAULT_RUNS_PER_TYPE = 5
 
 
+class SyncScope:
+    """Whose run a sync run was.
+
+    A centre's datasets, topics and broker address all come from the catalogue
+    sync, which runs over the whole region and is recorded against the
+    catalogue rather than any one node. Left out, the page would answer "why
+    are this centre's datasets missing" with a table that structurally cannot
+    contain the run that creates them -- so the registry's runs are shown
+    beside the centre's own, saying which is which.
+    """
+
+    CENTRE = "centre"
+    REGISTRY = "registry"
+
+    CHOICES = [
+        (CENTRE, _("This centre")),
+        (REGISTRY, _("The registry")),
+    ]
+
+    LABELS = dict(CHOICES)
+
+
 class StationStanding:
     """What is known of one of a centre's stations.
 
-    Three states out of two facts -- whether the node's own registry declares
-    the station, and whether anything has been heard from it -- because the
-    two absences are different findings. A declared station nothing has heard
-    from is a station that has stopped, or never started; a station
-    transmitting that the registry declares nowhere is a registration gap, and
-    dropping it from the page because no declaration named it is exactly how a
-    transmitting station becomes invisible.
+    Out of two facts -- whether the node's own registry declares the station,
+    and when anything was last heard from it -- because each absence is a
+    different finding. A declared station nothing has heard from is one that
+    stopped or never started; one heard from long ago has stopped since; and a
+    station transmitting that the registry declares nowhere is a registration
+    gap, which dropping from the page because no declaration named it is
+    exactly how a transmitting station becomes invisible.
+
+    Quiet is judged against the same flat threshold the overview calls a centre
+    stale by, for the reasons ``wis2watch.core.analysis.staleness`` gives.
+    Without it every station ever heard from reads as working, and the one that
+    stopped in March sits at the bottom of the page in green.
     """
 
     TRANSMITTING = "transmitting"
+    GONE_QUIET = "gone_quiet"
     NEVER_TRANSMITTED = "never_transmitted"
     UNDECLARED = "undeclared"
 
     CHOICES = [
         (NEVER_TRANSMITTED, _("Declared, never heard from")),
+        (GONE_QUIET, _("Gone quiet")),
         (UNDECLARED, _("Transmitting, not declared")),
         (TRANSMITTING, _("Transmitting")),
     ]
@@ -72,7 +116,52 @@ class StationStanding:
     #: What has stopped first, then what was never declared, then what is
     #: working: the order someone reads a station list in when they came here
     #: because something is missing.
-    RANK = {NEVER_TRANSMITTED: 0, UNDECLARED: 1, TRANSMITTING: 2}
+    RANK = {NEVER_TRANSMITTED: 0, GONE_QUIET: 1, UNDECLARED: 2, TRANSMITTING: 3}
+
+    #: The standings that mean nothing has been heard from the station lately.
+    #: Named once because the page counts them and the rows report them, and
+    #: those are decided in different places.
+    SILENT = (NEVER_TRANSMITTED, GONE_QUIET)
+
+    @classmethod
+    def of(cls, *, declared, hours_quiet, stale_after):
+        """What one station's declarations and last transmission amount to."""
+        if hours_quiet is None:
+            return cls.NEVER_TRANSMITTED
+
+        if hours_quiet > stale_after:
+            return cls.GONE_QUIET
+
+        return cls.TRANSMITTING if declared else cls.UNDECLARED
+
+
+@dataclass(frozen=True)
+class NodeDatasetRow:
+    """One dataset of a centre's: what the registry says, and whether it is quiet.
+
+    The quiet is the silence module's own finding rather than a copy of it, so
+    that a dataset called silent here is silent by exactly the reasoning the
+    overview counts. A dataset the registry no longer calls active carries
+    none: nobody is waiting to hear from it, and a silence finding about it
+    would be a finding nobody should act on.
+    """
+
+    dataset_id: int
+    title: str
+    topic: str
+    identifier: str
+    policy: str
+    policy_label: str
+    status: str
+    status_label: str
+    last_synced: datetime | None
+    last_active_hour: datetime | None
+    quiet: DatasetSilenceRow | None
+
+    @property
+    def is_silent(self):
+        """Whether this dataset is past what is expected of it."""
+        return self.quiet is not None and self.quiet.is_silent
 
 
 @dataclass(frozen=True)
@@ -84,19 +173,14 @@ class NodeStationRow:
     name: str
     local_name: str
     local_id: str
+    facility_type: str
+    latitude: float | None
+    longitude: float | None
+    elevation: float | None
     declared_by_registry: bool
     last_transmitted: datetime | None
-
-    @property
-    def standing(self):
-        """What this station amounts to: stopped, undeclared or working."""
-        if self.last_transmitted is None:
-            return StationStanding.NEVER_TRANSMITTED
-
-        if not self.declared_by_registry:
-            return StationStanding.UNDECLARED
-
-        return StationStanding.TRANSMITTING
+    hours_quiet: float | None
+    standing: str
 
     @property
     def standing_label(self):
@@ -115,6 +199,30 @@ class NodeStationRow:
 
 
 @dataclass(frozen=True)
+class SyncRunRow:
+    """One run of a sync job, as the page reports it."""
+
+    run_id: int
+    scope: str
+    kind: str
+    kind_label: str
+    status: str
+    status_label: str
+    started_at: datetime
+    completed_at: datetime | None
+    items_found: int
+    items_created: int
+    items_updated: int
+    items_errored: int
+    error_message: str
+
+    @property
+    def scope_label(self):
+        """Whose run this was, for a table cell."""
+        return SyncScope.LABELS.get(self.scope, self.scope)
+
+
+@dataclass(frozen=True)
 class OriginBrokerState:
     """What is known about the centre's own broker, from outside.
 
@@ -125,7 +233,7 @@ class OriginBrokerState:
 
     reachability: str
     address: str
-    is_active: bool
+    connections_enabled: bool
     last_connected_at: datetime | None
     last_error: str
 
@@ -133,9 +241,9 @@ class OriginBrokerState:
     def unadvertised(cls):
         """A centre whose catalogue record names no broker of its own."""
         return cls(
-            reachability=OriginReachability.NOT_ADVERTISED,
+            reachability=OriginReachability.of(None, advertised=False),
             address="",
-            is_active=False,
+            connections_enabled=False,
             last_connected_at=None,
             last_error="",
         )
@@ -143,7 +251,7 @@ class OriginBrokerState:
     @property
     def reachability_label(self):
         """What the broker's state is called, for the page."""
-        return OriginReachability.LABELS.get(self.reachability, self.reachability)
+        return OriginReachability.label(self.reachability)
 
 
 @dataclass(frozen=True)
@@ -154,10 +262,10 @@ class NodeDetail:
     centre_id: str
     last_seen_at: datetime | None
     hours_since_last_seen: float | None
-    datasets: list[DatasetSilenceRow]
-    retired_datasets: list[Dataset]
+    datasets: list[NodeDatasetRow]
+    retired_datasets: list[NodeDatasetRow]
     stations: list[NodeStationRow]
-    sync_runs: list[SyncLog]
+    sync_runs: list[SyncRunRow]
     origin: OriginBrokerState
 
     @property
@@ -166,11 +274,19 @@ class NodeDetail:
         return sum(row.is_silent for row in self.datasets)
 
     @property
+    def declared_station_count(self):
+        """How many stations the centre's own registry declares.
+
+        Fewer than the stations listed, wherever the centre transmits for one
+        it has never declared -- and what the station export covers, which is
+        the registry's declarations alone.
+        """
+        return sum(row.declared_by_registry for row in self.stations)
+
+    @property
     def silent_station_count(self):
-        """How many of the centre's declared stations have never been heard from."""
-        return sum(
-            row.standing == StationStanding.NEVER_TRANSMITTED for row in self.stations
-        )
+        """How many of the centre's stations have not been heard from lately."""
+        return sum(row.standing in StationStanding.SILENT for row in self.stations)
 
 
 def node_detail(node, *, now=None, runs_per_type=DEFAULT_RUNS_PER_TYPE):
@@ -187,17 +303,16 @@ def node_detail(node, *, now=None, runs_per_type=DEFAULT_RUNS_PER_TYPE):
     """
     now = now or dj_timezone.now()
     last_seen_at = _last_seen_at(node)
+    live, retired = _datasets(node, now=now)
 
     return NodeDetail(
         node_id=node.pk,
         centre_id=node.centre_id,
         last_seen_at=last_seen_at,
         hours_since_last_seen=hours_between(last_seen_at, now),
-        datasets=dataset_silence(now=now, node=node),
-        retired_datasets=list(
-            Dataset.objects.filter(node=node).exclude(status=Dataset.ACTIVE)
-        ),
-        stations=_stations(node),
+        datasets=live,
+        retired_datasets=retired,
+        stations=_stations(node, now=now),
         sync_runs=_sync_runs(node, runs_per_type),
         origin=_origin(node),
     )
@@ -210,33 +325,106 @@ def _last_seen_at(node):
     return last_seen["last_message_at"] if last_seen else None
 
 
-def _sync_runs(node, runs_per_type):
-    """The centre's recent sync runs, no kind of run able to bury another.
+def _datasets(node, *, now):
+    """The centre's datasets, the live ones judged and the retired ones not.
 
-    Read a kind at a time and merged, which costs one small indexed query per
-    kind the node has ever had -- two or three -- and is what keeps the daily
-    run visible beside the hourly one.
+    Retired ones are kept because the page is what somebody reads when a
+    dataset's data has stopped arriving, and "the catalogue withdrew it" is one
+    of the answers -- an answer they cannot reach if the withdrawn dataset has
+    simply vanished from the page that was meant to explain it.
     """
-    # Ordered by nothing on purpose: a sync log's default ordering is by when
-    # it started, which a distinct over the kind alone would drag into the
-    # query and hand back one row per run rather than one per kind.
-    kinds = (
-        SyncLog.objects.filter(node=node)
-        .order_by()
-        .values_list("sync_type", flat=True)
-        .distinct()
+    datasets = {
+        dataset.pk: dataset
+        for dataset in with_last_active_hour(
+            Dataset.objects.filter(node=node), now=now
+        )
+    }
+
+    # The silent first and furthest overdue before them: the order the silence
+    # module put them in, which is the order somebody reads for what broke.
+    live = [
+        _dataset_row(datasets[quiet.dataset_id], quiet)
+        for quiet in dataset_silence(now=now, node=node)
+    ]
+    retired = [
+        _dataset_row(dataset, None)
+        for dataset in datasets.values()
+        if dataset.status != Dataset.ACTIVE
+    ]
+
+    return live, retired
+
+
+def _dataset_row(dataset, quiet):
+    """One dataset as a finding, judged or not."""
+    return NodeDatasetRow(
+        dataset_id=dataset.pk,
+        title=dataset.title,
+        topic=dataset.wmo_topic_hierarchy,
+        identifier=dataset.identifier,
+        policy=dataset.wmo_data_policy,
+        policy_label=dataset.get_wmo_data_policy_display(),
+        status=dataset.status,
+        status_label=dataset.get_status_display(),
+        last_synced=dataset.last_synced,
+        last_active_hour=dataset.last_active_hour,
+        quiet=quiet,
     )
 
-    runs = [
-        run
-        for kind in kinds
-        for run in SyncLog.objects.filter(node=node, sync_type=kind)[:runs_per_type]
-    ]
+
+def _sync_runs(node, runs_per_type):
+    """The runs that could explain what is missing, the centre's and the registry's."""
+    runs = _recent_runs(SyncLog.objects.filter(node=node), runs_per_type, SyncScope.CENTRE)
+
+    writer = GlobalDiscoveryCatalogue.objects.filter(is_writer=True).first()
+
+    if writer is not None:
+        runs += _recent_runs(
+            SyncLog.objects.filter(catalogue=writer), runs_per_type, SyncScope.REGISTRY
+        )
 
     return sorted(runs, key=lambda run: run.started_at, reverse=True)
 
 
-def _stations(node):
+def _recent_runs(runs, per_kind, scope):
+    """The most recent runs of each kind, so no kind can bury another.
+
+    Read a kind at a time and merged, which costs one small indexed query per
+    kind that has ever run -- two or three -- and is what keeps the daily run
+    visible beside the hourly one.
+    """
+    # Ordered by nothing on purpose: a sync log's default ordering is by when
+    # it started, which a distinct over the kind alone would drag into the
+    # query and hand back one row per run rather than one per kind.
+    kinds = runs.order_by().values_list("sync_type", flat=True).distinct()
+
+    return [
+        _sync_run_row(run, scope)
+        for kind in kinds
+        for run in runs.filter(sync_type=kind)[:per_kind]
+    ]
+
+
+def _sync_run_row(run, scope):
+    """One sync run as a finding."""
+    return SyncRunRow(
+        run_id=run.pk,
+        scope=scope,
+        kind=run.sync_type,
+        kind_label=run.get_sync_type_display(),
+        status=run.status,
+        status_label=run.get_status_display(),
+        started_at=run.started_at,
+        completed_at=run.completed_at,
+        items_found=run.items_found,
+        items_created=run.items_created,
+        items_updated=run.items_updated,
+        items_errored=run.items_errored,
+        error_message=run.error_message,
+    )
+
+
+def _stations(node, *, now):
     """Every station this centre declares or has been heard transmitting for.
 
     Started from the stations rather than from the declarations, because a
@@ -251,6 +439,8 @@ def _stations(node):
     stations on a centre's page that the centre has never claimed and never
     transmitted.
     """
+    stale_after = default_stale_after_hours()
+
     declared = StationSource.objects.filter(
         station=OuterRef("pk"),
         source_type=StationSource.NODE_REGISTRY,
@@ -265,6 +455,7 @@ def _stations(node):
         station=OuterRef("pk"),
         source_type=StationSource.OBSERVED,
         node=node,
+        last_seen__isnull=False,
     )
 
     stations = (
@@ -279,19 +470,36 @@ def _stations(node):
     )
 
     rows = [
-        NodeStationRow(
-            station_id=station.pk,
-            wigos_id=station.wigos_id,
-            name=station.name,
-            local_name=station.local_name or "",
-            local_id=station.local_id or "",
-            declared_by_registry=station.declared_by_registry,
-            last_transmitted=station.last_transmitted,
-        )
-        for station in stations
+        _station_row(station, now=now, stale_after=stale_after) for station in stations
     ]
 
     return sorted(rows, key=_reading_order)
+
+
+def _station_row(station, *, now, stale_after):
+    """One station as a finding."""
+    hours_quiet = hours_between(station.last_transmitted, now)
+    location = station.location
+
+    return NodeStationRow(
+        station_id=station.pk,
+        wigos_id=station.wigos_id,
+        name=station.name,
+        local_name=station.local_name or "",
+        local_id=station.local_id or "",
+        facility_type=station.get_facility_type_display(),
+        latitude=location.y if location else None,
+        longitude=location.x if location else None,
+        elevation=location.z if location and location.hasz else None,
+        declared_by_registry=station.declared_by_registry,
+        last_transmitted=station.last_transmitted,
+        hours_quiet=hours_quiet,
+        standing=StationStanding.of(
+            declared=station.declared_by_registry,
+            hours_quiet=hours_quiet,
+            stale_after=stale_after,
+        ),
+    )
 
 
 def _reading_order(row):
@@ -315,7 +523,7 @@ def _origin(node):
     return OriginBrokerState(
         reachability=OriginReachability.of(source.is_reachable),
         address=f"{source.host}:{source.port}",
-        is_active=source.is_active,
+        connections_enabled=source.is_active,
         last_connected_at=source.last_connected_at,
         last_error=source.last_error,
     )
