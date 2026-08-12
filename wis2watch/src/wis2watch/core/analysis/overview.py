@@ -5,6 +5,13 @@ broker answers from outside. Read together they separate "gone quiet" from
 "publishing where no one can see it", which is the distinction the whole tool
 is built around.
 
+Two different quiets are reported side by side, because they answer different
+questions. Staleness is how long it is since the centre published anything at
+all, against one flat threshold, and is what the table sorts by. Silence is
+each dataset judged against its own learned or stated cadence -- so a centre
+whose hourly synops are flowing while its daily bulletin has not appeared for
+a week is not stale, and is missing something.
+
 Every monitored centre appears, whatever has been heard from it -- a centre
 nothing has ever arrived from is the most concerning row in the table, not an
 absent one, so the query starts from the registry and hangs everything else
@@ -33,6 +40,7 @@ from ..models import (
     WIS2Node,
 )
 from ..rollups import floor_to_hour
+from .silence import NodeSilence, Silence, silence_by_node
 
 #: How much recent traffic the table reports on, in hours. Volume comes from
 #: the rollups, so the window is a whole number of hourly buckets ending with
@@ -109,11 +117,19 @@ class NodeOverviewRow:
     station_count: int
     origin_reachability: str
     origin_last_error: str
+    silence: str
+    silent_dataset_count: int
+    judged_dataset_count: int
 
     @property
     def staleness_label(self):
         """What the staleness is called, for a table cell."""
         return Staleness.LABELS.get(self.staleness, self.staleness)
+
+    @property
+    def silence_label(self):
+        """What the centre's silence is called, for a table cell."""
+        return Silence.LABELS.get(self.silence, self.silence)
 
     @property
     def origin_reachability_label(self):
@@ -174,8 +190,13 @@ def node_overview(
     )
     hours = default_volume_hours() if volume_hours is None else volume_hours
 
+    # Asked once for the whole region rather than per row: the datasets of
+    # every centre are judged in the same two queries, and a row that has none
+    # is one the mapping simply does not mention.
+    silence = silence_by_node(now=now)
+
     rows = [
-        _row(node, now=now, stale_after=stale_after)
+        _row(node, now=now, stale_after=stale_after, silence=silence)
         for node in _annotated_nodes(since=volume_window_start(now, hours))
     ]
 
@@ -248,9 +269,10 @@ def _annotated_nodes(*, since):
     )
 
 
-def _row(node, *, now, stale_after):
+def _row(node, *, now, stale_after, silence):
     """One annotated node as a finding."""
     quiet_for = _hours_between(node.last_seen_at, now)
+    node_silence = silence.get(node.pk) or NodeSilence.nothing_known()
 
     return NodeOverviewRow(
         node_id=node.pk,
@@ -266,6 +288,9 @@ def _row(node, *, now, stale_after):
         station_count=node.station_count,
         origin_reachability=_origin_reachability(node),
         origin_last_error=node.origin_error or "",
+        silence=node_silence.silence,
+        silent_dataset_count=node_silence.silent_dataset_count,
+        judged_dataset_count=node_silence.judged_dataset_count,
     )
 
 

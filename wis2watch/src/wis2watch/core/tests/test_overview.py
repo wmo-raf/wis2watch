@@ -15,8 +15,14 @@ from datetime import timedelta
 
 from django.test import TestCase
 
-from wis2watch.core.analysis import OriginReachability, Staleness, node_overview
+from wis2watch.core.analysis import (
+    OriginReachability,
+    Silence,
+    Staleness,
+    node_overview,
+)
 from wis2watch.core.models import (
+    CadenceBaseline,
     Dataset,
     HourlyRollup,
     MessageSource,
@@ -317,6 +323,100 @@ class CountTests(OverviewTestCase):
         row = self.by_centre()["ke-meteo"]
 
         self.assertEqual((row.dataset_count, row.station_count), (0, 0))
+
+
+class SilenceTests(OverviewTestCase):
+    """Whether a centre's output has stopped, judged dataset by dataset.
+
+    The last-seen column says when the centre last published anything, which
+    is a different question: a centre publishing hourly synops while its daily
+    climate summary has not appeared for a week is not stale, and is missing
+    something.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.kenya = self.node("ke-meteo", last_seen=NOW)
+
+    def dataset(self, name, *, expects=None, node=None):
+        node = node or self.kenya
+
+        return Dataset.objects.create(
+            node=node,
+            identifier=f"urn:wmo:md:{node.centre_id}:{name}",
+            title=name,
+            wmo_data_policy="core",
+            wmo_topic_hierarchy=f"origin/a/wis2/{node.centre_id}/data/core/{name}",
+            raw_json={},
+            expected_interval_override_hours=expects,
+        )
+
+    def learned(self, dataset, interval_hours):
+        return CadenceBaseline.objects.create(
+            dataset=dataset,
+            interval_hours=interval_hours,
+            observations=20,
+            learned_at=NOW - timedelta(days=1),
+        )
+
+    def last_published(self, dataset, hours_ago):
+        return self.rollup(
+            dataset.node, NOW - timedelta(hours=hours_ago), 1, dataset=dataset
+        )
+
+    def test_a_centre_with_a_dataset_past_its_expectation_is_silent(self):
+        synop = self.dataset("synop")
+        self.learned(synop, 6)
+        self.last_published(synop, 30)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.silence, Silence.SILENT)
+        self.assertEqual(row.silent_dataset_count, 1)
+
+    def test_a_centre_whose_datasets_are_all_within_their_expectations_is_not(self):
+        synop = self.dataset("synop")
+        self.learned(synop, 6)
+        self.last_published(synop, 1)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.silence, Silence.ON_SCHEDULE)
+        self.assertEqual(row.silent_dataset_count, 0)
+        self.assertEqual(row.judged_dataset_count, 1)
+
+    def test_a_monthly_dataset_quiet_a_day_is_not_a_silent_centre(self):
+        climate = self.dataset("climate", expects=24 * 30)
+        self.last_published(climate, 24)
+
+        self.assertEqual(self.by_centre()["ke-meteo"].silence, Silence.ON_SCHEDULE)
+
+    def test_a_centre_with_nothing_that_can_be_judged_is_not_called_silent(self):
+        self.last_published(self.dataset("synop"), 500)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.silence, Silence.UNKNOWN)
+        self.assertEqual(row.judged_dataset_count, 0)
+
+    def test_a_centre_with_no_datasets_at_all_is_not_called_silent(self):
+        self.node("dj-anm")
+
+        self.assertEqual(self.by_centre()["dj-anm"].silence, Silence.UNKNOWN)
+
+    def test_each_centre_carries_its_own_datasets_verdict(self):
+        djibouti = self.node("dj-anm", last_seen=NOW)
+        overdue = self.dataset("synop")
+        on_time = self.dataset("temp", node=djibouti)
+        self.learned(overdue, 6)
+        self.learned(on_time, 6)
+        self.last_published(overdue, 30)
+        self.last_published(on_time, 1)
+
+        rows = self.by_centre()
+
+        self.assertEqual(rows["ke-meteo"].silence, Silence.SILENT)
+        self.assertEqual(rows["dj-anm"].silence, Silence.ON_SCHEDULE)
 
 
 class OriginReachabilityTests(OverviewTestCase):

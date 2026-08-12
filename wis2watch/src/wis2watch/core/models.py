@@ -344,6 +344,16 @@ class Dataset(TimeStampedModel):
         unique=True,
         help_text=_("URN identifier of the dataset"),
     )
+    expected_interval_override_hours = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name=_("Expected interval override (hours)"),
+        help_text=_(
+            "How long this dataset may be quiet before it is silent. Takes "
+            "precedence over the interval learned from its own history; leave "
+            "empty to use the learned one."
+        ),
+    )
     title = models.CharField(max_length=500)
     wmo_data_policy = models.CharField(max_length=20, choices=DATA_POLICY_CHOICES)
     wmo_topic_hierarchy = models.CharField(
@@ -358,6 +368,14 @@ class Dataset(TimeStampedModel):
     metadata_created = models.DateTimeField(null=True, blank=True)
     metadata_updated = models.DateTimeField(null=True, blank=True)
     last_synced = models.DateTimeField(null=True, blank=True)
+
+    # A dataset is sync-managed, so the edit form offers the one field a person
+    # is meant to set: what this tool should expect of it. Everything else is
+    # the catalogue's to say, and a hand-edit would be overwritten by the next
+    # sync anyway.
+    panels = [
+        FieldPanel("expected_interval_override_hours"),
+    ]
 
     class Meta:
         ordering = ["node", "title"]
@@ -798,6 +816,59 @@ class HourlyRollup(TimeStampedModel):
 
     def __str__(self):
         return f"{self.node_id} @ {self.hour}: {self.message_count}"
+
+
+class CadenceBaseline(models.Model):
+    """How often a dataset has been observed to publish, learned from its own
+    history.
+
+    A single silence threshold across the region is not a thing that exists.
+    One centre publishes surface observations in hourly bursts, another issues
+    a climate summary once a month, and both are healthy; a fixed threshold
+    either reports the second as broken or lets the first go quiet for weeks
+    unremarked. So each dataset is judged against itself.
+
+    The interval is a high percentile of the gaps between the hours the dataset
+    was actually seen publishing in, taken from the rollups because they are
+    what survives raw expiry. A percentile rather than a mean or a maximum: the
+    mean of a bursty dataset is shorter than most of its real gaps, and the
+    maximum is whatever its worst outage was, which would make silence
+    unreportable ever after.
+
+    Written down rather than derived when asked for, because it is a scan of
+    months of buckets for every dataset in the region -- far too much to run
+    behind a page -- and because it moves in weeks, not minutes.
+
+    A baseline is never removed for want of history. A dataset that stops
+    publishing altogether eventually has too few gaps left in the window to
+    learn from, and that is precisely when its baseline is the thing that
+    reports it: deleting it then would make the tool go quiet about the centre
+    at the same moment the centre went quiet. ``learned_at`` is what says how
+    old the answer is.
+    """
+
+    dataset = models.OneToOneField(
+        Dataset,
+        on_delete=models.CASCADE,
+        related_name="cadence_baseline",
+    )
+    interval_hours = models.FloatField(
+        help_text=_("How long this dataset normally goes between publications"),
+    )
+    observations = models.PositiveIntegerField(
+        help_text=_("How many observed gaps the interval was learned from"),
+    )
+    learned_at = models.DateTimeField(
+        help_text=_("When the run that produced this interval read the history"),
+    )
+
+    class Meta:
+        ordering = ["dataset"]
+        verbose_name = _("Cadence Baseline")
+        verbose_name_plural = _("Cadence Baselines")
+
+    def __str__(self):
+        return f"{self.dataset_id}: every {self.interval_hours}h"
 
 
 class PropagationGapQuerySet(models.QuerySet):
