@@ -1384,10 +1384,176 @@
      "sampleRequest": "https://fleetmonitoring.euro-argo.eu/dashboard?Status=Active&Variable=OXYGEN"
     }
    ]
+  },
+  {
+   "id": "urn:wmo:md:tg-anamet:core.surface-based-observations.synop",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "type": "Feature",
+   "time": {
+    "interval": [
+     "2025-11-10",
+     ".."
+    ]
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -0.05,
+       5.93
+      ],
+      [
+       -0.05,
+       11.02
+      ],
+      [
+       1.87,
+       11.02
+      ],
+      [
+       1.87,
+       5.93
+      ],
+      [
+       -0.05,
+       5.93
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "identifier": "urn:wmo:md:tg-anamet:core.surface-based-observations.synop",
+    "title": "Hourly synoptic observations from fixed-land stations (SYNOP) (tg-anamet)",
+    "description": "3-Hourly synoptic observations from Togo fixed-land stations",
+    "themes": [
+     {
+      "concepts": [
+       {
+        "id": "weather"
+       }
+      ],
+      "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+     }
+    ],
+    "type": "dataset",
+    "created": "2025-11-10T00:00:00Z",
+    "updated": "2025-12-25T10:30:14Z",
+    "contacts": [
+     {
+      "addresses": [
+       {
+        "country": "TGO"
+       }
+      ],
+      "roles": [
+       "host"
+      ],
+      "organization": "Agence Nationale de la Météorologie du TOGO (ANAMET)",
+      "emails": [
+       {
+        "value": "meteo_togo@yahoo.fr"
+       }
+      ],
+      "links": [
+       {
+        "rel": "canonical",
+        "type": "text/html",
+        "href": "https://meteotogo.tg"
+       }
+      ]
+     }
+    ],
+    "keywords": [
+     "observations",
+     "weather",
+     "synop"
+    ],
+    "wmo:dataPolicy": "core",
+    "id": "urn:wmo:md:tg-anamet:core.surface-based-observations.synop",
+    "centre-id": "tg-anamet"
+   },
+   "links": [
+    {
+     "href": "https://wis2.meteotogo.tg",
+     "type": "WWW:LINK",
+     "rel": "canonical",
+     "title": "WIS2BOX"
+    },
+    {
+     "href": "mqtts://everyone:everyone@gb.wis.cma.cn:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/tg-anamet/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/tg-anamet/data/core/weather/surface-based-observations/synop",
+     "filters": {
+      "wigos_station_identifier": {
+       "type": "string",
+       "title": "WIGOS Station Identifier",
+       "description": "Filter by WIGOS Station Identifier"
+      }
+     },
+     "title": "Notifications from China Meteorological Agency, Global Broker Service (cn-cma-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@globalbroker.meteo.fr:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/tg-anamet/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/tg-anamet/data/core/weather/surface-based-observations/synop",
+     "filters": {
+      "wigos_station_identifier": {
+       "type": "string",
+       "title": "WIGOS Station Identifier",
+       "description": "Filter by WIGOS Station Identifier"
+      }
+     },
+     "title": "Notifications from Météo-France, Global Broker Service (fr-meteofrance-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@globalbroker.inmet.gov.br:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/tg-anamet/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/tg-anamet/data/core/weather/surface-based-observations/synop",
+     "filters": {
+      "wigos_station_identifier": {
+       "type": "string",
+       "title": "WIGOS Station Identifier",
+       "description": "Filter by WIGOS Station Identifier"
+      }
+     },
+     "title": "Notifications from Instituto Nacional de Meteorologia (Brazil), Global Broker Service (br-inmet-global-broker)"
+    },
+    {
+     "href": "mqtts://everyone:everyone@wis2globalbroker.nws.noaa.gov:8883",
+     "type": "application/geo+json",
+     "name": "origin/a/wis2/tg-anamet/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "cache/a/wis2/tg-anamet/data/core/weather/surface-based-observations/synop",
+     "filters": {
+      "wigos_station_identifier": {
+       "type": "string",
+       "title": "WIGOS Station Identifier",
+       "description": "Filter by WIGOS Station Identifier"
+      }
+     },
+     "title": "Notifications from National Oceanic and Atmospheric Administration, National Weather Service, Global Broker Service (us-noaa-nws-global-broker)"
+    },
+    {
+     "href": "https://wis2.meteotogo.tg/data/metadata/urn:wmo:md:tg-anamet:core.surface-based-observations.synop.json",
+     "type": "application/geo+json",
+     "name": "urn:wmo:md:tg-anamet:core.surface-based-observations.synop",
+     "rel": "canonical",
+     "title": "urn:wmo:md:tg-anamet:core.surface-based-observations.synop"
+    }
+   ]
   }
  ],
- "numberMatched": 9,
- "numberReturned": 9,
+ "numberMatched": 10,
+ "numberReturned": 10,
  "links": [
   {
    "type": "application/geo+json",

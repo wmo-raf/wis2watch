@@ -48,6 +48,12 @@ PAGE_SIZE = 500
 
 FETCH_TIMEOUT = 60
 
+#: What :meth:`WIS2Node.save` works out from a base URL. Named alongside it
+#: wherever it is written, because an ``update_fields`` naming the base URL
+#: alone would drop them -- and the station registry URL is the whole reason
+#: the base URL is worth learning.
+DERIVED_FROM_BASE_URL = ("discovery_metadata_url", "stations_url")
+
 
 def discovery_metadata_url(catalogue):
     """Where a catalogue serves its discovery metadata records."""
@@ -68,11 +74,38 @@ def fetch_discovery_pages(catalogue):
     )
 
 
+def _fill_base_url(node, base_url):
+    """Give a node the address its own records point at, where it has none.
+
+    Nothing else ever learns it. Without a base URL a node has no station
+    registry URL either, and the sync that asks every centre what stations it
+    declares passes over it in silence -- so a centre reads as declaring
+    nothing when nobody has asked it.
+
+    Filled once and never written over. The address is an inference from where
+    a centre serves its metadata rather than something the catalogue states, so
+    it is offered where there is nothing and withdrawn in favour of anything a
+    later run or an operator has put there. A record advertising no address
+    leaves what is there alone, in the way a record advertising no broker does:
+    most centres carry a canonical link on some of their records and not
+    others, and absence in one is not evidence about the centre.
+    """
+    if not base_url or node.base_url:
+        return
+
+    node.base_url = base_url
+    node.save(update_fields=["base_url", *DERIVED_FROM_BASE_URL, "modified"])
+
+
 def _apply_node(discovered):
     """The node a record belongs to, created or refreshed."""
     node, created = WIS2Node.objects.get_or_create(
         centre_id=discovered.centre_id,
-        defaults={"name": discovered.centre_id, "country": discovered.country},
+        defaults={
+            "name": discovered.centre_id,
+            "country": discovered.country,
+            "base_url": discovered.base_url,
+        },
     )
 
     if created or node.is_manually_managed:
@@ -81,6 +114,8 @@ def _apply_node(discovered):
     if discovered.country and node.country != discovered.country:
         node.country = discovered.country
         node.save(update_fields=["country", "modified"])
+
+    _fill_base_url(node, discovered.base_url)
 
     return node
 

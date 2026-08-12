@@ -4,9 +4,10 @@ The sync runs against the committed GDC fixture rather than the network: the
 page fetch is an argument, so these tests exercise the writing rules against
 records the catalogue really returns.
 
-Of the fixture's nine records, seven are usable and four name a monitored
-centre -- ``ke-meteo``, ``cg-met``, ``sz-swazimet`` and ``gh-gmet``. Only
-``cg-met`` advertises a broker of its own.
+Of the fixture's ten records, eight are usable and five name a monitored
+centre -- ``ke-meteo``, ``cg-met``, ``sz-swazimet``, ``gh-gmet`` and
+``tg-anamet``. Only ``cg-met`` advertises a broker of its own, and only
+``ke-meteo`` and ``tg-anamet`` advertise an address of their own.
 """
 
 from io import StringIO
@@ -33,7 +34,7 @@ from .support import failing_fetch, load_json_fixture, pages
 
 CATALOGUE = "gdc_discovery_metadata.json"
 
-MONITORED_CENTRE_IDS = {"ke-meteo", "cg-met", "sz-swazimet", "gh-gmet"}
+MONITORED_CENTRE_IDS = {"ke-meteo", "cg-met", "sz-swazimet", "gh-gmet", "tg-anamet"}
 
 KE_DATASET = "urn:wmo:md:ke-meteo:synop-dataset-surface-observations"
 CG_DATASET = "urn:wmo:md:cg-met:core.climate.surface-based-observations.climat"
@@ -95,6 +96,7 @@ class WriterCatalogueTests(CatalogueSyncTestCase):
                 CG_DATASET,
                 "urn:wmo:md:sz-swazimet:surface-based-observations.synop",
                 "urn:wmo:md:gh-gmet:urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+                "urn:wmo:md:tg-anamet:core.surface-based-observations.synop",
             },
         )
 
@@ -145,6 +147,96 @@ class WriterCatalogueTests(CatalogueSyncTestCase):
         self.assertEqual(
             WIS2Node.objects.filter(centre_id__iexact="ke-meteo").count(), 1
         )
+
+
+class NodeAddressTests(CatalogueSyncTestCase):
+    """A node's own address, without which nothing can ask it anything.
+
+    The station registry URL is derived from it, and the sync that asks every
+    centre what stations it declares passes over a node that has none -- so a
+    centre with no address reads as declaring nothing, having never been asked.
+    """
+
+    def test_a_new_node_takes_the_address_its_records_point_at(self):
+        self.sync()
+
+        self.assertEqual(
+            WIS2Node.objects.get(centre_id="ke-meteo").base_url,
+            "http://wis.meteo.go.ke",
+        )
+
+    def test_the_address_gives_the_node_a_station_registry_to_ask(self):
+        self.sync()
+
+        self.assertEqual(
+            WIS2Node.objects.get(centre_id="ke-meteo").stations_url,
+            "http://wis.meteo.go.ke/oapi/collections/stations/items?f=json",
+        )
+
+    def test_a_node_that_had_no_address_is_given_its_registry_too(self):
+        """The station registry URL is worked out on save, and must be stored.
+
+        A node from an earlier sync has no address at all. Filling one while
+        naming only that field would leave the registry URL unwritten, and the
+        centre would still be passed over -- the very fault this addresses,
+        one layer further down.
+        """
+        WIS2Node.objects.create(centre_id="ke-meteo", name="Kenya Met")
+
+        self.sync()
+
+        node = WIS2Node.objects.get(centre_id="ke-meteo")
+
+        self.assertEqual(node.base_url, "http://wis.meteo.go.ke")
+        self.assertEqual(
+            node.stations_url,
+            "http://wis.meteo.go.ke/oapi/collections/stations/items?f=json",
+        )
+
+    def test_every_addressed_node_is_one_the_station_sync_would_ask(self):
+        self.sync()
+
+        self.assertEqual(
+            set(
+                WIS2Node.objects.exclude(stations_url="").values_list(
+                    "centre_id", flat=True
+                )
+            ),
+            {"ke-meteo", "tg-anamet"},
+        )
+
+    def test_a_record_advertising_no_address_leaves_the_node_without_one(self):
+        self.sync()
+
+        self.assertEqual(WIS2Node.objects.get(centre_id="cg-met").base_url, "")
+        self.assertEqual(WIS2Node.objects.get(centre_id="cg-met").stations_url, "")
+
+    def test_an_address_already_recorded_is_not_written_over(self):
+        """Filled once. What is there was put there by a run or by a person."""
+        WIS2Node.objects.create(
+            centre_id="ke-meteo",
+            name="Kenya Met",
+            base_url="https://wis2.meteo.go.ke",
+        )
+
+        self.sync()
+
+        node = WIS2Node.objects.get(centre_id="ke-meteo")
+
+        self.assertEqual(node.base_url, "https://wis2.meteo.go.ke")
+        self.assertEqual(
+            node.stations_url,
+            "https://wis2.meteo.go.ke/oapi/collections/stations/items?f=json",
+        )
+
+    def test_a_manually_managed_node_is_not_given_an_address(self):
+        WIS2Node.objects.create(
+            centre_id="ke-meteo", name="Kenya Met", is_manually_managed=True
+        )
+
+        self.sync()
+
+        self.assertEqual(WIS2Node.objects.get(centre_id="ke-meteo").base_url, "")
 
 
 class OriginBrokerTests(CatalogueSyncTestCase):
@@ -454,7 +546,7 @@ class SyncCommandTests(CatalogueSyncTestCase):
         output = self.run_command()
 
         self.assertIn(self.catalogue.centre_id, output)
-        self.assertIn("created=4", output)
+        self.assertIn(f"created={len(MONITORED_CENTRE_IDS)}", output)
 
     def test_it_says_so_when_there_is_nothing_to_sync(self):
         GlobalDiscoveryCatalogue.objects.all().delete()

@@ -14,10 +14,15 @@ is looser than WCMP2 suggests, so every rule here is a response to real data:
   and plenty of records advertise no such link at all.
 - Some records carry no topic anywhere. Nothing can be monitored from them, so
   they are skipped.
+- No record says where the node's own API lives, but its ``canonical`` link
+  names a file on the node's own host. That host is the only thing a catalogue
+  offers about where to ask a centre directly, so it is read here as the node's
+  base URL.
 """
 
 from dataclasses import dataclass
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from ..countries import monitored_country_code_for_centre_id
 from .brokers import BrokerConnection, parse_broker_url
@@ -30,13 +35,25 @@ IDENTIFIER_PREFIX = ("urn", "wmo", "md")
 #: How a catalogue titles the notification links it adds for Global Brokers.
 GLOBAL_BROKER_MARKER = "global broker"
 
+#: The URL schemes a node's own web presence is served over. A ``canonical``
+#: link is occasionally something else -- a broker, a DOI -- and a scheme and
+#: host taken from one of those would name a host nothing can be asked of.
+WEB_SCHEMES = ("http", "https")
+
 
 @dataclass(frozen=True)
 class DiscoveredNode:
-    """The publishing centre a discovery record belongs to."""
+    """The publishing centre a discovery record belongs to.
+
+    ``base_url`` is where the centre's own API is expected to answer, and is
+    empty for a record that advertises no canonical link -- which is normal
+    rather than a fault, since a centre indexed by several records commonly
+    carries one on only some of them.
+    """
 
     centre_id: str
     country: str
+    base_url: str = ""
 
     @property
     def is_monitored(self):
@@ -131,6 +148,32 @@ def _link_href(feature, rel):
     return ""
 
 
+def _node_base_url(feature):
+    """Where the node's own API is, read from its canonical link, or empty.
+
+    A canonical link points at the metadata file on the centre's own host --
+    ``https://wis2.meteo.sc/data/metadata/urn:wmo:md:....json`` -- so the scheme
+    and host of it are the node itself. Only those two are kept: what follows is
+    the file's place in the centre's public tree and says nothing about where
+    its API answers.
+
+    A record may carry more than one canonical link, and the first is taken.
+    Where a centre advertises several they name one host between them; taking
+    the first is what keeps the reading from depending on the order a catalogue
+    happens to return links in.
+    """
+    for link in feature.get("links", []) or []:
+        if link.get("rel") != "canonical":
+            continue
+
+        parts = urlsplit((link.get("href") or "").strip())
+
+        if parts.scheme in WEB_SCHEMES and parts.netloc:
+            return f"{parts.scheme}://{parts.netloc}"
+
+    return ""
+
+
 def extract_discovery_record(feature):
     """A discovery metadata feature as a node and dataset, or None to skip it.
 
@@ -161,6 +204,7 @@ def extract_discovery_record(feature):
         node=DiscoveredNode(
             centre_id=centre_id,
             country=monitored_country_code_for_centre_id(centre_id),
+            base_url=_node_base_url(feature),
         ),
         dataset=DiscoveredDataset(
             identifier=identifier,
