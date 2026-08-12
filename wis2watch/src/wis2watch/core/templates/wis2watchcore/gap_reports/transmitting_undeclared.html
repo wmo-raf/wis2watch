@@ -1,0 +1,41 @@
+{% extends "wis2watchcore/gap_reports/base.html" %}
+
+{% load i18n %}
+
+{% block report_note %}
+    <p class="report-note">
+        {% trans "One row per centre transmitting for the station: a station carried by two centres is two registrations to correct." %}
+    </p>
+{% endblock %}
+
+{% block table_head %}
+    <th>{% trans "Centre" %}</th>
+    <th>{% trans "Station" %}</th>
+    <th>{% trans "WIGOS ID" %}</th>
+    <th>{% trans "Last transmitted" %}</th>
+    <th>{% trans "Quiet for" %}</th>
+{% endblock %}
+
+{% block table_row %}
+    <td>
+        {% if row.node_id %}
+            <a href="{% url 'node_details' row.node_id %}"><code>{{ row.centre_id }}</code></a>
+        {% else %}
+            <span class="badge badge-warning">{% trans "Unregistered centre" %}</span>
+        {% endif %}
+    </td>
+    <td>{{ row.display_name }}</td>
+    <td><code>{{ row.wigos_id }}</code></td>
+    <td>{{ row.last_transmitted|date:"Y-m-d H:i"|default:"—" }}</td>
+    <td>
+        {% if row.hours_quiet is not None %}
+            {% blocktrans with hours=row.hours_quiet|floatformat:1 %}{{ hours }}h{% endblocktrans %}
+        {% else %}
+            —
+        {% endif %}
+    </td>
+{% endblock %}
+
+{% block empty_message %}
+    {% trans "Every station being heard from is declared somewhere" %}
+{% endblock %}

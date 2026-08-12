@@ -133,10 +133,39 @@
             padding: 50px;
             color: #999;
         }
+
+        .overview-reports {
+            display: flex;
+            gap: 10px;
+            align-items: baseline;
+            flex-wrap: wrap;
+            margin: 20px 0 0;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .overview-reports-label {
+            font-weight: 600;
+            color: #555;
+        }
     </style>
 {% endblock %}
 
 {% block main_content %}
+    {% comment %}
+        The gap reports named here as well as on their own index, because this
+        table is what somebody has open when they start wondering what else is
+        wrong -- and a report nobody arrives at reports nothing.
+    {% endcomment %}
+    <div class="overview-reports">
+        <span class="overview-reports-label">
+            <a href="{% url 'gap_reports' %}">{% trans "Gap reports" %}</a>:
+        </span>
+        {% for report in gap_reports %}
+            <a href="{% url 'gap_report' report.slug %}">{{ report.title }}</a>
+        {% endfor %}
+    </div>
+
     <div class="overview-filters">
         <span>{% trans "Staleness" %}:</span>
         <a class="overview-filter {% if not staleness %}selected{% endif %}"

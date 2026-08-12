@@ -1,0 +1,39 @@
+{% extends "wis2watchcore/gap_reports/base.html" %}
+
+{% load i18n %}
+
+{% block report_note %}
+    <p class="report-note">
+        {% trans "Never heard from at all, rather than not lately: a station that has stopped since is named on its centre's own page." %}
+    </p>
+{% endblock %}
+
+{% block table_head %}
+    <th>{% trans "Station" %}</th>
+    <th>{% trans "WIGOS ID" %}</th>
+    <th>{% trans "Territory" %}</th>
+    <th>{% trans "WMO region" %}</th>
+    <th>{% trans "Facility" %}</th>
+    <th title="{% trans 'The centre whose own registry also declares this station, where one does' %}">
+        {% trans "Declared by centre" %}
+    </th>
+{% endblock %}
+
+{% block table_row %}
+    <td>{{ row.display_name }}</td>
+    <td><code>{{ row.wigos_id }}</code></td>
+    <td>{{ row.territory|default:"—" }}</td>
+    <td>{{ row.wmo_region|default:"—" }}</td>
+    <td>{{ row.facility_type|default:"—" }}</td>
+    <td>
+        {% if row.registry_centre_id %}
+            <code>{{ row.registry_centre_id }}</code>
+        {% else %}
+            <span class="badge badge-warning">{% trans "No centre declares it" %}</span>
+        {% endif %}
+    </td>
+{% endblock %}
+
+{% block empty_message %}
+    {% trans "Every station OSCAR/Surface calls operational has been heard transmitting" %}
+{% endblock %}

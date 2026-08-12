@@ -380,6 +380,13 @@ WIS2WATCH_CADENCE_MIN_OBSERVATIONS = env.int("WIS2WATCH_CADENCE_MIN_OBSERVATIONS
 # volume, ending with the hour in progress.
 WIS2WATCH_VOLUME_WINDOW_HOURS = env.int("WIS2WATCH_VOLUME_WINDOW_HOURS", 24)
 
+# Over how many hours the gap reports work out each centre's share of messages
+# carrying no station identifier. Wider than the overview's volume window,
+# because a share is only worth reading over enough messages to have one: a
+# centre publishing twice a day would otherwise be reported at nought or a
+# hundred per cent depending on the day it was asked about.
+WIS2WATCH_ATTRIBUTION_WINDOW_HOURS = env.int("WIS2WATCH_ATTRIBUTION_WINDOW_HOURS", 168)
+
 WIS2WATCH_LOG_LEVEL = env.str("WIS2WATCH_LOG_LEVEL", "INFO")
 WIS2WATCH_DATABASE_LOG_LEVEL = env.str("WIS2WATCH_DATABASE_LOG_LEVEL", "ERROR")
 

@@ -122,13 +122,22 @@ def evaluate_propagation(*, now=None, grace_minutes=None, window_hours=None):
     )
     since = evaluation_window_start(now, window_hours)
 
-    sources = _watched_origin_sources() if _the_world_is_watched() else []
+    # Which brokers may be judged on is the model's answer rather than this
+    # module's, because the report that lists the gaps recorded here asks the
+    # same question of the same brokers: the two answering differently would
+    # put a centre's gaps on a page the evaluation had decided it could not
+    # judge.
+    sources = (
+        list(MessageSource.objects.watched_origins())
+        if _the_world_is_watched()
+        else []
+    )
     counts = PropagationCounts(
         nodes_evaluated=len(sources),
         # Whatever was not judged was suppressed, for whichever of the two
         # reasons. A node has at most one broker of its own, so counting the
         # sources not evaluated counts the centres not judged.
-        nodes_suppressed=_origin_sources_being_watched().count() - len(sources),
+        nodes_suppressed=MessageSource.objects.origin_brokers().count() - len(sources),
     )
 
     # Closing first costs nothing and keeps a run's own two halves consistent:
@@ -144,31 +153,6 @@ def evaluate_propagation(*, now=None, grace_minutes=None, window_hours=None):
     logger.info("Propagation evaluated back to %s: %s", since, counts.summary)
 
     return counts
-
-
-def _origin_sources_being_watched():
-    """The origin brokers this process is currently connected to at all.
-
-    Reachability is only ever what the supervisor last recorded of a live
-    connection, so a broker no longer being connected -- deactivated in the
-    admin -- would otherwise be judged on an answer that has since gone stale.
-    Both halves of the run start from here, so what counts as a centre this
-    tool can see is decided once.
-    """
-    return MessageSource.objects.filter(
-        source_type=MessageSource.ORIGIN_BROKER,
-        is_active=True,
-        node__isnull=False,
-    )
-
-
-def _watched_origin_sources():
-    """The origin brokers whose view can be trusted right now.
-
-    A null reachability is "not attempted yet", and is no more a licence to
-    judge a centre than a failure is.
-    """
-    return list(_origin_sources_being_watched().filter(is_reachable=True))
 
 
 def _the_world_is_watched():

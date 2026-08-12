@@ -1,0 +1,40 @@
+{% extends "wis2watchcore/gap_reports/base.html" %}
+
+{% load i18n %}
+
+{% block report_note %}
+    <p class="report-note">
+        {% blocktrans with hours=attribution_hours %}Counted over the last {{ hours }} hours, from what the Global Broker carried. Every centre heard publishing is listed, because a share is only readable beside the centres that carry the identifier throughout.{% endblocktrans %}
+    </p>
+    <p class="report-note">
+        {% trans "A high share is a question rather than a fault: whole data categories — gridded products, satellite imagery, warnings — have no station to name." %}
+    </p>
+{% endblock %}
+
+{% block table_head %}
+    <th>{% trans "Centre" %}</th>
+    <th>{% trans "Country" %}</th>
+    <th class="numeric">{% trans "Messages" %}</th>
+    <th class="numeric">{% trans "Naming a station" %}</th>
+    <th class="numeric">{% trans "Naming none" %}</th>
+    <th class="numeric">{% trans "Unattributed" %}</th>
+{% endblock %}
+
+{% block table_row %}
+    <td>
+        <a href="{% url 'node_details' row.node_id %}"><code>{{ row.centre_id }}</code></a>
+    </td>
+    <td>{{ row.country_name|default:"—" }}</td>
+    <td class="numeric">{{ row.message_count }}</td>
+    <td class="numeric">{{ row.attributed_count }}</td>
+    <td class="numeric">{{ row.unattributed_count }}</td>
+    <td class="numeric">
+        <span class="badge {% if row.unattributed_count %}badge-warning{% else %}badge-quiet{% endif %}">
+            {% blocktrans with percent=row.percent|floatformat:1 %}{{ percent }}%{% endblocktrans %}
+        </span>
+    </td>
+{% endblock %}
+
+{% block empty_message %}
+    {% trans "No centre has been heard publishing in the window" %}
+{% endblock %}

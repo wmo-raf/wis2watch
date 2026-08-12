@@ -5,6 +5,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone as dj_timezone
 
+from wis2watch.core.analysis import GAP_REPORTS
 from wis2watch.core.models import (
     CadenceBaseline,
     Dataset,
@@ -12,9 +13,11 @@ from wis2watch.core.models import (
     HourlyRollup,
     MessageSource,
     NodeLastSeen,
+    PropagationGap,
     Station,
     StationSource,
     SyncLog,
+    UnregisteredCentre,
     WIS2Node,
 )
 from wis2watch.core.viewsets import (
@@ -286,6 +289,146 @@ class NodeOverviewViewTests(TestCase):
 
         self.assertContains(response, "Nothing to cache")
         self.assertNotContains(response, "Not cached")
+
+
+class GapReportViewTests(TestCase):
+    """The five reports, and the ways somebody arrives at one.
+
+    What the reports find is the analysis seam's business; what is guarded here
+    is that each of them can actually be reached and rendered, since a finding
+    on a page nobody can open is a finding that stayed in the database.
+    """
+
+    def setUp(self):
+        self.client.force_login(
+            get_user_model().objects.create_superuser("diagnostician", password="s3cret")
+        )
+        self.node = WIS2Node.objects.create(centre_id="ke-kmd", name="Kenya Met")
+
+    def declared_in_oscar(self):
+        """A station the country declares and nothing has ever heard."""
+        station = Station.objects.create(
+            wigos_id="0-20000-0-63741",
+            name="Dagoretti",
+            operating_status="operational",
+        )
+        StationSource.objects.create(station=station, source_type=StationSource.OSCAR)
+
+        return station
+
+    def a_finding_for_every_report(self):
+        """One of each, so that every report has a row to lay out.
+
+        A column that only ever renders against an empty table is a column
+        nobody has seen: the row is where a template's mistakes are.
+        """
+        self.declared_in_oscar()
+
+        StationSource.objects.create(
+            station=Station.objects.create(wigos_id="0-20000-0-63999"),
+            source_type=StationSource.OBSERVED,
+            node=self.node,
+            last_seen=dj_timezone.now(),
+        )
+        origin = MessageSource.objects.create(
+            name="ke-kmd origin broker",
+            source_type=MessageSource.ORIGIN_BROKER,
+            node=self.node,
+            centre_id="ke-kmd",
+            host="wis.kmd.test",
+            is_reachable=True,
+        )
+        PropagationGap.objects.create(
+            node=self.node,
+            origin_source=origin,
+            notification_id="4b1d",
+            topic="origin/a/wis2/ke-kmd/data/core/weather/synop",
+            published_at=dj_timezone.now(),
+            observed_at_origin=dj_timezone.now(),
+            detected_at=dj_timezone.now(),
+        )
+        UnregisteredCentre.objects.create(
+            centre_id="ml-meteo",
+            country="ML",
+            sample_topic="origin/a/wis2/ml-meteo/data/core/weather/synop",
+            first_seen_at=dj_timezone.now(),
+            last_seen_at=dj_timezone.now(),
+        )
+        HourlyRollup.objects.create(
+            hour=dj_timezone.now().replace(minute=0, second=0, microsecond=0),
+            source=MessageSource.objects.create(
+                name="Global Broker",
+                source_type=MessageSource.GLOBAL_BROKER,
+                host="globalbroker.example.int",
+            ),
+            node=self.node,
+            message_count=4,
+        )
+
+    def test_the_index_lists_every_report(self):
+        response = self.client.get(reverse("gap_reports"))
+
+        self.assertEqual(response.status_code, 200)
+
+        for report in GAP_REPORTS:
+            with self.subTest(slug=report.slug):
+                self.assertContains(response, reverse("gap_report", args=[report.slug]))
+
+    def test_the_index_counts_what_each_report_holds(self):
+        self.declared_in_oscar()
+
+        response = self.client.get(reverse("gap_reports"))
+
+        counted = {
+            summary.slug: summary.count for summary in response.context["summaries"]
+        }
+        self.assertEqual(counted["declared-but-silent"], 1)
+
+    def test_every_report_renders_what_it_found(self):
+        self.a_finding_for_every_report()
+
+        for report in GAP_REPORTS:
+            with self.subTest(slug=report.slug):
+                response = self.client.get(reverse("gap_report", args=[report.slug]))
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.context["page_obj"].paginator.count, 1)
+
+    def test_every_report_renders_with_nothing_to_show(self):
+        for report in GAP_REPORTS:
+            with self.subTest(slug=report.slug):
+                response = self.client.get(reverse("gap_report", args=[report.slug]))
+
+                self.assertEqual(response.status_code, 200)
+
+    def test_a_report_names_the_entities_it_found(self):
+        """A count would not be a finding anybody could act on."""
+        self.declared_in_oscar()
+
+        response = self.client.get(
+            reverse("gap_report", args=["declared-but-silent"])
+        )
+
+        self.assertContains(response, "0-20000-0-63741")
+        self.assertContains(response, "Dagoretti")
+
+    def test_a_report_that_found_nothing_says_so(self):
+        response = self.client.get(reverse("gap_report", args=["declared-but-silent"]))
+
+        self.assertContains(response, "has been heard transmitting")
+
+    def test_a_report_nothing_is_called_is_not_found(self):
+        response = self.client.get(reverse("gap_report", args=["stations-i-invented"]))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_the_overview_reaches_every_report(self):
+        """The table is what somebody has open when they start wondering."""
+        response = self.client.get(reverse("node_overview"))
+
+        for report in GAP_REPORTS:
+            with self.subTest(slug=report.slug):
+                self.assertContains(response, reverse("gap_report", args=[report.slug]))
 
 
 class DatasetAdminTests(TestCase):

@@ -69,6 +69,23 @@ def floor_to_hour(moment):
     return moment.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
 
 
+def window_start(now, hours):
+    """The first hourly bucket a window of that many hours covers.
+
+    Counted in whole buckets ending with the hour in progress, so a window is
+    the same length whatever minute it is asked for at. Measuring back from the
+    instant itself would either take in a slice of an extra bucket or drop part
+    of one, and a column headed "24h" would mean something slightly different
+    each time it was read.
+
+    Here rather than beside any one of the surfaces that reads a window,
+    because the buckets are what the rule is about: this is the finest answer
+    the rollups can give, and two surfaces spelling it separately is how a
+    "last 24 hours" and a "last 24 hours" come to cover different hours.
+    """
+    return floor_to_hour(now) - timedelta(hours=hours - 1)
+
+
 def default_window_hours():
     """How far back a scheduled run recomputes, unless told otherwise."""
     return getattr(settings, "WIS2WATCH_ROLLUP_WINDOW_HOURS", DEFAULT_WINDOW_HOURS)
