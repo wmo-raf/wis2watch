@@ -30,6 +30,21 @@ from wis2watch.ingest.supervisor import Supervisor
 CAPTURE = "global_broker_notifications.jsonl"
 
 
+def watching(*centre_ids):
+    """The filters a Global Broker connection carries for these centres.
+
+    Two per centre: what it published, and what the Global Caches made of it.
+    Written out here rather than imported from the code under test, so that a
+    change to what the process asks for has to be stated in a test rather than
+    agreed with itself.
+    """
+    return tuple(
+        f"{prefix}/a/wis2/{centre_id}/#"
+        for centre_id in centre_ids
+        for prefix in ("origin", "cache")
+    )
+
+
 def captured_messages(limit=None):
     """Real traffic, as the listeners hand it over: ``(topic, payload)``."""
     records = load_jsonl_fixture(CAPTURE)
@@ -392,7 +407,7 @@ class SubscriptionsFollowTheRegistryTests(SupervisorTestCase):
         self.supervisor.refresh_from_registry()
 
         self.assertEqual(
-            self.listeners[broker].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+            self.listeners[broker].subscriptions, watching("ke-meteo")
         )
 
     def test_a_centre_a_sync_added_reaches_the_connection_without_a_restart(self):
@@ -406,7 +421,7 @@ class SubscriptionsFollowTheRegistryTests(SupervisorTestCase):
 
         self.assertEqual(
             self.listeners[broker].subscriptions,
-            ("origin/a/wis2/dj-anm/#", "origin/a/wis2/ke-meteo/#"),
+            watching("dj-anm", "ke-meteo"),
         )
 
     def test_a_centre_removed_from_the_registry_is_dropped(self):
@@ -431,7 +446,7 @@ class SubscriptionsFollowTheRegistryTests(SupervisorTestCase):
         self.supervisor.refresh_from_registry()
 
         self.assertEqual(
-            self.listeners[second].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+            self.listeners[second].subscriptions, watching("ke-meteo")
         )
 
     def test_an_empty_registry_subscribes_the_connection_to_nothing(self):
@@ -499,7 +514,7 @@ class OriginBrokersFollowTheRegistryTests(SupervisorTestCase):
 
         self.assertEqual(self.connected_sources(), sorted([broker.pk, origin.pk]))
         self.assertEqual(
-            self.listeners[broker].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+            self.listeners[broker].subscriptions, watching("ke-meteo")
         )
         self.assertEqual(
             self.listeners[origin].subscriptions, ("origin/a/wis2/ke-meteo/#",)
@@ -565,7 +580,7 @@ class OriginChurnIsolationTests(SupervisorTestCase):
 
         self.assertEqual(self.connected_sources(), [broker.pk])
         self.assertEqual(
-            self.listeners[broker].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+            self.listeners[broker].subscriptions, watching("ke-meteo")
         )
 
     def test_a_node_broker_that_cannot_be_opened_does_not_cost_the_others(self):
@@ -727,7 +742,7 @@ class WildcardSweepTests(SupervisorTestCase):
 
         self.assertEqual(
             self.listeners[broker].subscriptions,
-            ("origin/a/wis2/ke-meteo/#", "origin/a/wis2/+/#"),
+            watching("ke-meteo") + (SweepUnderControl.SWEEP_TOPIC,),
         )
 
     def test_a_closed_sweep_leaves_the_registry_filters_alone(self):
@@ -742,7 +757,7 @@ class WildcardSweepTests(SupervisorTestCase):
         self.supervisor.service_sweep()
 
         self.assertEqual(
-            self.listeners[broker].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+            self.listeners[broker].subscriptions, watching("ke-meteo")
         )
 
     def test_a_registry_refresh_mid_sweep_keeps_carrying_the_sweep(self):
@@ -757,7 +772,7 @@ class WildcardSweepTests(SupervisorTestCase):
 
         self.assertEqual(
             self.listeners[broker].subscriptions,
-            ("origin/a/wis2/dj-anm/#", "origin/a/wis2/+/#"),
+            watching("dj-anm") + (SweepUnderControl.SWEEP_TOPIC,),
         )
 
     def test_an_unchanged_sweep_state_does_not_touch_the_connection(self):
@@ -844,7 +859,7 @@ class WildcardSweepTests(SupervisorTestCase):
         self.supervisor.tick()
 
         self.assertEqual(
-            self.listeners[broker].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+            self.listeners[broker].subscriptions, watching("ke-meteo")
         )
 
 
@@ -986,7 +1001,7 @@ class RestartTests(SupervisorTestCase):
 
         self.assertEqual(sorted(restarted.listeners), [broker.pk])
         self.assertEqual(
-            listeners[broker].subscriptions, ("origin/a/wis2/ke-meteo/#",)
+            listeners[broker].subscriptions, watching("ke-meteo")
         )
 
     def test_a_restart_picks_up_a_centre_added_while_it_was_down(self):
@@ -1004,5 +1019,5 @@ class RestartTests(SupervisorTestCase):
 
         self.assertEqual(
             listeners[broker].subscriptions,
-            ("origin/a/wis2/dj-anm/#", "origin/a/wis2/ke-meteo/#"),
+            watching("dj-anm", "ke-meteo"),
         )

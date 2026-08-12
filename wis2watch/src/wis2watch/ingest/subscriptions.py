@@ -7,6 +7,13 @@ definition of the region being watched, which is what lets a catalogue sync
 widen the coverage without anyone editing a subscription list -- the supervisor
 recomputes this and the difference is what it acts on.
 
+Each centre is asked for twice on that one connection: once under ``origin/``,
+as the centre published it, and once under ``cache/``, as the Global Caches
+republished it. Whether the region's core data is actually picked up by the
+caches is the last link in the chain from a centre to the world, and it costs
+nothing to observe beyond the filter itself -- no request is made of anyone's
+infrastructure, and the connection is already open.
+
 A node's own broker is the second vantage point, and asks for far less: one
 centre, its own. The difference between what it carries and what the Global
 Broker carries is the propagation signal, which is why both connections exist.
@@ -22,13 +29,18 @@ import logging
 
 from django.conf import settings
 
-from ..core.interpretation import parse_broker_url, subscription_topic
+from ..core.interpretation import CACHE, ORIGIN, parse_broker_url, subscription_topic
 from ..core.models import MessageSource, WIS2Node
 
 logger = logging.getLogger(__name__)
 
 #: What a seeded Global Broker is called, before anyone renames it.
 DEFAULT_GLOBAL_BROKER_NAME = "Global Broker"
+
+#: The prefixes a Global Broker connection carries for every monitored centre:
+#: what the centre published, and what the Global Caches made of it. Origin
+#: first, because it is the traffic every other finding is derived from.
+GLOBAL_BROKER_PREFIXES = (ORIGIN, CACHE)
 
 
 def registry_centre_ids():
@@ -45,8 +57,18 @@ def registry_centre_ids():
 
 
 def global_broker_subscriptions():
-    """The topic filters a Global Broker connection should carry."""
-    filters = (subscription_topic(centre_id) for centre_id in registry_centre_ids())
+    """The topic filters a Global Broker connection should carry.
+
+    Both prefixes for each centre. A cache filter names the same centre as the
+    origin filter beside it, so it widens what is heard about the centres
+    already being watched rather than what the process considers the region --
+    the registry remains the definition of that.
+    """
+    filters = (
+        subscription_topic(centre_id, prefix=prefix)
+        for centre_id in registry_centre_ids()
+        for prefix in GLOBAL_BROKER_PREFIXES
+    )
 
     return tuple(topic for topic in filters if topic)
 
@@ -90,6 +112,41 @@ def origin_broker_subscriptions(source):
     topic = subscription_topic(source.owning_centre_id)
 
     return (topic,) if topic else ()
+
+
+def cache_source_for(broker):
+    """The vantage point a connection's ``cache/`` traffic belongs to.
+
+    A Global Cache republishes a centre's notification pointing at its own
+    copy of the data, keeping the centre's data identifier and publication
+    time but stamping a UUID of its own -- and every cache carrying the data
+    does it. One publication therefore arrives as several messages that
+    nothing can match back to the original. Stored against the broker's own
+    source they would count as traffic the centre published, multiplying its
+    volume by the number of caches watching. Against a source of their own
+    they are what they are: copies, countable apart from the original and
+    never added to it.
+
+    Created when cache traffic first arrives on a connection rather than
+    alongside the broker, so that a deployment that has never been offered any
+    carries no vantage point for it.
+
+    The carrier's address is copied because it is where the traffic really
+    came from, and its credentials are not: nothing ever dials this source,
+    and a second copy of a password is a second place to leak it from.
+    """
+    source, _ = MessageSource.objects.get_or_create(
+        carried_by=broker,
+        source_type=MessageSource.GLOBAL_CACHE,
+        defaults={
+            "name": f"Global Cache via {broker.name}"[:200],
+            "host": broker.host,
+            "port": broker.port,
+            "use_tls": broker.use_tls,
+        },
+    )
+
+    return source
 
 
 def ensure_global_broker_source():

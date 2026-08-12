@@ -16,6 +16,7 @@ from datetime import timedelta
 from django.test import TestCase
 
 from wis2watch.core.analysis import (
+    CachePickup,
     OriginReachability,
     Silence,
     Staleness,
@@ -488,3 +489,118 @@ class OriginReachabilityTests(OverviewTestCase):
         self.assertEqual(
             rows["dj-anm"].origin_reachability, OriginReachability.UNREACHABLE
         )
+
+
+class CachePickupTests(OverviewTestCase):
+    """Whether a centre's core data is reaching the Global Caches.
+
+    The last link in the chain from a centre to the world, and the one the
+    origin volume column cannot speak to: a centre whose notifications reach
+    the Global Broker and are never cached is publishing into a world that
+    cannot retrieve what it published.
+
+    Only core data is cached, so a centre publishing nothing else has nothing
+    to be missing -- which is the distinction these tests are mostly about.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.cache = MessageSource.objects.create(
+            name="Global Cache via Global Broker",
+            source_type=MessageSource.GLOBAL_CACHE,
+            carried_by=self.global_broker,
+            host="globalbroker.example.int",
+        )
+        self.kenya = self.node("ke-meteo", last_seen=NOW)
+
+    def dataset(self, name, policy=Dataset.CORE):
+        return Dataset.objects.create(
+            node=self.kenya,
+            identifier=f"urn:wmo:md:ke-meteo:{name}",
+            title=name,
+            wmo_data_policy=policy,
+            wmo_topic_hierarchy=f"origin/a/wis2/ke-meteo/data/{policy}/{name}",
+            raw_json={},
+        )
+
+    def published(self, dataset, count=1, hours_ago=1, source=None):
+        return self.rollup(
+            self.kenya,
+            NOW - timedelta(hours=hours_ago),
+            count,
+            dataset=dataset,
+            source=source,
+        )
+
+    def test_core_data_the_caches_republished_is_picked_up(self):
+        synop = self.dataset("synop")
+        self.published(synop, count=12)
+        self.published(synop, count=12, source=self.cache)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.cache_pickup, CachePickup.PICKED_UP)
+        self.assertEqual(row.cache_message_count, 12)
+
+    def test_core_data_no_cache_carried_is_not_picked_up(self):
+        self.published(self.dataset("synop"), count=12)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.cache_pickup, CachePickup.NOT_PICKED_UP)
+        self.assertEqual(row.cache_message_count, 0)
+
+    def test_a_centre_publishing_only_recommended_data_has_nothing_to_cache(self):
+        """The Global Caches carry core data; the rest is not theirs to hold."""
+        self.published(self.dataset("taf", policy=Dataset.RECOMMENDED), count=12)
+
+        self.assertEqual(
+            self.by_centre()["ke-meteo"].cache_pickup, CachePickup.NOTHING_TO_CACHE
+        )
+
+    def test_a_centre_that_has_published_nothing_is_not_reported_as_missing(self):
+        self.assertEqual(
+            self.by_centre()["ke-meteo"].cache_pickup, CachePickup.NOTHING_TO_CACHE
+        )
+
+    def test_cache_pickup_is_judged_over_the_same_window_as_the_volume(self):
+        synop = self.dataset("synop")
+        self.published(synop, count=12, hours_ago=1)
+        self.published(synop, count=12, hours_ago=30, source=self.cache)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.cache_pickup, CachePickup.NOT_PICKED_UP)
+        self.assertEqual(row.cache_message_count, 0)
+
+    def test_what_a_cache_republished_does_not_inflate_the_origin_volume(self):
+        synop = self.dataset("synop")
+        self.published(synop, count=12)
+        self.published(synop, count=12, source=self.cache)
+
+        self.assertEqual(self.by_centre()["ke-meteo"].recent_message_count, 12)
+
+    def test_each_centre_carries_its_own_pickup(self):
+        djibouti = self.node("dj-anm", last_seen=NOW)
+        synop = self.dataset("synop")
+        self.published(synop, count=12)
+        self.published(synop, count=12, source=self.cache)
+        HourlyRollup.objects.create(
+            hour=NOW - timedelta(hours=1),
+            source=self.global_broker,
+            node=djibouti,
+            dataset=Dataset.objects.create(
+                node=djibouti,
+                identifier="urn:wmo:md:dj-anm:synop",
+                title="synop",
+                wmo_data_policy=Dataset.CORE,
+                wmo_topic_hierarchy="origin/a/wis2/dj-anm/data/core/synop",
+                raw_json={},
+            ),
+            message_count=7,
+        )
+
+        rows = self.by_centre()
+
+        self.assertEqual(rows["ke-meteo"].cache_pickup, CachePickup.PICKED_UP)
+        self.assertEqual(rows["dj-anm"].cache_pickup, CachePickup.NOT_PICKED_UP)
