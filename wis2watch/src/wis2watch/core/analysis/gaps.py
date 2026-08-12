@@ -497,18 +497,125 @@ def _centres_naming_no_station(*, now):
 
 
 @dataclass(frozen=True)
+class Notice:
+    """One finding as something other than a table row would put it.
+
+    A report row is columns, and columns need a heading and a page. A notice
+    is the same finding in a sentence, and what identifies it -- which is what
+    it takes to tell somebody about it in an email, and to know tomorrow that
+    they have already been told.
+
+    The key is the finding's identity rather than the row's. Two rows that
+    name the same problem carry the same key and are one notice: a centre
+    whose propagation has broken produces a row per notification, and a digest
+    that reported each of them would report one fault hundreds of times, then
+    hundreds more tomorrow.
+
+    Summaries are not translated. They are mostly identifiers, they are read
+    by whoever runs the installation rather than published, and the framing
+    around them in the email is translated in the usual way.
+    """
+
+    key: str
+    summary: str
+
+
+def _silent_station_notice(row):
+    """A declared station nothing has ever heard, in a sentence."""
+    known_to = f", declared by {row.registry_centre_id}" if row.registry_centre_id else ""
+
+    return Notice(
+        key=row.wigos_id,
+        summary=(
+            f"{row.display_name} ({row.wigos_id}) in {row.territory or 'no territory'} "
+            f"is declared operational and has never transmitted{known_to}"
+        ),
+    )
+
+
+def _undeclared_station_notice(row):
+    """A station transmitting that nothing declares, in a sentence."""
+    centre = row.centre_id or "an unregistered centre"
+
+    return Notice(
+        key=f"{row.centre_id}:{row.wigos_id}",
+        summary=(
+            f"{row.wigos_id} is transmitting under {centre} and neither "
+            f"OSCAR/Surface nor any centre's registry declares it"
+        ),
+    )
+
+
+def _propagation_gap_notice(row):
+    """A centre whose publications are not reaching the world, in a sentence.
+
+    Keyed on the centre rather than on the notification. What has gone wrong
+    is the path, and it is the path somebody is sent to look at; the
+    notification named here is the evidence to open the conversation with, and
+    the report holds however many others there are.
+    """
+    return Notice(
+        key=row.centre_id,
+        summary=(
+            f"{row.centre_id} published {row.notification_id} on {row.topic} "
+            f"and the Global Broker has not carried it"
+        ),
+    )
+
+
+def _unregistered_centre_notice(row):
+    """A centre publishing that no catalogue knows, in a sentence."""
+    country = f" ({row.country_name})" if row.country_name else ""
+
+    return Notice(
+        key=row.centre_id,
+        summary=(
+            f"{row.centre_id}{country} is publishing with no discovery "
+            f"catalogue record"
+        ),
+    )
+
+
+def _unattributed_rate_notice(row):
+    """A centre naming no station for some of its traffic, in a sentence.
+
+    Nothing at all for a centre that attributed everything it published. This
+    report lists every publishing centre so that the share can be read against
+    the ones doing it right, and a digest that announced those as findings
+    would announce the whole region the first time it ran.
+    """
+    if not row.unattributed_count:
+        return None
+
+    return Notice(
+        key=row.centre_id,
+        summary=(
+            f"{row.centre_id} left {row.unattributed_count} of "
+            f"{row.message_count} messages ({row.percent:.0f}%) naming no station"
+        ),
+    )
+
+
+@dataclass(frozen=True)
 class GapReport:
     """One report: what it finds, and how to ask for it.
 
     The five are held as a list rather than as five hard-wired pages so that
-    the index, the routing and the report itself all read from one place. A
-    report that exists but is not on the index is a finding nobody sees, which
-    is the failure this whole module exists to prevent.
+    the index, the routing, the report itself and the digest all read from one
+    place. A report that exists but is not on the index is a finding nobody
+    sees, which is the failure this whole module exists to prevent -- and one
+    that exists but is not in the digest is a finding nobody sees until they
+    next open the tool.
 
-    The two callables are named as the verbs they are. A template renders any
-    attribute it is given and calls it if it can, so a field called ``count``
-    would run a query from the middle of a page that only meant to print a
-    number.
+    The three callables are named as the verbs they are. A template renders
+    any attribute it is given and calls it if it can, so a field called
+    ``count`` would run a query from the middle of a page that only meant to
+    print a number.
+
+    ``describe_row`` answers with nothing where a row is not a finding at all.
+    The rate report needs that: it lists every publishing centre so that a
+    share can be read against the ones doing it right, and most of them have
+    nothing to answer for.
     """
 
     slug: str
@@ -516,6 +623,7 @@ class GapReport:
     description: str
     find_rows: Callable[..., list]
     count_rows: Callable[..., int]
+    describe_row: Callable[..., Notice | None]
 
 
 @dataclass(frozen=True)
@@ -541,6 +649,7 @@ GAP_REPORTS = (
         ),
         find_rows=stations_declared_but_silent,
         count_rows=lambda *, now=None: _silent_declarations().count(),
+        describe_row=_silent_station_notice,
     ),
     GapReport(
         slug="transmitting-undeclared",
@@ -551,6 +660,7 @@ GAP_REPORTS = (
         ),
         find_rows=stations_transmitting_undeclared,
         count_rows=lambda *, now=None: _undeclared_observations().count(),
+        describe_row=_undeclared_station_notice,
     ),
     GapReport(
         slug="propagation-gaps",
@@ -562,6 +672,7 @@ GAP_REPORTS = (
         ),
         find_rows=propagation_gaps,
         count_rows=lambda *, now=None: _reportable_gaps().count(),
+        describe_row=_propagation_gap_notice,
     ),
     GapReport(
         slug="unregistered-centres",
@@ -572,6 +683,7 @@ GAP_REPORTS = (
         ),
         find_rows=unregistered_centres,
         count_rows=lambda *, now=None: _open_unregistered_centres().count(),
+        describe_row=_unregistered_centre_notice,
     ),
     GapReport(
         slug="unattributed-messages",
@@ -585,6 +697,7 @@ GAP_REPORTS = (
         count_rows=lambda *, now=None: _centres_naming_no_station(
             now=now or dj_timezone.now()
         ),
+        describe_row=_unattributed_rate_notice,
     ),
 )
 

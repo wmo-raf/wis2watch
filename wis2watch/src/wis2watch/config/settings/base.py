@@ -387,6 +387,36 @@ WIS2WATCH_VOLUME_WINDOW_HOURS = env.int("WIS2WATCH_VOLUME_WINDOW_HOURS", 24)
 # hundred per cent depending on the day it was asked about.
 WIS2WATCH_ATTRIBUTION_WINDOW_HOURS = env.int("WIS2WATCH_ATTRIBUTION_WINDOW_HOURS", 168)
 
+# Who is told what changed, and who is told when the tool itself has stopped
+# working. There is one operator of a regional diagnostic tool rather than a
+# subscriber list, so both are configuration. Leaving the alert list unset
+# sends alerts to whoever receives the digest, on the grounds that an
+# installation which had configured one and not the other would think it was
+# being watched.
+WIS2WATCH_DIGEST_RECIPIENTS = env.list("WIS2WATCH_DIGEST_RECIPIENTS", default=[])
+WIS2WATCH_ALERT_RECIPIENTS = env.list("WIS2WATCH_ALERT_RECIPIENTS", default=[])
+
+# How long the Global Broker connection may be down, and how long nothing at
+# all may be ingested, before either is mailed about, in minutes. Both are a
+# first guess at what is more than a blip, and are meant to be revisited once
+# the region's normal traffic patterns are known.
+WIS2WATCH_BROKER_OUTAGE_MINUTES = env.int("WIS2WATCH_BROKER_OUTAGE_MINUTES", 5)
+WIS2WATCH_INGESTION_STALL_MINUTES = env.int("WIS2WATCH_INGESTION_STALL_MINUTES", 15)
+
+# Where the digest and the alerts are sent from. Without a mail host nothing
+# is sent at all, which is why the recipients above are the setting an
+# installation is most likely to have forgotten: the tool goes on finding
+# everything it would have said.
+EMAIL_HOST = env.str("EMAIL_HOST", "")
+# Read as text first because the deployment passes every unset variable as an
+# empty string, which is not a number and would stop the process from starting
+# over a setting nothing was going to use.
+EMAIL_PORT = int(env.str("EMAIL_PORT", "") or 25)
+EMAIL_HOST_USER = env.str("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = env.str("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = env.bool("EMAIL_USE_TLS", False)
+DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", "wis2watch@localhost")
+
 WIS2WATCH_LOG_LEVEL = env.str("WIS2WATCH_LOG_LEVEL", "INFO")
 WIS2WATCH_DATABASE_LOG_LEVEL = env.str("WIS2WATCH_DATABASE_LOG_LEVEL", "ERROR")
 
@@ -465,5 +495,17 @@ CELERY_BEAT_SCHEDULE = {
     'expire-raw-messages': {
         'task': 'wis2watch.core.tasks.run_expire_raw_messages',
         'schedule': 86400.0,  # Daily
+    },
+    # Early, in the installation's own time zone, so that what changed
+    # overnight is read before the day starts rather than during it.
+    'send-daily-digest': {
+        'task': 'wis2watch.core.tasks.run_send_daily_digest',
+        'schedule': crontab(hour=6, minute=0),
+    },
+    # Far oftener than the outages it judges: a check on a five-minute beat
+    # could not tell a five-minute outage from a twenty-minute one.
+    'check-hard-failures': {
+        'task': 'wis2watch.core.tasks.run_check_hard_failures',
+        'schedule': 60.0,  # Every minute
     },
 }

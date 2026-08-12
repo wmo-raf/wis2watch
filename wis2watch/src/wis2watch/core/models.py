@@ -727,7 +727,11 @@ class NotificationMessage(TimescaleModel, TimeStampedModel):
         blank=True,
         help_text=_("Discovery metadata identifier declared by the message"),
     )
-    received_datetime = models.DateTimeField(default=dj_timezone.now)
+    received_datetime = models.DateTimeField(
+        default=dj_timezone.now,
+        db_index=True,
+        help_text=_("When this tool stored the message, as against when it was published"),
+    )
     canonical_link = models.URLField(max_length=1000, blank=True)
     raw_json = models.JSONField()
 
@@ -1345,3 +1349,141 @@ class SyncLog(models.Model):
             f"{self.status} found={self.items_found} created={self.items_created} "
             f"updated={self.items_updated} errored={self.items_errored}"
         )
+
+
+class ReportedFinding(models.Model):
+    """One finding the digest has already told somebody about.
+
+    The digest exists to carry what changed, which means something has to
+    remember what was carried last time. This is that memory: a row per
+    finding the last digest named, keyed by the report it came from and by
+    whatever identifies it within that report -- a WIGOS identifier, a centre,
+    a notification UUID.
+
+    A finding that is no longer found has its row deleted rather than closed,
+    so that the row's existence is the whole answer to "has this been
+    mentioned". Nothing here is evidence -- the reports are derived from the
+    observations whenever they are asked -- and keeping the row would make a
+    problem that came back unmentionable, which a problem that came back is
+    not: it is news.
+
+    The summary is stored alongside because it is the only thing that can
+    still describe a finding once it is gone. A digest that says a gap has
+    closed has to name which, and by then the report no longer lists it.
+    """
+
+    report_slug = models.CharField(
+        max_length=100,
+        help_text=_("Which gap report this finding came from"),
+    )
+    key = models.CharField(
+        max_length=500,
+        help_text=_("What identifies the finding within its report"),
+    )
+    summary = models.CharField(
+        max_length=1000,
+        help_text=_("How the finding read when it was last reported"),
+    )
+
+    reported_at = models.DateTimeField(
+        help_text=_("When a digest carried this finding"),
+    )
+
+    class Meta:
+        ordering = ["report_slug", "key"]
+        constraints = [
+            # A finding is remembered once. Two rows for one finding would
+            # make it new again on the run that read the second of them.
+            models.UniqueConstraint(
+                fields=["report_slug", "key"],
+                name="unique_reported_finding",
+            ),
+        ]
+        verbose_name = _("Reported Finding")
+        verbose_name_plural = _("Reported Findings")
+
+    def __str__(self):
+        return f"{self.report_slug}: {self.key}"
+
+
+class HardFailureQuerySet(models.QuerySet):
+    def open(self):
+        """The failures that have not been seen to clear.
+
+        A failure stays on the record after it clears -- how long the region
+        went unwatched is worth being able to ask -- but only an open one is
+        anybody's to act on now.
+        """
+        return self.filter(resolved_at__isnull=True)
+
+
+class HardFailure(models.Model):
+    """A spell in which this tool itself stopped working.
+
+    Everything else recorded here is a finding about the region. This is the
+    other kind: the Global Broker connection lost, or nothing at all being
+    ingested. Neither says anything about whether African centres are
+    publishing, and both mean that nothing the tool goes on to say about them
+    can be believed until it is fixed.
+
+    A row per spell rather than per check, so that a failure lasting a day is
+    one thing that happened rather than a thousand. ``notified_at`` is what
+    keeps it to one message: an outage is announced once it has lasted past
+    the threshold, and again only when it clears.
+
+    The threshold is not stored. It is a first guess about what counts as more
+    than a blip, and it is meant to be revised once the region's normal
+    rhythms are known; a row that recorded the guess it was opened under would
+    have to be reconciled with the setting on every read.
+    """
+
+    GLOBAL_BROKER_LOST = "global_broker_lost"
+    INGESTION_STALLED = "ingestion_stalled"
+
+    KIND_CHOICES = [
+        (GLOBAL_BROKER_LOST, _("Global Broker connection lost")),
+        (INGESTION_STALLED, _("Ingestion stalled")),
+    ]
+
+    kind = models.CharField(max_length=50, choices=KIND_CHOICES)
+    detail = models.TextField(
+        blank=True,
+        help_text=_("What was found to be wrong, as it stood when last checked"),
+    )
+
+    started_at = models.DateTimeField(
+        help_text=_("When the failure began, as closely as it can be told"),
+    )
+    notified_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the failure was announced, if it lasted long enough to be"),
+    )
+    resolved_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=_("When the failure was seen to have cleared"),
+    )
+
+    objects = HardFailureQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-started_at"]
+        constraints = [
+            # One open failure of each kind. The checks run on a beat, and two
+            # open rows for one outage would announce it twice and clear it
+            # once.
+            models.UniqueConstraint(
+                fields=["kind"],
+                condition=models.Q(resolved_at__isnull=True),
+                name="unique_open_hard_failure_per_kind",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["kind", "-started_at"]),
+        ]
+        verbose_name = _("Hard Failure")
+        verbose_name_plural = _("Hard Failures")
+
+    def __str__(self):
+        return f"{self.get_kind_display()} since {self.started_at}"

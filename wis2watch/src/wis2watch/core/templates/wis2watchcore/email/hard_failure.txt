@@ -1,0 +1,12 @@
+{% load i18n tz %}{% if recovered %}{% blocktranslate with failure=failure.get_kind_display started_at=failure.started_at|utc|date:"Y-m-d H:i" resolved_at=failure.resolved_at|utc|date:"Y-m-d H:i" %}{{ failure }} -- recovered.
+
+It began at {{ started_at }} UTC and was seen working again at {{ resolved_at }} UTC.{% endblocktranslate %}
+
+{% translate "What this tool said about the region while it stood is worth reading again now." %}
+{% else %}{% blocktranslate with failure=failure.get_kind_display started_at=failure.started_at|utc|date:"Y-m-d H:i" %}{{ failure }}, since {{ started_at }} UTC.{% endblocktranslate %}
+
+{{ failure.detail }}
+
+{% translate "While this stands, nothing WIS2Watch says about the region can be relied on: centres that are publishing normally will look silent, because nothing is reaching this tool to say otherwise." %}
+{% endif %}
+{{ overview_url }}
