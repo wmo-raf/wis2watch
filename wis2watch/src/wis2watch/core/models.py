@@ -1367,6 +1367,15 @@ class ReportedFinding(models.Model):
     problem that came back unmentionable, which a problem that came back is
     not: it is news.
 
+    Which is exactly why ``last_seen_at`` is kept. A report can stop listing a
+    finding without the problem having gone anywhere: propagation gaps are
+    withheld for a centre whose own broker cannot currently be reached, and
+    the unattributed share is worked out over a trailing window a quiet centre
+    falls out of. Deleting on the first absence would announce those as
+    cleared and then announce them again on their return, which is the one
+    thing a digest must not do. So a finding is only let go once it has been
+    absent for long enough that its absence means something.
+
     The summary is stored alongside because it is the only thing that can
     still describe a finding once it is gone. A digest that says a gap has
     closed has to name which, and by then the report no longer lists it.
@@ -1387,6 +1396,9 @@ class ReportedFinding(models.Model):
 
     reported_at = models.DateTimeField(
         help_text=_("When a digest carried this finding"),
+    )
+    last_seen_at = models.DateTimeField(
+        help_text=_("When a digest run last found the report still listing it"),
     )
 
     class Meta:

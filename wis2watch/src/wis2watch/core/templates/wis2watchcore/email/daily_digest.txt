@@ -1,5 +1,5 @@
 {% load i18n tz %}{% translate "What has changed in the region since the last digest. Findings already reported are left out." %}
-{% for change in digest.changes %}
+{% for change in digest.changed %}
 == {{ change.title }} ==
 {% blocktranslate with found=change.found %}{{ found }} standing now.{% endblocktranslate %} {{ change.url }}
 {% if change.new_sample %}

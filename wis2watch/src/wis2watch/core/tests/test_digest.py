@@ -34,8 +34,22 @@ NOW = at("2026-08-11T06:00:00")
 
 RECIPIENTS = ["diagnostician@example.int"]
 
+#: The grace the tests are written against, stated rather than inherited so
+#: that revising the setting does not silently change what is asserted.
+GRACE_HOURS = 48
 
-@override_settings(WIS2WATCH_DIGEST_RECIPIENTS=RECIPIENTS)
+#: A day later: another digest, and still inside the grace.
+TOMORROW = NOW + timedelta(days=1)
+
+#: Long enough after that a finding still missing has really gone.
+PAST_THE_GRACE = NOW + timedelta(hours=GRACE_HOURS + 1)
+
+
+@override_settings(
+    WIS2WATCH_DIGEST_RECIPIENTS=RECIPIENTS,
+    WIS2WATCH_FINDING_GRACE_HOURS=GRACE_HOURS,
+    WIS2WATCH_DIGEST_SAMPLE_SIZE=20,
+)
 class DigestTestCase(TestCase):
     def setUp(self):
         self.global_broker = MessageSource.objects.create(
@@ -97,10 +111,11 @@ class DigestTestCase(TestCase):
         return send_digest(now=now)
 
     def changes_for(self, slug, *, now=NOW):
+        """What one report has to say, or nothing if it has nothing."""
         digest = digest_changes(now=now)
 
         return next(
-            (change for change in digest.changes if change.slug == slug), None
+            (change for change in digest.changed if change.slug == slug), None
         )
 
     def body(self):
@@ -143,13 +158,13 @@ class NewFindingTests(DigestTestCase):
         self.assertIn("ke-meteo", self.body())
         self.assertIn("0-20000-0-63741", self.body())
 
-    def test_a_report_with_nothing_new_is_left_out(self):
+    def test_a_report_with_nothing_new_is_left_out_of_the_email(self):
         self.publishing_unregistered("ke-meteo")
 
         digest = digest_changes(now=NOW)
 
         self.assertEqual(
-            [change.slug for change in digest.changes], ["unregistered-centres"]
+            [change.slug for change in digest.changed], ["unregistered-centres"]
         )
 
 
@@ -160,7 +175,7 @@ class RepeatFindingTests(DigestTestCase):
         self.publishing_unregistered("ke-meteo")
 
         self.send()
-        second = self.send(now=NOW + timedelta(days=1))
+        second = self.send(now=TOMORROW)
 
         self.assertFalse(second.has_changes)
 
@@ -168,7 +183,7 @@ class RepeatFindingTests(DigestTestCase):
         self.publishing_unregistered("ke-meteo")
 
         self.send()
-        self.send(now=NOW + timedelta(days=1))
+        self.send(now=TOMORROW)
 
         self.assertEqual(len(mail.outbox), 1)
 
@@ -189,50 +204,84 @@ class RepeatFindingTests(DigestTestCase):
         self.send()
 
         self.publishing_unregistered("ug-unma")
-        self.send(now=NOW + timedelta(days=1))
+        self.send(now=TOMORROW)
 
         self.assertIn("ug-unma", self.body())
         self.assertNotIn("ke-meteo", self.body())
 
 
 class ClearedFindingTests(DigestTestCase):
-    """A problem that has gone is also what changed."""
+    """A problem that has gone is also what changed -- once it really has.
 
-    def test_a_finding_that_has_gone_is_reported_as_cleared(self):
-        centre = self.publishing_unregistered("ke-meteo")
+    A report can stop listing a finding without anything having been fixed:
+    propagation gaps are withheld for a centre whose own broker cannot be
+    reached, and a quiet centre falls out of the attribution window. So a
+    finding has to be missing for longer than a digest or two before it counts
+    as cleared, and these are the tests of that boundary.
+    """
+
+    def setUp(self):
+        super().setUp()
+
+        self.centre = self.publishing_unregistered("ke-meteo")
         self.send()
 
-        centre.registered_at = NOW
-        centre.save()
-        digest = digest_changes(now=NOW + timedelta(days=1))
+    def stopped_being_found(self):
+        """The report stops listing the finding, for whatever reason."""
+        self.centre.registered_at = NOW
+        self.centre.save()
 
-        (change,) = digest.changes
+    def found_again(self):
+        self.centre.registered_at = None
+        self.centre.save()
+
+    def test_a_finding_gone_longer_than_the_grace_is_reported_as_cleared(self):
+        self.stopped_being_found()
+
+        (change,) = digest_changes(now=PAST_THE_GRACE).changed
+
         self.assertEqual([notice.key for notice in change.resolved], ["ke-meteo"])
 
     def test_a_cleared_finding_is_named_in_the_email(self):
-        centre = self.publishing_unregistered("ke-meteo")
-        self.send()
+        self.stopped_being_found()
 
-        centre.registered_at = NOW
-        centre.save()
-        self.send(now=NOW + timedelta(days=1))
+        self.send(now=PAST_THE_GRACE)
 
         self.assertIn("ke-meteo", self.body())
 
-    def test_a_finding_that_comes_back_is_carried_again(self):
-        centre = self.publishing_unregistered("ke-meteo")
-        self.send()
+    def test_a_finding_gone_since_yesterday_is_not_yet_cleared(self):
+        self.stopped_being_found()
 
-        centre.registered_at = NOW
-        centre.save()
-        self.send(now=NOW + timedelta(days=1))
+        self.assertFalse(digest_changes(now=TOMORROW).has_changes)
 
-        centre.registered_at = None
-        centre.save()
-        digest = digest_changes(now=NOW + timedelta(days=2))
+    def test_a_finding_that_returns_within_the_grace_is_not_carried_again(self):
+        """The suppression case: a report that could not see a finding for an
+        afternoon must not announce it fixed and then announce it anew."""
+        self.stopped_being_found()
+        self.send(now=TOMORROW)
 
-        (change,) = digest.changes
+        self.found_again()
+
+        self.assertFalse(digest_changes(now=PAST_THE_GRACE).has_changes)
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_a_finding_that_comes_back_after_being_cleared_is_carried_again(self):
+        self.stopped_being_found()
+        self.send(now=PAST_THE_GRACE)
+
+        self.found_again()
+        (change,) = digest_changes(now=PAST_THE_GRACE + timedelta(days=1)).changed
+
         self.assertEqual([notice.key for notice in change.new], ["ke-meteo"])
+
+    def test_a_finding_still_being_found_keeps_its_grace_from_running_out(self):
+        """The clock is kept by every run, including the ones that send
+        nothing -- otherwise a finding standing quietly for a week would be
+        called cleared the first time its report was suppressed."""
+        self.send(now=TOMORROW)
+        self.stopped_being_found()
+
+        self.assertFalse(digest_changes(now=TOMORROW + timedelta(days=1)).has_changes)
 
 
 class WhatCountsAsAFindingTests(DigestTestCase):

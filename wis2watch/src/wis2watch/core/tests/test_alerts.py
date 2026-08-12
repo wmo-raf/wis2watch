@@ -56,12 +56,19 @@ class HardFailureTestCase(TestCase):
 
     # -- seeding ---------------------------------------------------------
 
-    def broker_lost(self, *, minutes_ago, source=None):
-        """A Global Broker connection the supervisor found it could not hold."""
+    def broker_lost(self, *, source=None):
+        """A Global Broker connection the supervisor found it could not hold.
+
+        Recorded as the supervisor records it, which is the whole difficulty:
+        ``last_connected_at`` is stamped when a connection comes up and left
+        alone when it goes down, so a broker that worked for six hours and
+        dropped a moment ago carries a stamp six hours old. Nothing in the
+        record says when it dropped, which is why the outage is timed from
+        when a check first found it.
+        """
         source = source or self.global_broker
         source.is_reachable = False
         source.last_error = "Could not reach globalbroker.example.int:8883"
-        source.last_connected_at = NOW - timedelta(minutes=minutes_ago)
         source.save()
 
         return source
@@ -127,7 +134,7 @@ class GlobalBrokerLostTests(HardFailureTestCase):
 
     def test_a_broker_switched_off_in_the_admin_is_not_watched(self):
         self.global_broker.is_active = False
-        self.broker_lost(minutes_ago=60)
+        self.broker_lost()
 
         self.check()
 
@@ -140,33 +147,43 @@ class GlobalBrokerLostTests(HardFailureTestCase):
 
         self.assertIsNone(self.open_failure(self.KIND))
 
-    def test_a_broker_lost_moments_ago_is_recorded_but_not_announced(self):
-        self.broker_lost(minutes_ago=OUTAGE_MINUTES - 3)
+    def test_a_broker_just_lost_is_recorded_but_not_announced(self):
+        """The case a long-connected broker actually presents.
+
+        Its record says it last connected six hours ago and nothing says when
+        it stopped, so an outage timed from that stamp would be announced on
+        the first check -- which would make the threshold no threshold at all.
+        """
+        self.broker_lost()
 
         self.check()
 
         self.assertIsNotNone(self.open_failure(self.KIND))
         self.assertEqual(mail.outbox, [])
 
-    def test_a_broker_lost_beyond_the_threshold_is_announced(self):
-        self.broker_lost(minutes_ago=OUTAGE_MINUTES + 5)
-
+    def test_a_broker_still_down_past_the_threshold_is_announced(self):
+        self.broker_lost()
         self.check()
+
+        self.check(now=NOW + timedelta(minutes=OUTAGE_MINUTES + 1))
 
         (sent,) = mail.outbox
         self.assertEqual(sent.to, RECIPIENTS)
         self.assertIn("Global Broker", sent.subject)
 
-    def test_a_blip_that_lasts_is_announced_on_the_check_that_finds_it_has(self):
-        self.broker_lost(minutes_ago=1)
+    def test_a_broker_down_when_first_looked_at_is_given_the_threshold(self):
+        """A broker that has never come up at all is not announced instantly:
+        a tool that has only just started has not watched anything long enough
+        to say."""
+        self.global_broker.last_connected_at = None
+        self.broker_lost()
+
         self.check()
 
-        self.check(now=NOW + timedelta(minutes=OUTAGE_MINUTES + 1))
-
-        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox, [])
 
     def test_a_blip_that_clears_is_never_announced(self):
-        self.broker_lost(minutes_ago=1)
+        self.broker_lost()
         self.check()
 
         self.global_broker.is_reachable = True
@@ -177,27 +194,28 @@ class GlobalBrokerLostTests(HardFailureTestCase):
         self.assertIsNone(self.open_failure(self.KIND))
 
     def test_an_outage_is_announced_once_however_long_it_lasts(self):
-        self.broker_lost(minutes_ago=60)
+        self.broker_lost()
 
         self.check()
-        self.check(now=NOW + timedelta(minutes=1))
+        self.check(now=NOW + timedelta(minutes=OUTAGE_MINUTES + 1))
         self.check(now=NOW + timedelta(hours=3))
 
         self.assertEqual(len(self.announcements(self.KIND)), 1)
 
     def test_a_broker_that_comes_back_is_reported_as_recovered(self):
-        self.broker_lost(minutes_ago=60)
+        self.broker_lost()
         self.check()
+        self.check(now=NOW + timedelta(minutes=OUTAGE_MINUTES + 1))
 
         self.global_broker.is_reachable = True
         self.global_broker.save()
         self.check(now=NOW + timedelta(minutes=10))
 
-        self.assertEqual(len(mail.outbox), 2)
+        self.assertEqual(len(self.announcements(self.KIND)), 2)
         self.assertIsNone(self.open_failure(self.KIND))
 
     def test_another_broker_still_carrying_the_region_is_not_a_failure(self):
-        self.broker_lost(minutes_ago=60)
+        self.broker_lost()
         MessageSource.objects.create(
             name="Second Global Broker",
             source_type=MessageSource.GLOBAL_BROKER,
@@ -210,7 +228,7 @@ class GlobalBrokerLostTests(HardFailureTestCase):
         self.assertIsNone(self.open_failure(self.KIND))
 
     def test_the_failure_says_which_broker_and_why(self):
-        self.broker_lost(minutes_ago=60)
+        self.broker_lost()
 
         self.check()
 
@@ -279,9 +297,10 @@ class IngestionStalledTests(HardFailureTestCase):
 
     def test_both_failures_at_once_are_announced_separately(self):
         self.ingested(minutes_ago=STALL_MINUTES + 10)
-        self.broker_lost(minutes_ago=60)
+        self.broker_lost()
 
         self.check()
+        self.check(now=NOW + timedelta(minutes=OUTAGE_MINUTES + 1))
 
         self.assertEqual(len(mail.outbox), 2)
         self.assertEqual(HardFailure.objects.open().count(), 2)

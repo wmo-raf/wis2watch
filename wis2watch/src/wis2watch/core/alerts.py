@@ -33,6 +33,7 @@ inferred from the connections looking healthy.
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -79,11 +80,12 @@ class AlertCounts:
 class Symptom:
     """What one check found, whether or not anything is wrong.
 
-    ``since`` is the failure's own beginning where that can be told -- when
-    the broker was last connected, when a message last arrived. Where it
-    cannot be, it is left empty and the moment the check first noticed stands
-    in, which is the most that can honestly be claimed about a tool that has
-    never worked since it was deployed.
+    ``since`` is the failure's own beginning where that can be told -- the
+    moment the last message arrived is the moment ingestion stopped. Where it
+    cannot be, it is left empty and the moment a check first found the failure
+    stands in. That is the most that can honestly be claimed of a broker whose
+    record says only when it last came up, and it is what keeps a blip from
+    being announced as an outage.
     """
 
     failing: bool
@@ -122,20 +124,17 @@ def check_hard_failures(*, now=None):
     now = now or dj_timezone.now()
     counts = AlertCounts()
 
-    for kind, symptom in (
-        (HardFailure.GLOBAL_BROKER_LOST, _global_broker_symptom(now=now)),
-        (HardFailure.INGESTION_STALLED, _ingestion_symptom(now=now)),
-    ):
-        _reconcile(kind, symptom, now=now, counts=counts)
+    for check in HARD_FAILURE_CHECKS:
+        _reconcile(check, check.look_for(now=now), now=now, counts=counts)
 
     logger.info("[ALERTS] %s", counts.summary)
 
     return counts
 
 
-def _reconcile(kind, symptom, *, now, counts):
+def _reconcile(check, symptom, *, now, counts):
     """Bring one kind of failure's record, and who knows about it, up to date."""
-    standing = HardFailure.objects.open().filter(kind=kind).first()
+    standing = HardFailure.objects.open().filter(kind=check.kind).first()
 
     if not symptom.failing:
         if standing is not None:
@@ -145,7 +144,7 @@ def _reconcile(kind, symptom, *, now, counts):
 
     if standing is None:
         standing = HardFailure.objects.create(
-            kind=kind,
+            kind=check.kind,
             detail=symptom.detail,
             started_at=min(symptom.since or now, now),
         )
@@ -157,10 +156,10 @@ def _reconcile(kind, symptom, *, now, counts):
     counts.standing += 1
 
     if standing.notified_at is None:
-        _announce(standing, now=now, counts=counts)
+        _announce(standing, check=check, now=now, counts=counts)
 
 
-def _announce(failure, *, now, counts):
+def _announce(failure, *, check, now, counts):
     """Tell somebody, once the failure has lasted long enough to be worth it.
 
     Announced only when it has lasted past its threshold, and recorded as
@@ -168,21 +167,10 @@ def _announce(failure, *, now, counts):
     recipient configured yet has not been told, and gets the message when it
     has one.
     """
-    if now - failure.started_at < timedelta(minutes=_threshold_minutes(failure.kind)):
+    if now - failure.started_at < timedelta(minutes=check.threshold_minutes()):
         return
 
-    subject = failure.get_kind_display()
-    body = render_to_string(
-        "wis2watchcore/email/hard_failure.txt",
-        {
-            "failure": failure,
-            "now": now,
-            "recovered": False,
-            "overview_url": admin_url("node_overview"),
-        },
-    )
-
-    if not notify(subject, body, alert_recipients()):
+    if not _send(failure, now=now, recovered=False):
         return
 
     failure.notified_at = now
@@ -190,7 +178,9 @@ def _announce(failure, *, now, counts):
 
     counts.announced += 1
 
-    logger.error("[ALERTS] %s since %s: %s", failure.kind, failure.started_at, failure.detail)
+    logger.error(
+        "[ALERTS] %s since %s: %s", failure.kind, failure.started_at, failure.detail
+    )
 
 
 def _clear(failure, *, now, counts):
@@ -208,32 +198,42 @@ def _clear(failure, *, now, counts):
     if failure.notified_at is None:
         return
 
-    subject = _("%(failure)s -- recovered") % {"failure": failure.get_kind_display()}
+    _send(failure, now=now, recovered=True)
+
+    logger.info("[ALERTS] %s cleared after %s", failure.kind, now - failure.started_at)
+
+
+def _send(failure, *, now, recovered):
+    """Put one failure, beginning or ending, in front of whoever is watching.
+
+    Both ends of an outage are the same message about the same thing, so they
+    are written once and told apart by a flag: what a reader needs is the
+    failure, when it began, and -- for the second message -- that everything
+    the tool said in between is worth reading again.
+    """
+    subject = failure.get_kind_display()
+
+    if recovered:
+        subject = _("%(failure)s -- recovered") % {"failure": subject}
+
     body = render_to_string(
         "wis2watchcore/email/hard_failure.txt",
         {
             "failure": failure,
             "now": now,
-            "recovered": True,
+            "recovered": recovered,
             "overview_url": admin_url("node_overview"),
         },
     )
 
-    notify(subject, body, alert_recipients())
-
-    logger.info("[ALERTS] %s cleared after %s", failure.kind, now - failure.started_at)
-
-
-def _threshold_minutes(kind):
-    """How long a failure of this kind must last before it is announced."""
-    if kind == HardFailure.GLOBAL_BROKER_LOST:
-        return broker_outage_minutes()
-
-    return ingestion_stall_minutes()
+    return notify(subject, body, alert_recipients())
 
 
 def _global_broker_symptom(*, now):
     """Whether anything is currently carrying the region's traffic to us.
+
+    Args:
+        now: unused; taken so that every check is asked in the same way.
 
     Read from what the supervisor recorded about its own connections, which
     means this can only ever speak about a supervisor that is running. A
@@ -242,6 +242,14 @@ def _global_broker_symptom(*, now):
 
     One Global Broker still connected is enough. The others are redundancy,
     and a redundant connection being down is not a region gone unwatched.
+
+    Nothing here can say when the connection dropped, so nothing here tries.
+    A source's ``last_connected_at`` is when it last came up, written on
+    connection and left standing afterwards: a broker up for six hours and
+    down for thirty seconds carries a stamp six hours old, and timing the
+    outage from it would announce every blip on the next beat -- which is
+    exactly what the threshold exists to prevent. So the outage begins when a
+    check first found it, and the beat is what bounds how much later that is.
     """
     watched = MessageSource.objects.connections().filter(
         source_type=MessageSource.GLOBAL_BROKER, is_active=True
@@ -256,20 +264,23 @@ def _global_broker_symptom(*, now):
         detail="; ".join(
             f"{source.name} ({source.host}:{source.port}): "
             f"{source.last_error or 'disconnected'}"
+            f"{_last_connected(source)}"
             for source in attempted
         ),
-        # The most recent connection any of them held. What is being timed is
-        # the region going unwatched, which began when the last of them
-        # dropped rather than when the first did.
-        since=max(
-            (
-                source.last_connected_at
-                for source in attempted
-                if source.last_connected_at
-            ),
-            default=None,
-        ),
     )
+
+
+def _last_connected(source):
+    """When a broker was last seen to come up, for a reader to judge by.
+
+    Reported rather than timed against. It says how long this connection had
+    been working, which is worth knowing about a broker that has just started
+    refusing, and nothing at all about when it stopped.
+    """
+    if not source.last_connected_at:
+        return " (never connected)"
+
+    return f" (last connected {source.last_connected_at:%Y-%m-%d %H:%M} UTC)"
 
 
 def _ingestion_symptom(*, now):
@@ -283,6 +294,11 @@ def _ingestion_symptom(*, now):
     Any source counts. One centre's origin broker still delivering is not a
     healthy region, but it is not a stall either, and this alert exists for
     the case where nothing is arriving at all.
+
+    Unlike the broker check, this one can date its own failure: the moment the
+    last message arrived is the moment ingestion stopped. An installation that
+    has never ingested anything has no such moment, and is timed from when it
+    was first looked at instead.
     """
     arrived = (
         NotificationMessage.objects.order_by("-received_datetime")
@@ -304,3 +320,35 @@ def _ingestion_symptom(*, now):
         detail=f"Nothing has been ingested since {arrived:%Y-%m-%d %H:%M} UTC",
         since=arrived,
     )
+
+
+@dataclass(frozen=True)
+class HardFailureCheck:
+    """One way this tool stops working: how it is looked for, and how long it
+    is given before anybody is told.
+
+    The two are held as a list for the same reason the gap reports are: a
+    third kind of breakage should be one entry rather than an edit to a
+    branch in the announcing, another in the checking, and a third somebody
+    forgets. What is left hard-wired is the pair of choices on the model,
+    which is what the rows are read back by.
+    """
+
+    kind: str
+    look_for: Callable[..., Symptom]
+    threshold_minutes: Callable[[], int]
+
+
+#: The failures worth interrupting somebody for, in the order they are checked.
+HARD_FAILURE_CHECKS = (
+    HardFailureCheck(
+        kind=HardFailure.GLOBAL_BROKER_LOST,
+        look_for=_global_broker_symptom,
+        threshold_minutes=broker_outage_minutes,
+    ),
+    HardFailureCheck(
+        kind=HardFailure.INGESTION_STALLED,
+        look_for=_ingestion_symptom,
+        threshold_minutes=ingestion_stall_minutes,
+    ),
+)

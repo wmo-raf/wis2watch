@@ -403,6 +403,19 @@ WIS2WATCH_ALERT_RECIPIENTS = env.list("WIS2WATCH_ALERT_RECIPIENTS", default=[])
 WIS2WATCH_BROKER_OUTAGE_MINUTES = env.int("WIS2WATCH_BROKER_OUTAGE_MINUTES", 5)
 WIS2WATCH_INGESTION_STALL_MINUTES = env.int("WIS2WATCH_INGESTION_STALL_MINUTES", 15)
 
+# How many of a report's findings one digest names before linking to the rest.
+# Nothing is dropped -- what is left out is counted and the report is linked --
+# but past a couple of dozen lines an email stops being read at all.
+WIS2WATCH_DIGEST_SAMPLE_SIZE = env.int("WIS2WATCH_DIGEST_SAMPLE_SIZE", 20)
+
+# How long a finding may be absent from its report before the digest calls it
+# cleared, in hours. A report can stop listing a finding without the problem
+# having gone anywhere -- propagation gaps are withheld for a centre whose own
+# broker is unreachable, and a quiet centre falls out of the attribution
+# window -- and announcing those as fixed, then again as new when they return,
+# is exactly what a digest must not do.
+WIS2WATCH_FINDING_GRACE_HOURS = env.int("WIS2WATCH_FINDING_GRACE_HOURS", 48)
+
 # Where the digest and the alerts are sent from. Without a mail host nothing
 # is sent at all, which is why the recipients above are the setting an
 # installation is most likely to have forgotten: the tool goes on finding
