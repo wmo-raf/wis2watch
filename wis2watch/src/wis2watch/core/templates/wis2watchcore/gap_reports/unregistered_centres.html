@@ -1,0 +1,37 @@
+{% extends "wis2watchcore/gap_reports/base.html" %}
+
+{% load i18n %}
+
+{% block report_note %}
+    <p class="report-note">
+        {% trans "Found by the wildcard sweep, which listens past the registry: a centre here is publishing to WIS2 while being invisible to anything that reads a catalogue." %}
+    </p>
+{% endblock %}
+
+{% block table_head %}
+    <th>{% trans "Centre" %}</th>
+    <th>{% trans "Country" %}</th>
+    <th>{% trans "Seen publishing on" %}</th>
+    <th>{% trans "First seen" %}</th>
+    <th>{% trans "Last seen" %}</th>
+    <th>{% trans "Unregistered for" %}</th>
+{% endblock %}
+
+{% block table_row %}
+    <td><code>{{ row.centre_id }}</code></td>
+    <td>{{ row.country_name|default:"—" }}</td>
+    <td class="wrapping"><code>{{ row.sample_topic|default:"—" }}</code></td>
+    <td>{{ row.first_seen_at|date:"Y-m-d H:i" }}</td>
+    <td>{{ row.last_seen_at|date:"Y-m-d H:i" }}</td>
+    <td>
+        {% if row.hours_unregistered is not None %}
+            {% blocktrans with hours=row.hours_unregistered|floatformat:1 %}{{ hours }}h{% endblocktrans %}
+        {% else %}
+            —
+        {% endif %}
+    </td>
+{% endblock %}
+
+{% block empty_message %}
+    {% trans "Every centre heard publishing has a discovery catalogue record" %}
+{% endblock %}

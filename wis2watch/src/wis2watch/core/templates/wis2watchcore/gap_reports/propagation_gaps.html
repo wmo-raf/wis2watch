@@ -1,0 +1,44 @@
+{% extends "wis2watchcore/gap_reports/base.html" %}
+
+{% load i18n %}
+
+{% block report_note %}
+    <p class="report-note">
+        {% trans "Each row is one notification, named by the UUID both vantage points carry, so it can be taken to the centre as it stands." %}
+    </p>
+{% endblock %}
+
+{% block table_head %}
+    <th>{% trans "Centre" %}</th>
+    <th>{% trans "Dataset" %}</th>
+    <th>{% trans "Topic" %}</th>
+    <th>{% trans "Notification" %}</th>
+    <th>{% trans "Published" %}</th>
+    <th>{% trans "Missing for" %}</th>
+{% endblock %}
+
+{% block table_row %}
+    <td>
+        <a href="{% url 'node_details' row.node_id %}"><code>{{ row.centre_id }}</code></a>
+    </td>
+    <td>{{ row.dataset_title|default:"—" }}</td>
+    <td class="wrapping"><code>{{ row.topic }}</code></td>
+    <td class="wrapping"><code>{{ row.notification_id }}</code></td>
+    <td>
+        {{ row.published_at|date:"Y-m-d H:i" }}
+        <div class="row-detail">
+            {% blocktrans with seen=row.observed_at_origin|date:"Y-m-d H:i" %}seen at origin {{ seen }}{% endblocktrans %}
+        </div>
+    </td>
+    <td>
+        {% if row.hours_missing is not None %}
+            {% blocktrans with hours=row.hours_missing|floatformat:1 %}{{ hours }}h{% endblocktrans %}
+        {% else %}
+            —
+        {% endif %}
+    </td>
+{% endblock %}
+
+{% block empty_message %}
+    {% trans "Everything published at a reachable centre's own broker has reached the Global Broker" %}
+{% endblock %}

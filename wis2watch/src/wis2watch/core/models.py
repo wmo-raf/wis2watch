@@ -218,6 +218,34 @@ class MessageSourceQuerySet(models.QuerySet):
         """
         return self.filter(carried_by__isnull=True)
 
+    def origin_brokers(self):
+        """The nodes' own brokers this tool is currently meant to be watching.
+
+        A broker switched off in the admin is not one of them: reachability is
+        only ever what the last live connection recorded, so a source nothing
+        is dialling any more carries an answer that has since gone stale.
+        """
+        return self.filter(
+            source_type=MessageSource.ORIGIN_BROKER,
+            is_active=True,
+            node__isnull=False,
+        )
+
+    def watched_origins(self):
+        """The origin brokers whose view of their centre can be trusted now.
+
+        What decides whether a centre may be judged on the difference between
+        its own broker and the Global Broker -- and so is asked both by the
+        evaluation that records propagation gaps and by the report that lists
+        them. Written once, because a gap recorded while a broker answered and
+        then reported after it went dark is exactly the finding neither of them
+        should stand behind.
+
+        A null reachability is "not attempted yet", and is no more a licence to
+        judge a centre than a failure is.
+        """
+        return self.origin_brokers().filter(is_reachable=True)
+
 
 class MessageSource(TimeStampedModel):
     """

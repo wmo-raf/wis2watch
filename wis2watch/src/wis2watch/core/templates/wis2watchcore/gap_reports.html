@@ -1,0 +1,90 @@
+{% extends "wagtailadmin/generic/base.html" %}
+
+{% load i18n wagtailadmin_tags %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .reports-lead {
+            margin: 20px 0 25px;
+            color: #555;
+            max-width: 70ch;
+        }
+
+        .report-list {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 15px;
+        }
+
+        .report-card {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px 20px;
+        }
+
+        .report-card-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 15px;
+        }
+
+        .report-title {
+            font-weight: 600;
+            font-size: 1.05em;
+        }
+
+        .report-count {
+            display: inline-block;
+            padding: 3px 12px;
+            border-radius: 3px;
+            font-weight: 600;
+            background: #eee;
+            color: #555;
+        }
+
+        .report-count-found {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .report-description {
+            margin: 10px 0 0;
+            color: #555;
+            font-size: 0.9em;
+        }
+
+        .reports-back {
+            margin-top: 30px;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <p class="reports-lead">
+        {% trans "What the overview cannot show: stations declared and never heard, traffic nobody declared, notifications the world never received, and centres publishing that no catalogue has indexed." %}
+    </p>
+
+    <ul class="report-list">
+        {% for summary in summaries %}
+            <li class="report-card">
+                <div class="report-card-head">
+                    <a class="report-title" href="{% url 'gap_report' summary.slug %}">{{ summary.title }}</a>
+                    <span class="report-count {% if summary.count %}report-count-found{% endif %}">
+                        {{ summary.count }}
+                    </span>
+                </div>
+                <p class="report-description">{{ summary.description }}</p>
+            </li>
+        {% endfor %}
+    </ul>
+
+    <p class="reports-back">
+        <a href="{{ overview_url }}">{% trans "Back to the node overview" %}</a>
+    </p>
+{% endblock %}

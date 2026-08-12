@@ -5,6 +5,8 @@ from wagtail.snippets.models import register_snippet
 
 from wis2watch.core.viewsets import DatasetViewSet, admin_viewsets
 from .views import (
+    gap_report_index,
+    gap_report_table,
     get_node_stations_as_csv,
     node_details,
     node_overview_table,
@@ -16,6 +18,8 @@ from .views import (
 def urlconf_wis2watch():
     return [
         path("node-overview/", node_overview_table, name="node_overview"),
+        path("gap-reports/", gap_report_index, name="gap_reports"),
+        path("gap-reports/<slug:slug>/", gap_report_table, name="gap_report"),
         path("node-detail/<int:node_id>/", node_details, name="node_details"),
         path('node/<int:node_id>/stations/preview/', preview_node_stations_csv,
              name='preview_node_stations_csv'),
@@ -41,6 +45,17 @@ def construct_homepage_summary_items(request, summary_items):
 def register_overview_menu_item():
     """The headline table comes first: it is what someone opens the tool for."""
     return MenuItem('Overview', reverse('node_overview'), icon_name='list-ul', order=90)
+
+
+@hooks.register('register_admin_menu_item')
+def register_gap_reports_menu_item():
+    """Next to the overview, because it answers what the overview cannot.
+
+    The overview says how the centres somebody registered are doing. These say
+    what is missing from that picture entirely -- and a report reachable only
+    from a page you had to know to look at is one nobody reads.
+    """
+    return MenuItem('Gap reports', reverse('gap_reports'), icon_name='warning', order=91)
 
 
 @hooks.register("register_admin_viewset")

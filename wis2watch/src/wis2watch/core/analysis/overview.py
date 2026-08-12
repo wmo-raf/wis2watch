@@ -29,7 +29,7 @@ lookups rather than a scan that grows with the region's traffic.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 from django.conf import settings
 from django.db.models import Count, Exists, OuterRef, Subquery, Sum
@@ -45,7 +45,7 @@ from ..models import (
     StationSource,
     WIS2Node,
 )
-from ..rollups import floor_to_hour
+from ..rollups import window_start
 from .reachability import OriginReachability
 from .silence import BEFORE_ANYTHING, NodeSilence, Silence, hours_between, silence_by_node
 from .staleness import Staleness, default_stale_after_hours
@@ -143,18 +143,6 @@ def default_volume_hours():
     return getattr(settings, "WIS2WATCH_VOLUME_WINDOW_HOURS", DEFAULT_VOLUME_HOURS)
 
 
-def volume_window_start(now, volume_hours):
-    """The first hourly bucket the volume column counts.
-
-    Counted in whole buckets ending with the hour in progress, so the window
-    is the same length whatever minute the page is opened at. Measuring back
-    from the current instant instead would either take in a slice of an
-    extra hour or drop part of one, and a column headed "24h" would mean
-    something slightly different each time it was read.
-    """
-    return floor_to_hour(now) - timedelta(hours=volume_hours - 1)
-
-
 def node_overview(
     *,
     now=None,
@@ -191,7 +179,7 @@ def node_overview(
 
     rows = [
         _row(node, now=now, stale_after=stale_after, silence=silence)
-        for node in _annotated_nodes(since=volume_window_start(now, hours))
+        for node in _annotated_nodes(since=window_start(now, hours))
     ]
 
     if staleness is not None:

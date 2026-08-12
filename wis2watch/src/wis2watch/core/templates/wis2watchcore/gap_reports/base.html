@@ -1,0 +1,127 @@
+{% extends "wagtailadmin/generic/base.html" %}
+
+{% load i18n wagtailadmin_tags %}
+
+{% comment %}
+    The frame every gap report shares: what the report is for, its findings a
+    page at a time, and what it says when it has found nothing. Only the
+    columns differ between the five, so only the columns are overridden --
+    otherwise a report added later would arrive looking like a different tool.
+{% endcomment %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .report-description {
+            margin: 20px 0;
+            color: #555;
+            max-width: 80ch;
+        }
+
+        .report-note {
+            margin: 0 0 20px;
+            color: #666;
+            font-size: 0.9em;
+            max-width: 80ch;
+        }
+
+        .report-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+        }
+
+        .report-table th {
+            background: #f5f5f5;
+            padding: 10px;
+            text-align: left;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid #ddd;
+            font-size: 0.9em;
+        }
+
+        .report-table td {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            font-size: 0.9em;
+        }
+
+        .report-table td.numeric,
+        .report-table th.numeric {
+            text-align: right;
+        }
+
+        .report-table td.wrapping {
+            max-width: 40ch;
+            word-break: break-all;
+        }
+
+        .row-detail {
+            margin-top: 4px;
+            color: #555;
+            font-size: 0.8em;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 3px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+
+        .badge-warning {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .badge-quiet {
+            background: #eee;
+            color: #555;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 50px;
+            color: #999;
+        }
+
+        .report-back {
+            margin-top: 30px;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    <p class="report-description">{{ report.description }}</p>
+
+    {% block report_note %}{% endblock %}
+
+    {% if rows %}
+        <table class="listing report-table">
+            <thead>
+            <tr>
+                {% block table_head %}{% endblock %}
+            </tr>
+            </thead>
+            <tbody>
+            {% for row in rows %}
+                <tr>
+                    {% block table_row %}{% endblock %}
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+
+        {% include "wagtailadmin/shared/pagination_nav.html" with items=page_obj %}
+    {% else %}
+        <div class="empty-state">
+            <p>{% block empty_message %}{% trans "Nothing to report" %}{% endblock %}</p>
+        </div>
+    {% endif %}
+
+    <p class="report-back">
+        <a href="{% url 'gap_reports' %}">{% trans "Back to the gap reports" %}</a>
+    </p>
+{% endblock %}

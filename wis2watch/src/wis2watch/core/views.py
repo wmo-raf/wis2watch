@@ -1,18 +1,33 @@
 import csv
 from io import StringIO
 
-from django.http import HttpResponse
+from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404, render
 from django.urls import reverse_lazy
 from django.utils.translation import gettext as _
 from wagtail.admin import messages
+from wagtail.admin.paginator import WagtailPaginator
 
-from .analysis import Staleness, default_volume_hours, node_detail, node_overview
+from .analysis import (
+    GAP_REPORTS,
+    Staleness,
+    default_attribution_window_hours,
+    default_volume_hours,
+    gap_report,
+    gap_report_summaries,
+    node_detail,
+    node_overview,
+)
 from .forms import SyncNodeForm
 from .models import SyncLog, WIS2Node
 from .node_stations import sync_node_stations
 from .stations import node_stations_as_csv
 from .viewsets import WIS2NodeViewSet
+
+#: How many findings one page of a gap report shows. A report is bounded by
+#: its filters rather than by truncation -- everything it found is reachable by
+#: paging -- so this is only about how much of it arrives at once.
+GAP_REPORT_PAGE_SIZE = 50
 
 
 def node_overview_table(request):
@@ -38,9 +53,87 @@ def node_overview_table(request):
         "staleness": staleness,
         "order": order,
         "staleness_choices": Staleness.CHOICES,
+        # Named here rather than only on their own index, because a report
+        # nobody arrives at reports nothing: this table is what somebody has
+        # open when they start wondering what else is wrong.
+        "gap_reports": GAP_REPORTS,
     }
 
     return render(request, 'wis2watchcore/node_overview.html', context)
+
+
+def gap_report_index(request):
+    """Which of the gap reports is worth opening, and what each one finds.
+
+    Counts rather than findings: the index exists to point at a report, and
+    reading five reports in full to show five numbers would make the cheapest
+    page in the tool the most expensive.
+    """
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            # The leaf carries no URL at all rather than an empty one, which
+            # the breadcrumbs component renders as a link to the page you are
+            # already on.
+            {"url": None, "label": _("Gap reports")},
+        ],
+        "header_title": _("Gap reports"),
+        "header_icon": "warning",
+        "summaries": gap_report_summaries(),
+        "overview_url": reverse_lazy("node_overview"),
+    }
+
+    return render(request, 'wis2watchcore/gap_reports.html', context)
+
+
+def gap_report_table(request, slug):
+    """One gap report, in full, a page at a time.
+
+    Args:
+        request: HTTP request object.
+        slug (str): which of the reports to show.
+
+    Returns:
+        HttpResponse: the report's findings, rendered.
+    """
+    report = gap_report(slug)
+
+    if report is None:
+        raise Http404(f"no gap report is called {slug}")
+
+    findings = report.find_rows()
+    paginator = WagtailPaginator(findings, GAP_REPORT_PAGE_SIZE)
+    page = paginator.get_page(request.GET.get("p"))
+
+    context = {
+        "breadcrumbs_items": [
+            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+            {"url": reverse_lazy("gap_reports"), "label": _("Gap reports")},
+            {"url": None, "label": report.title},
+        ],
+        "header_title": report.title,
+        "header_icon": "warning",
+        "report": report,
+        "rows": page,
+        "page_obj": page,
+        "elided_page_range": paginator.get_elided_page_range(page.number),
+        # Carried for every report though only the unattributed one quotes it:
+        # its note has to say what window the share was worked out over, and a
+        # share whose window is unstated is a number nobody can check.
+        "attribution_hours": default_attribution_window_hours(),
+    }
+
+    return render(request, _gap_report_template(slug), context)
+
+
+def _gap_report_template(slug):
+    """The template one report's findings are laid out by.
+
+    Named after the report rather than mapped to it, because every report has
+    columns of its own and a mapping kept beside the reports is one more place
+    to forget when a sixth is added.
+    """
+    return f"wis2watchcore/gap_reports/{slug.replace('-', '_')}.html"
 
 
 def preview_node_stations_csv(request, node_id):

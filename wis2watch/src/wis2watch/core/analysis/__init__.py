@@ -12,6 +12,24 @@ confident wrong answer rather than an exception, and only real rows expose
 them.
 """
 
+from .gaps import (
+    GAP_REPORTS,
+    GapReport,
+    GapReportSummary,
+    PropagationGapRow,
+    SilentStationRow,
+    UnattributedRateRow,
+    UndeclaredStationRow,
+    UnregisteredCentreRow,
+    default_attribution_window_hours,
+    gap_report,
+    gap_report_summaries,
+    propagation_gaps,
+    stations_declared_but_silent,
+    stations_transmitting_undeclared,
+    unattributed_rates,
+    unregistered_centres,
+)
 from .node_detail import (
     NodeDatasetRow,
     NodeDetail,
@@ -40,9 +58,12 @@ from .silence import (
 from .staleness import Staleness
 
 __all__ = [
+    "GAP_REPORTS",
     "CachePickup",
     "DatasetSilenceRow",
     "Expectation",
+    "GapReport",
+    "GapReportSummary",
     "NodeDatasetRow",
     "NodeDetail",
     "NodeOverviewRow",
@@ -50,14 +71,27 @@ __all__ = [
     "NodeStationRow",
     "OriginBrokerState",
     "OriginReachability",
+    "PropagationGapRow",
     "Silence",
+    "SilentStationRow",
     "Staleness",
     "StationStanding",
     "SyncRunRow",
     "SyncScope",
+    "UnattributedRateRow",
+    "UndeclaredStationRow",
+    "UnregisteredCentreRow",
     "dataset_silence",
+    "default_attribution_window_hours",
     "default_volume_hours",
+    "gap_report",
+    "gap_report_summaries",
     "node_detail",
     "node_overview",
+    "propagation_gaps",
     "silence_by_node",
+    "stations_declared_but_silent",
+    "stations_transmitting_undeclared",
+    "unattributed_rates",
+    "unregistered_centres",
 ]
