@@ -36,6 +36,14 @@ setting is about reading a node's registry, where a bad certificate is an
 obstacle between this tool and the metadata it wants; here the certificate is
 one of the things being tested, and turning verification off would suppress
 exactly the finding the probe exists to make.
+
+What is asked for is the centre's own advertised file, so the Global Caches'
+republication of it is left out of the sample. A cached copy carries the
+centre's node and its publication time but advertises the cache's copy of the
+file, at the cache's address: probing that would measure a Global Cache's
+retrievability and file the answer against the centre, which is the opposite of
+the question. It would also point the whole region's probe volume at a handful
+of cache hosts, outside any per-node bound.
 """
 
 import logging
@@ -47,7 +55,7 @@ import requests
 from django.conf import settings
 from django.utils import timezone as dj_timezone
 
-from .models import LinkProbe, NotificationMessage
+from .models import LinkProbe, MessageSource, NotificationMessage, SyncLog
 from .rollups import floor_to_hour
 
 logger = logging.getLogger(__name__)
@@ -115,8 +123,8 @@ class ProbeResult:
     """
 
     outcome: str
-    status_code: int = None
-    latency_ms: int = None
+    status_code: int | None = None
+    latency_ms: int | None = None
     error: str = ""
 
 
@@ -128,8 +136,13 @@ class ProbeCounts:
     server refusing a headers-only request has said nothing about the file, and
     counting that as a failure would report this tool's own limitation as the
     centre's.
+
+    ``sampled`` and ``probed`` differ only when a run died partway, which is
+    the whole reason both are kept: the sync log can then say how much of the
+    sample it got through.
     """
 
+    sampled: int = 0
     probed: int = 0
     retrievable: int = 0
     unretrievable: int = 0
@@ -153,6 +166,24 @@ class ProbeCounts:
             f"probed={self.probed} retrievable={self.retrievable} "
             f"unretrievable={self.unretrievable} undetermined={self.undetermined}"
         )
+
+    def close(self, sync_log, status, error_message=""):
+        """Close a sync log off with these counts.
+
+        Only what the run did is recorded here -- how many links it took and
+        how many it got through. What the answers were belongs on the probe
+        rows: a run in which every file was missing did its job perfectly, and
+        a sync log saying otherwise would confuse the tool's health with the
+        region's.
+        """
+        sync_log.status = status
+        sync_log.error_message = error_message
+        sync_log.items_found = self.sampled
+        sync_log.items_created = self.probed
+        sync_log.completed_at = dj_timezone.now()
+        sync_log.save()
+
+        return sync_log
 
 
 def default_sample_size():
@@ -246,6 +277,33 @@ def _elapsed_ms(started):
     return round((monotonic() - started) * 1000)
 
 
+def files_advertised_in(hour):
+    """Every notification advertising a file the centres themselves published,
+    in one UTC hour.
+
+    What both the fan-out and the sampling start from, so that "a file this
+    tool may ask a centre for" is decided once. Two exclusions make it that
+    rather than simply an hour of traffic:
+
+    A Global Cache's republication is left out. It carries the centre's node
+    and its publication time, but the link on it is the cache's copy at the
+    cache's address, and an answer about that filed against the centre would
+    be a finding about the wrong machine.
+
+    Traffic belonging to no registered centre is left out too. The bound is per
+    node, and what a sweep turns up has no node to bound it against.
+    """
+    return (
+        NotificationMessage.objects.filter(
+            node__isnull=False,
+            time__gte=hour,
+            time__lt=hour + timedelta(hours=1),
+        )
+        .exclude(source__source_type=MessageSource.GLOBAL_CACHE)
+        .exclude(canonical_link="")
+    )
+
+
 def sample_links(node, *, hour, limit):
     """The links to ask this centre for, at most ``limit`` of them.
 
@@ -255,12 +313,15 @@ def sample_links(node, *, hour, limit):
     published first: a file advertised twenty minutes ago is the one whose
     absence anybody would want to hear about soonest.
 
+    Everything on a topic no dataset claims counts as one bucket and takes one
+    slot between them, rather than a slot each. Unknown-topic traffic is worth
+    probing -- nobody else is watching it -- but a centre publishing an hour of
+    it on topics the registry has never heard of would otherwise crowd out
+    every dataset the registry does know.
+
     Links already probed for this node and hour are left out, so that a run
     which follows a short one tops the sample up rather than asking again for
     what has been asked for.
-
-    Traffic belonging to no registered centre is not sampled at all. The bound
-    is per node, and a sweep's findings have no node to bound them against.
     """
     if limit <= 0:
         return []
@@ -270,12 +331,8 @@ def sample_links(node, *, hour, limit):
     )
 
     latest_per_dataset = (
-        NotificationMessage.objects.filter(
-            node=node,
-            time__gte=hour,
-            time__lt=hour + timedelta(hours=1),
-        )
-        .exclude(canonical_link="")
+        files_advertised_in(hour)
+        .filter(node=node)
         .order_by("dataset_id", "-time")
         .distinct("dataset_id")
         .values("dataset_id", "notification_id", "canonical_link", "time")
@@ -306,7 +363,13 @@ def probe_node_links(node, *, hour=None, now=None, sample_size=None, probe=None)
 
     Each answer is written down as it arrives rather than at the end, so a run
     that dies partway keeps what it learned, and the hour's allowance already
-    reflects what it spent.
+    reflects what it spent. Each carries the moment its own request was made,
+    which for a centre whose server hangs is minutes away from the moment the
+    run started and is what an operator would correlate their logs against.
+
+    The run is recorded as a sync log whether or not it found anything to ask
+    for, so that a centre's page can say the probes ran rather than leaving
+    "no findings" and "never checked" looking the same.
 
     ``probe`` is how a link is asked for, defaulting to the network.
     """
@@ -315,30 +378,46 @@ def probe_node_links(node, *, hour=None, now=None, sample_size=None, probe=None)
     bound = default_sample_size() if sample_size is None else sample_size
     probe = probe or probe_link
 
+    sync_log = SyncLog.objects.create(
+        node=node,
+        sync_type=SyncLog.LINK_PROBES,
+        status=SyncLog.FAILED,
+        started_at=now,
+    )
     counts = ProbeCounts()
     already_spent = LinkProbe.objects.filter(node=node, hour=hour).count()
 
-    for row in sample_links(node, hour=hour, limit=bound - already_spent):
-        result = probe(row["canonical_link"])
+    try:
+        sampled = sample_links(node, hour=hour, limit=bound - already_spent)
+        counts.sampled = len(sampled)
 
-        LinkProbe.objects.create(
-            node=node,
-            dataset_id=row["dataset_id"],
-            notification_id=row["notification_id"],
-            url=row["canonical_link"],
-            outcome=result.outcome,
-            status_code=result.status_code,
-            latency_ms=result.latency_ms,
-            error=result.error,
-            hour=hour,
-            probed_at=now,
-        )
+        for row in sampled:
+            result = probe(row["canonical_link"])
 
-        counts.record(result.outcome)
+            LinkProbe.objects.create(
+                node=node,
+                dataset_id=row["dataset_id"],
+                notification_id=row["notification_id"],
+                url=row["canonical_link"],
+                outcome=result.outcome,
+                status_code=result.status_code,
+                latency_ms=result.latency_ms,
+                error=result.error,
+                hour=hour,
+                probed_at=dj_timezone.now(),
+            )
 
-    if counts.probed:
-        logger.info("Probed %s links for %s: %s", counts.probed, node.centre_id,
-                    counts.summary)
+            counts.record(result.outcome)
+    except Exception as exc:
+        logger.error("Link probes failed for %s: %s", node.centre_id, exc)
+        counts.close(sync_log, SyncLog.FAILED, str(exc))
+
+        raise
+
+    counts.close(sync_log, SyncLog.SUCCESS)
+
+    logger.info("Probed %s links for %s: %s", counts.probed, node.centre_id,
+                counts.summary)
 
     return counts
 
@@ -349,13 +428,4 @@ def nodes_advertising_links(hour):
     Read once by the fan-out rather than discovered by each node's own run, so
     that a region of quiet centres does not queue a task apiece to find nothing.
     """
-    return (
-        NotificationMessage.objects.filter(
-            node__isnull=False,
-            time__gte=hour,
-            time__lt=hour + timedelta(hours=1),
-        )
-        .exclude(canonical_link="")
-        .values_list("node_id", flat=True)
-        .distinct()
-    )
+    return files_advertised_in(hour).values_list("node_id", flat=True).distinct()

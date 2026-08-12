@@ -1,19 +1,23 @@
-"""Canonical link probes: the sampling, and what the answers are read as.
+"""Canonical link probes: what gets asked for, and what the answers are read as.
 
-This is the failure every message-flow metric misses. A notification published
-perfectly, propagating perfectly, counting towards every green number the tool
-holds -- and the file it advertises cannot be fetched. Two things have to hold
-for the finding to be worth anything.
+Three things could go wrong here quietly, and they are what these tests are
+about.
 
-The sample has to stay bounded. This is the one job that makes requests of the
-centres being monitored rather than of a broker, and a diagnostic tool that
+The sample could stop being bounded. This is the one job that makes requests of
+the centres being monitored rather than of a broker, and a diagnostic tool that
 puts a centre's web server under load is a fault report of its own.
 
-And the answers have to be told apart. "Could not be fetched" sends nobody
-anywhere. A 404 goes to whoever publishes the data, an expired certificate to
-whoever runs the web server, a connection that never opens to whoever runs the
-network -- and a server that will not answer a headers-only request at all is
-this tool's limitation rather than any finding about the centre.
+The wrong file could be asked for. A Global Cache's republication carries the
+centre's node and its publication time but points at the cache's own copy;
+probing that and filing the answer against the centre would report a finding
+about the wrong machine entirely, and nothing about the row would say so.
+
+And the answers could stop being told apart. "Could not be fetched" sends
+nobody anywhere. A 404 goes to whoever publishes the data, an expired
+certificate to whoever runs the web server, a connection that never opens to
+whoever runs the network -- and a server that will not answer a headers-only
+request at all is this tool's limitation rather than any finding about the
+centre.
 """
 
 from datetime import timedelta
@@ -21,12 +25,14 @@ from unittest import mock
 
 import requests
 from django.test import TestCase, override_settings
+from django.utils import timezone as dj_timezone
 
 from wis2watch.core.models import (
     Dataset,
     LinkProbe,
     MessageSource,
     NotificationMessage,
+    SyncLog,
     WIS2Node,
 )
 from wis2watch.core.probes import (
@@ -129,8 +135,14 @@ class SampledHourTests(ProbeTestCase):
     def test_a_run_samples_the_last_hour_that_is_over(self):
         self.assertEqual(probed_hour(now=NOW), HOUR)
 
-    def test_the_hour_is_taken_in_utc_whatever_the_deployment_runs_in(self):
+    def test_the_hour_in_progress_is_never_sampled_however_late_the_run(self):
         self.assertEqual(probed_hour(now=at("2026-08-11T12:59:59")), HOUR)
+
+    @override_settings(TIME_ZONE="Africa/Nairobi")
+    def test_the_hour_is_a_utc_one_whatever_the_deployment_runs_in(self):
+        """A deployment configured for local time would otherwise sample a
+        window three hours out, which no exception would ever surface."""
+        self.assertEqual(probed_hour(now=NOW), HOUR)
 
     def test_links_advertised_in_the_sampled_hour_are_probed(self):
         self.advertised("in-the-hour", published=HOUR + timedelta(minutes=30))
@@ -288,6 +300,65 @@ class SampleSelectionTests(ProbeTestCase):
             "https://data.example.int/unclaimed.bufr",
         ])
 
+    def test_everything_on_unclaimed_topics_shares_one_slot(self):
+        """Worth probing, but a centre publishing an hour of traffic on topics
+        the registry has never heard of must not crowd out the ones it has."""
+        for index in range(5):
+            self.advertised(
+                f"unclaimed-{index}",
+                dataset=None,
+                published=HOUR + timedelta(minutes=index),
+            )
+        self.advertised("claimed")
+
+        self.run_probes(sample_size=5)
+
+        self.assertEqual(
+            self.probed_urls(),
+            [
+                "https://data.example.int/claimed.bufr",
+                "https://data.example.int/unclaimed-4.bufr",
+            ],
+        )
+
+    def cache_source(self):
+        """The Global Cache pickup carried on the Global Broker's connection."""
+        return MessageSource.objects.create(
+            name="Global Cache",
+            source_type=MessageSource.GLOBAL_CACHE,
+            carried_by=self.global_broker,
+            host="",
+        )
+
+    def test_a_centre_heard_only_through_a_cache_is_not_probed(self):
+        """A cached copy carries the centre's node and publication time but
+        advertises the cache's own copy, at the cache's address. Asking for
+        that would measure the cache and file the answer against the centre --
+        a finding about the wrong machine, with nothing on the row to say so."""
+        self.advertised(
+            "cached-only", link="https://cache.example.int/a.bufr",
+            source=self.cache_source(),
+        )
+
+        self.run_probes(sample_size=5)
+
+        self.assertEqual(self.probed_urls(), [])
+
+    def test_a_cached_copy_never_takes_a_slot_beside_the_centres_own_files(self):
+        """And so cannot point the region's whole probe volume at a handful of
+        cache hosts, outside any per-node bound."""
+        self.advertised("published", link="https://data.ke-meteo.int/a.bufr")
+        self.advertised(
+            "cached",
+            link="https://cache.example.int/b.bufr",
+            source=self.cache_source(),
+            dataset=self.dataset("marine"),
+        )
+
+        self.run_probes(sample_size=5)
+
+        self.assertEqual(self.probed_urls(), ["https://data.ke-meteo.int/a.bufr"])
+
 
 class RecordedProbeTests(ProbeTestCase):
     """What the row has to carry for the finding to be actionable."""
@@ -312,7 +383,21 @@ class RecordedProbeTests(ProbeTestCase):
         self.assertEqual(recorded.status_code, 404)
         self.assertEqual(recorded.latency_ms, 87)
         self.assertEqual(recorded.hour, HOUR)
-        self.assertEqual(recorded.probed_at, NOW)
+
+    def test_a_probe_is_stamped_with_when_its_own_request_was_made(self):
+        """Not with when the run started. A centre whose server hangs puts
+        minutes between the two, and the stamp is what an operator would
+        correlate their own logs against."""
+        self.advertised("slow-to-answer")
+
+        before = dj_timezone.now()
+        self.run_probes()
+        after = dj_timezone.now()
+
+        probed_at = LinkProbe.objects.get().probed_at
+
+        self.assertGreaterEqual(probed_at, before)
+        self.assertLessEqual(probed_at, after)
 
     def test_a_transport_failure_records_what_it_said(self):
         self.advertised("expired-cert")
@@ -355,6 +440,62 @@ class RecordedProbeTests(ProbeTestCase):
         self.assertEqual(counts.unretrievable, 0)
         self.assertEqual(counts.undetermined, 1)
         self.assertEqual(LinkProbe.objects.unretrievable().count(), 0)
+
+
+class RunRecordTests(ProbeTestCase):
+    """That the probes ran is itself something a centre's page has to say.
+
+    Otherwise "nothing wrong with this centre's files" and "this centre has
+    never been checked" are the same empty list, which is the failure mode this
+    whole ticket exists to close one level up.
+    """
+
+    def test_a_run_is_recorded_against_the_centre_it_asked(self):
+        self.advertised("one", dataset=self.dataset("a"))
+        self.advertised("two", dataset=self.dataset("b"))
+
+        self.run_probes()
+
+        recorded = SyncLog.objects.get()
+
+        self.assertEqual(recorded.node, self.kenya)
+        self.assertEqual(recorded.sync_type, SyncLog.LINK_PROBES)
+        self.assertEqual(recorded.status, SyncLog.SUCCESS)
+        self.assertEqual(recorded.items_found, 2)
+        self.assertEqual(recorded.items_created, 2)
+        self.assertIsNotNone(recorded.completed_at)
+
+    def test_a_run_that_found_nothing_to_ask_for_is_still_recorded(self):
+        """The centre published nothing this hour, which is not the same as the
+        probes having never run."""
+        self.run_probes()
+
+        recorded = SyncLog.objects.get()
+
+        self.assertEqual(recorded.status, SyncLog.SUCCESS)
+        self.assertEqual(recorded.items_found, 0)
+
+    def test_a_run_that_broke_says_so_and_says_why(self):
+        self.advertised("one")
+
+        def probe(url):
+            raise RuntimeError("the probe itself fell over")
+
+        with self.assertRaises(RuntimeError):
+            self.run_probes(probe=probe)
+
+        recorded = SyncLog.objects.get()
+
+        self.assertEqual(recorded.status, SyncLog.FAILED)
+        self.assertIn("fell over", recorded.error_message)
+
+    def test_what_the_answers_were_is_not_the_runs_own_health(self):
+        """A run in which every file was missing did its job perfectly."""
+        self.advertised("gone")
+
+        self.run_probes(probe=answering(LinkProbe.MISSING, status_code=404))
+
+        self.assertEqual(SyncLog.objects.get().status, SyncLog.SUCCESS)
 
 
 class ProbeRequestTests(NoNetworkTestCase):

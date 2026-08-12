@@ -1049,36 +1049,26 @@ class LinkProbeQuerySet(models.QuerySet):
     def unretrievable(self):
         """Probes that found the advertised file was not there to be had.
 
-        Everything except the two answers that are not the centre's problem: a
-        file that came back, and a server that would not answer a headers-only
-        request at all.
+        Everything the outcomes below do not excuse, so that an outcome added
+        later is a finding until somebody decides otherwise -- the safe way
+        round for a diagnostic, which should rather report something it cannot
+        classify than quietly drop it.
         """
-        return self.exclude(
-            outcome__in=[LinkProbe.RETRIEVABLE, LinkProbe.NOT_PROBEABLE]
-        )
+        return self.exclude(outcome__in=LinkProbe.NOT_THE_CENTRES_FAULT)
 
 
 class LinkProbe(models.Model):
     """What became of one lightweight request for a file a notification
     advertised.
 
-    This is the failure every message-flow metric misses. A notification is
-    published perfectly, propagates perfectly, and counts towards every green
-    number this tool holds -- and the file it points at cannot be fetched. The
-    only way to learn that is to ask for it.
-
-    Asking means a headers-only request: whether the file is there, what the
-    server said, how long it took and whether its certificate stands up. No
-    body is ever requested, and no hash is checked against the notification's,
-    which keeps this inside the boundary the tool draws around itself --
-    notifications only, never the data.
-
-    The outcome is what the row is for. "Could not be fetched" is not a
-    finding anyone can act on; a 404 goes to the centre's data publishing, an
-    expired certificate goes to whoever runs its web server, and a connection
-    that never opens goes to its network. So the transport failures are
-    distinguished from the HTTP answers, and both from a server that declines
-    headers-only requests -- which says nothing about the file at all.
+    Why this is asked at all, and how the sample is kept bounded, is
+    :mod:`wis2watch.core.probes`. What matters about the row is the outcome.
+    "Could not be fetched" is not a finding anyone can act on: a 404 goes to
+    the centre's data publishing, an expired certificate to whoever runs its
+    web server, a connection that never opens to its network. So the transport
+    failures are held apart from the HTTP answers, and both from a server that
+    declines headers-only requests -- which has said nothing about the file at
+    all, and is this tool's limitation rather than the centre's.
 
     ``hour`` is the UTC hour the sampled notifications were published in, kept
     beside the probe rather than derived from it, because it is what the
@@ -1115,6 +1105,13 @@ class LinkProbe(models.Model):
         (TIMEOUT, _("Timed out")),
         (BAD_URL, _("Link is not a fetchable URL")),
     ]
+
+    #: The two answers that say nothing against the centre: the file came back,
+    #: or the server would not answer a headers-only request at all and so
+    #: never spoke about the file. Named once because the counts a run reports
+    #: and the rows a report reads have to agree on it, and they are decided in
+    #: different modules.
+    NOT_THE_CENTRES_FAULT = (RETRIEVABLE, NOT_PROBEABLE)
 
     node = models.ForeignKey(
         WIS2Node,
@@ -1263,6 +1260,7 @@ class SyncLog(models.Model):
 
     CATALOGUE = "catalogue"
     DISCOVERY_METADATA = "discovery_metadata"
+    LINK_PROBES = "link_probes"
     NODE_STATIONS = "node_stations"
     OSCAR_STATIONS = "oscar_stations"
     WILDCARD_SWEEP = "wildcard_sweep"
@@ -1270,6 +1268,7 @@ class SyncLog(models.Model):
     SYNC_TYPE_CHOICES = [
         (CATALOGUE, _("Global Discovery Catalogue")),
         (DISCOVERY_METADATA, _("Discovery Metadata")),
+        (LINK_PROBES, _("Canonical Link Probes")),
         (NODE_STATIONS, _("Node Stations")),
         (OSCAR_STATIONS, _("OSCAR Stations")),
         (WILDCARD_SWEEP, _("Wildcard Sweep")),

@@ -14,12 +14,13 @@ from unittest import mock
 from django.test import TestCase
 
 from wis2watch.core.models import (
+    LinkProbe,
     MessageSource,
     NotificationMessage,
     SyncLog,
     WIS2Node,
 )
-from wis2watch.core.probes import probed_hour
+from wis2watch.core.probes import ProbeResult, probed_hour
 from wis2watch.core.tasks import (
     run_probe_canonical_links,
     run_probe_node_links,
@@ -125,28 +126,40 @@ class LinkProbeTaskTests(TestCase):
 
         self.assertEqual(self.queued(), [])
 
-    def test_every_centre_in_one_run_is_asked_for_the_same_hour(self):
+    def test_every_centre_in_one_run_probes_the_same_hour(self):
+        """A fan-out that let each child work out its own hour would, on a run
+        spilling over an hour boundary, check some centres twice and skip
+        others' hour entirely -- and the bound is counted per hour."""
         djibouti = WIS2Node.objects.create(centre_id="dj-anm", name="Djibouti ANM")
         self.advertised("kenyan", node=self.kenya)
-        self.advertised("djiboutian", node=djibouti)
+        self.advertised("djiboutian", node=djibouti, link="https://d.example.int/b")
 
-        self.queued()
+        with mock.patch(
+            "wis2watch.core.tasks.run_probe_node_links.delay",
+            side_effect=lambda *args: run_probe_node_links(*args),
+        ):
+            with mock.patch(
+                "wis2watch.core.probes.probe_link",
+                return_value=ProbeResult(outcome=LinkProbe.RETRIEVABLE),
+            ):
+                run_probe_canonical_links()
 
         self.assertEqual(
-            {call.args[1] for call in self.delay.call_args_list},
-            {self.hour.isoformat()},
+            set(LinkProbe.objects.values_list("node_id", "hour")),
+            {(self.kenya.id, self.hour), (djibouti.id, self.hour)},
         )
 
     def test_a_run_reports_what_it_came_to(self):
-        with mock.patch("wis2watch.core.tasks.probe_node_links") as probe:
-            probe.return_value.summary = "probed=2 retrievable=1"
+        self.advertised("published", node=self.kenya)
 
-            self.assertEqual(
-                run_probe_node_links(self.kenya.id, self.hour.isoformat()),
-                "probed=2 retrievable=1",
-            )
+        with mock.patch(
+            "wis2watch.core.probes.probe_link",
+            return_value=ProbeResult(outcome=LinkProbe.MISSING, status_code=404),
+        ):
+            summary = run_probe_node_links(self.kenya.id, self.hour.isoformat())
 
-        self.assertEqual(probe.call_args.kwargs["hour"], self.hour)
+        self.assertIn("probed=1", summary)
+        self.assertIn("unretrievable=1", summary)
 
 
 class OscarStationTaskTests(TestCase):

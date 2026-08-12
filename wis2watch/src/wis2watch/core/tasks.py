@@ -162,14 +162,21 @@ def run_evaluate_propagation():
     return counts.summary
 
 
-@shared_task
-def run_probe_node_links(node_id, hour):
+@app.task(base=Singleton, bind=True)
+def run_probe_node_links(self, node_id, hour):
     """Ask one centre for a bounded sample of the files it advertised.
 
     ``hour`` is passed in as an ISO timestamp rather than worked out here, so
     that every node in a fan-out samples the same hour however long the queue
     takes to reach it -- otherwise a run that spilled over an hour boundary
     would leave some centres' hours checked twice and others not at all.
+
+    A singleton on its own arguments, which is what actually holds the bound.
+    The run reads how much of the hour's allowance is already spent and then
+    spends the rest, so two of these for the same centre and hour -- a beat
+    that overlapped, a queue drained twice -- would each read nothing spent and
+    both spend the lot. Keyed on the node and the hour, so different centres
+    and later hours are unaffected.
 
     Failures are not retried. The next hour asks again, and a centre whose
     server is down is precisely what the probe is meant to record rather than
