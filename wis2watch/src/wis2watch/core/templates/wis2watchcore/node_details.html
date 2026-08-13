@@ -99,6 +99,7 @@
         .badge-core,
         .badge-active,
         .badge-reachable,
+        .badge-watched_at_broker,
         .badge-on_schedule,
         .badge-transmitting,
         .badge-success {
@@ -111,7 +112,10 @@
             color: #004085;
         }
 
+        /* The fallback is amber rather than green: the centre can be judged,
+           and the broker it is obliged to run is not answering. */
         .badge-undeclared,
+        .badge-watched_at_archive,
         .badge-gone_quiet,
         .badge-partial {
             background: #fff3cd;
@@ -122,6 +126,7 @@
         .badge-deleted,
         .badge-error,
         .badge-unreachable,
+        .badge-unwatched,
         .badge-silent,
         .badge-never_transmitted,
         .badge-failed {
@@ -241,37 +246,45 @@
         </a>
     </div>
 
-    <!-- The centre's own broker -->
+    <!-- The centre's own view of itself -->
     <div class="detail-section">
         <div class="section-header">
-            <h3>{% trans "This centre's own broker" %}</h3>
-            <span class="badge badge-{{ detail.origin.reachability }}">
-                {{ detail.origin.reachability_label }}
+            <h3>{% trans "This centre's own view" %}</h3>
+            <span class="badge badge-{{ detail.origin.watch }}">
+                {{ detail.origin.watch_label }}
             </span>
         </div>
         <p class="section-note">
-            {% trans "Whether this centre's broker answers from outside. A centre publishing where nobody can reach it looks the same as a centre that has stopped, until this column says otherwise." %}
+            {% trans "Which of this centre's own transports this tool is hearing it through. A centre publishing where nobody can reach it looks the same as a centre that has stopped, until this says otherwise -- and its archive is polled only where its broker will not answer, so a centre watched there is being watched and is failing to run a broker anyone can dial." %}
         </p>
         <div class="node-info">
+            <div class="info-item">
+                <span class="info-label">{% trans "Vantage point" %}</span>
+                <span class="info-value">{{ detail.origin.transport_label }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">{% trans "Last said" %}</span>
+                <span class="info-value">{{ detail.origin.reachability_label }}</span>
+            </div>
             <div class="info-item">
                 <span class="info-label">{% trans "Address" %}</span>
                 <span class="info-value"><code>{{ detail.origin.address|default:"—" }}</code></span>
             </div>
             <div class="info-item">
-                <span class="info-label">{% trans "Last connected" %}</span>
+                <span class="info-label">{% trans "Last answered" %}</span>
                 <span class="info-value">
                     {{ detail.origin.last_connected_at|date:"Y-m-d H:i"|default:"—" }}
                 </span>
             </div>
             <div class="info-item">
-                <span class="info-label">{% trans "Connections enabled" %}</span>
+                <span class="info-label">{% trans "Enabled" %}</span>
                 <span class="info-value"
-                      title="{% trans 'Whether this tool is set to dial this broker at all. A disabled broker is never attempted, so nothing is learned about it.' %}">
+                      title="{% trans 'Whether this tool is set to ask this vantage point at all. A disabled one is never attempted, so nothing is learned about it.' %}">
                     {% if detail.origin.connections_enabled %}{% trans "Yes" %}{% else %}{% trans "No" %}{% endif %}
                 </span>
             </div>
             <div class="info-item">
-                <span class="info-label">{% trans "Last connection error" %}</span>
+                <span class="info-label">{% trans "Last error" %}</span>
                 <span class="info-value">
                     {% if detail.origin.last_error %}
                         <span class="row-error">{{ detail.origin.last_error }}</span>

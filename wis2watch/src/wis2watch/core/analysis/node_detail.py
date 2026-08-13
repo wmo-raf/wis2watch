@@ -13,7 +13,8 @@ observations are flowing while its daily bulletin has not appeared for a week
 reads as the second thing rather than as healthy. Per station, when it last
 transmitted, so a single silent station is nameable. And beside both, the two
 explanations that are about this tool rather than the centre: a sync run that
-failed, and a broker that does not answer from outside.
+failed, and which of the centre's own transports -- if either -- this tool is
+hearing it through at all.
 
 Nothing here is derived a second way. Dataset silence is the same function the
 overview reduces to one badge, asked for one centre, so the page and the table
@@ -37,7 +38,7 @@ from ..models import (
     StationSource,
     SyncLog,
 )
-from .reachability import OriginReachability
+from .reachability import OriginReachability, OriginTransport, OriginWatch
 from .silence import (
     BEFORE_ANYTHING,
     DatasetSilenceRow,
@@ -223,14 +224,24 @@ class SyncRunRow:
 
 
 @dataclass(frozen=True)
-class OriginBrokerState:
-    """What is known about the centre's own broker, from outside.
+class OriginState:
+    """Which transport carries the centre's own view, and how that one is faring.
 
-    An address beside the verdict, because "not reachable" is only actionable
-    with the host and port that were dialled: half of what this reports is a
-    broker advertised at an address that was never open to begin with.
+    Two readings of the same section, because they are acted on by different
+    people. The watch state is what the overview showed and what decides
+    whether this centre's propagation may be judged at all; the reachability
+    beside it is what the one vantage point in play last reported.
+
+    An address beside both, because "not reachable" is only actionable with
+    what was actually asked: half of what this reports is a transport
+    advertised somewhere that was never open to begin with. Which address that
+    is follows the vantage point in play -- an operator sent here by an
+    archive-only badge is being asked about an HTTPS endpoint, and showing
+    them a broker's host and port would send them after the wrong thing.
     """
 
+    watch: str
+    transport: str
     reachability: str
     address: str
     connections_enabled: bool
@@ -238,9 +249,18 @@ class OriginBrokerState:
     last_error: str
 
     @classmethod
-    def unadvertised(cls):
-        """A centre whose catalogue record names no broker of its own."""
+    def unwatched(cls):
+        """A centre with no vantage point of its own on the record at all.
+
+        Neither a broker its catalogue record advertises nor an archive this
+        tool has worked out an address for, so there is nothing to describe
+        and nothing being watched. None rather than unrecorded: no vantage
+        point has been lost here, and saying one had would send somebody
+        looking for a transport that never existed.
+        """
         return cls(
+            watch=OriginWatch.UNWATCHED,
+            transport=OriginTransport.NONE,
             reachability=OriginReachability.of(None, advertised=False),
             address="",
             connections_enabled=False,
@@ -249,8 +269,18 @@ class OriginBrokerState:
         )
 
     @property
+    def watch_label(self):
+        """What the centre's origin state is called, for the page."""
+        return OriginWatch.label(self.watch)
+
+    @property
+    def transport_label(self):
+        """What the vantage point in play is called, for the page."""
+        return OriginTransport.label(self.transport)
+
+    @property
     def reachability_label(self):
-        """What the broker's state is called, for the page."""
+        """What that vantage point last reported, for the page."""
         return OriginReachability.label(self.reachability)
 
 
@@ -266,7 +296,7 @@ class NodeDetail:
     retired_datasets: list[NodeDatasetRow]
     stations: list[NodeStationRow]
     sync_runs: list[SyncRunRow]
-    origin: OriginBrokerState
+    origin: OriginState
 
     @property
     def silent_dataset_count(self):
@@ -512,18 +542,62 @@ def _reading_order(row):
 
 
 def _origin(node):
-    """The centre's own broker, as the page reports it."""
-    source = MessageSource.objects.filter(
-        node=node, source_type=MessageSource.ORIGIN_BROKER
-    ).first()
+    """The centre's own view of itself, and the transport carrying it.
+
+    Read from both of the centre's vantage points in one query, because the
+    watch state is a statement about the pair: which one is answering decides
+    what the section says, and what the other is doing is the reason it says
+    it.
+    """
+    sources = {
+        source.source_type: source
+        for source in MessageSource.objects.filter(
+            node=node, source_type__in=MessageSource.ORIGIN_TRANSPORTS
+        )
+    }
+
+    # Which of them is watching is asked of the manager rather than worked out
+    # from the rows just fetched. It is the same question the propagation
+    # evaluation is bounded by -- answering, and still being asked -- and a
+    # page deciding it a second way is how the page and the evaluation would
+    # come to disagree about the centre being read.
+    watching = set(
+        MessageSource.objects.watched_origins()
+        .filter(node=node)
+        .values_list("source_type", flat=True)
+    )
+
+    watch = OriginWatch.of(
+        broker=MessageSource.ORIGIN_BROKER in watching,
+        archive=MessageSource.ORIGIN_API in watching,
+    )
+    source = _vantage_in_play(watch, sources)
 
     if source is None:
-        return OriginBrokerState.unadvertised()
+        return OriginState.unwatched()
 
-    return OriginBrokerState(
+    return OriginState(
+        watch=watch,
+        transport=OriginTransport.of(source.source_type),
         reachability=OriginReachability.of(source.is_reachable),
-        address=f"{source.host}:{source.port}",
+        address=source.address,
         connections_enabled=source.is_active,
         last_connected_at=source.last_connected_at,
         last_error=source.last_error,
+    )
+
+
+def _vantage_in_play(watch, sources):
+    """The vantage point this section is describing, or None if there is none.
+
+    Whichever is carrying the centre's view where one is. Where neither is,
+    the broker: its archive is an address this tool inferred and polls as a
+    fallback, and its broker is the one the centre is obliged to run and the
+    one somebody is going to be asked about.
+    """
+    if watch == OriginWatch.AT_ARCHIVE:
+        return sources.get(MessageSource.ORIGIN_API)
+
+    return sources.get(MessageSource.ORIGIN_BROKER) or sources.get(
+        MessageSource.ORIGIN_API
     )

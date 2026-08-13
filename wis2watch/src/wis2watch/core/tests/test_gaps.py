@@ -19,6 +19,7 @@ from django.test import TestCase, override_settings
 
 from wis2watch.core.analysis import (
     GAP_REPORTS,
+    OriginTransport,
     gap_report,
     gap_report_summaries,
     propagation_gaps,
@@ -38,7 +39,7 @@ from wis2watch.core.models import (
     UnregisteredCentre,
     WIS2Node,
 )
-from wis2watch.core.tests.support import at, origin_broker
+from wis2watch.core.tests.support import at, origin_api, origin_broker
 
 
 NOW = at("2026-08-11T12:00:00")
@@ -288,12 +289,13 @@ class PropagationGapTestCase(GapReportTestCase):
         hours_ago=2,
         resolved=False,
         dataset=None,
+        source=None,
     ):
         node = node or self.kenya
 
         return PropagationGap.objects.create(
             node=node,
-            origin_source=node.origin_source,
+            origin_source=node.origin_source if source is None else source,
             dataset=dataset,
             notification_id=notification_id,
             topic=f"origin/a/wis2/{node.centre_id}/data/core/weather/surface-based-observations/synop",
@@ -362,6 +364,55 @@ class PropagationGapTests(PropagationGapTestCase):
         self.assertEqual(
             [row.notification_id for row in self.report()], ["newer", "older"]
         )
+
+    def test_a_gap_seen_at_the_centres_own_broker_says_so(self):
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap()
+
+        (row,) = self.report()
+
+        self.assertEqual(row.origin_transport, OriginTransport.BROKER)
+
+    def test_a_gap_seen_in_the_centres_archive_says_so(self):
+        """How the tool knows, on a finding that goes to a met service by email.
+
+        A centre whose broker is dark is watched through its archive, and a
+        gap that did not say so would read as evidence from a broker the
+        centre knows nobody outside can reach.
+        """
+        origin_broker(self.kenya, is_reachable=False)
+        archive = origin_api(self.kenya, is_reachable=True)
+        self.gap(source=archive)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.origin_transport, OriginTransport.ARCHIVE)
+        self.assertEqual(
+            row.origin_transport_label, OriginTransport.label(OriginTransport.ARCHIVE)
+        )
+
+    def test_a_gap_whose_vantage_point_is_gone_does_not_invent_one(self):
+        """Something saw it; what has been lost is the note of which."""
+        origin_broker(self.kenya, is_reachable=True)
+        archive = origin_api(self.kenya, is_reachable=True)
+        self.gap(source=archive)
+        archive.delete()
+
+        (row,) = self.report()
+
+        self.assertEqual(row.origin_transport, OriginTransport.UNRECORDED)
+
+    def test_the_notice_a_digest_sends_names_the_transport(self):
+        origin_broker(self.kenya, is_reachable=False)
+        archive = origin_api(self.kenya, is_reachable=True)
+        self.gap(source=archive)
+
+        (row,) = self.report()
+        notice = gap_report("propagation-gaps").describe_row(row)
+
+        archive_label = str(OriginTransport.label(OriginTransport.ARCHIVE))
+
+        self.assertIn(archive_label, notice.summary)
 
     def test_a_gap_names_the_dataset_where_the_registry_knows_one(self):
         origin_broker(self.kenya, is_reachable=True)

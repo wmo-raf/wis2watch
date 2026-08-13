@@ -1,9 +1,11 @@
 """The node overview: the state of the region on one screen.
 
-Each row pairs what the world saw of a centre with whether that centre's own
-broker answers from outside. Read together they separate "gone quiet" from
-"publishing where no one can see it", which is the distinction the whole tool
-is built around.
+Each row pairs what the world saw of a centre with which of that centre's own
+transports this tool is hearing it through. Read together they separate "gone
+quiet" from "publishing where no one can see it", which is the distinction the
+whole tool is built around -- and the second of the two is a state rather than
+a yes, because a centre reachable only through its archive is both being
+watched and failing to run a broker anyone can dial.
 
 Beside them is the far end of the same chain: whether the Global Caches picked
 the centre's core data up. A centre whose notifications reach the Global Broker
@@ -46,7 +48,7 @@ from ..models import (
     WIS2Node,
 )
 from ..rollups import window_start
-from .reachability import OriginReachability
+from .reachability import OriginReachability, OriginWatch
 from .silence import BEFORE_ANYTHING, NodeSilence, Silence, hours_between, silence_by_node
 from .staleness import Staleness, default_stale_after_hours
 
@@ -109,7 +111,8 @@ class NodeOverviewRow:
     cache_pickup: str
     dataset_count: int
     station_count: int
-    origin_reachability: str
+    origin_watch: str
+    origin_broker_reachability: str
     origin_last_error: str
     silence: str
     silent_dataset_count: int
@@ -131,11 +134,33 @@ class NodeOverviewRow:
         return CachePickup.LABELS.get(self.cache_pickup, self.cache_pickup)
 
     @property
-    def origin_reachability_label(self):
-        """What the centre's own broker's state is called, for a table cell."""
-        return OriginReachability.LABELS.get(
-            self.origin_reachability, self.origin_reachability
-        )
+    def origin_watch_label(self):
+        """What the centre's origin state is called, for a table cell."""
+        return OriginWatch.label(self.origin_watch)
+
+    @property
+    def is_watched_at_broker(self):
+        """Whether the centre's own broker is what this row is reading it through.
+
+        What decides whether the line below the badge is worth spending. Where
+        the broker is carrying our view the badge has already said so, and the
+        line would repeat it.
+        """
+        return self.origin_watch == OriginWatch.AT_BROKER
+
+    @property
+    def origin_broker_reachability_label(self):
+        """What the centre's own broker last reported, for a table cell.
+
+        Read beneath the state rather than instead of it, and it is what keeps
+        the column honest wherever the broker is not what we are reading.
+        Three different centres are not watched at their broker -- one whose
+        broker refuses, one nothing has dialled yet, one that advertises no
+        broker at all -- and they are three conversations with three different
+        people. The state says whether the centre can be judged at all; this
+        says what its broker is doing about the obligation to be dialable.
+        """
+        return OriginReachability.label(self.origin_broker_reachability)
 
 
 def default_volume_hours():
@@ -257,6 +282,19 @@ def _annotated_nodes(*, since):
         node=OuterRef("pk"), source_type=MessageSource.ORIGIN_BROKER
     )
 
+    # Whether each transport is watching the centre now, asked through the
+    # queryset the propagation evaluation is bounded by rather than through
+    # the row above. The row above is what the centre's broker last said; this
+    # is whether that answer still entitles anything to judge the centre, and
+    # deriving the second from the first here is how the table and the
+    # evaluation would come to disagree.
+    def watching(source_type):
+        return Exists(
+            MessageSource.objects.watched_origins().filter(
+                node=OuterRef("pk"), source_type=source_type
+            )
+        )
+
     return WIS2Node.objects.annotate(
         last_seen_at=Subquery(last_seen[:1]),
         recent_message_count=Coalesce(Subquery(recent_messages), 0),
@@ -267,6 +305,8 @@ def _annotated_nodes(*, since):
         has_origin_broker=Exists(origin_broker),
         origin_reachable=Subquery(origin_broker.values("is_reachable")[:1]),
         origin_error=Subquery(origin_broker.values("last_error")[:1]),
+        watched_at_broker=watching(MessageSource.ORIGIN_BROKER),
+        watched_at_archive=watching(MessageSource.ORIGIN_API),
     )
 
 
@@ -290,7 +330,10 @@ def _row(node, *, now, stale_after, silence):
         cache_pickup=_cache_pickup(node),
         dataset_count=node.dataset_count,
         station_count=node.station_count,
-        origin_reachability=_origin_reachability(node),
+        origin_watch=OriginWatch.of(
+            broker=node.watched_at_broker, archive=node.watched_at_archive
+        ),
+        origin_broker_reachability=_origin_reachability(node),
         origin_last_error=node.origin_error or "",
         silence=node_silence.silence,
         silent_dataset_count=node_silence.silent_dataset_count,

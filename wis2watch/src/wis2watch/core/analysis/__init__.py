@@ -36,7 +36,7 @@ from .node_detail import (
     NodeDatasetRow,
     NodeDetail,
     NodeStationRow,
-    OriginBrokerState,
+    OriginState,
     StationStanding,
     SyncRunRow,
     SyncScope,
@@ -48,7 +48,7 @@ from .overview import (
     default_volume_hours,
     node_overview,
 )
-from .reachability import OriginReachability
+from .reachability import OriginReachability, OriginTransport, OriginWatch
 from .silence import (
     DatasetSilenceRow,
     Expectation,
@@ -72,8 +72,10 @@ __all__ = [
     "NodeSilence",
     "NodeStationRow",
     "Notice",
-    "OriginBrokerState",
     "OriginReachability",
+    "OriginState",
+    "OriginTransport",
+    "OriginWatch",
     "PropagationGapRow",
     "Silence",
     "SilentStationRow",

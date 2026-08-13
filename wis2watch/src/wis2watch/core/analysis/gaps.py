@@ -28,8 +28,8 @@ report that quietly drops findings is worse than one that is long.
 
 Two of those filters do most of the work, and both exist to keep the reports
 readable rather than complete. OSCAR is notoriously stale, so only stations it
-still reports as fully operational count as declared. And a centre whose own
-broker this tool cannot currently reach has its propagation gaps withheld,
+still reports as fully operational count as declared. And a centre no vantage
+point of its own currently answers at has its propagation gaps withheld,
 because they are indistinguishable from this tool having stopped listening.
 """
 
@@ -55,6 +55,7 @@ from ..models import (
     evidence_horizon,
 )
 from ..rollups import window_start
+from .reachability import OriginTransport
 from .silence import hours_between
 
 #: Over how many hours a centre's unattributed share is worked out. Longer than
@@ -124,7 +125,11 @@ class UndeclaredStationRow:
 
 @dataclass(frozen=True)
 class PropagationGapRow:
-    """One notification a centre published that the world never received."""
+    """One notification a centre published that the world never received.
+
+    The transport that observed it travels with the row rather than being left
+    to the reader, for the reason ``OriginTransport`` gives.
+    """
 
     gap_id: int
     node_id: int
@@ -133,10 +138,16 @@ class PropagationGapRow:
     dataset_title: str
     notification_id: str
     topic: str
+    origin_transport: str
     published_at: datetime
     observed_at_origin: datetime
     detected_at: datetime
     hours_missing: float | None
+
+    @property
+    def origin_transport_label(self):
+        """What the transport that observed this is called, for a cell or an email."""
+        return OriginTransport.label(self.origin_transport)
 
 
 @dataclass(frozen=True)
@@ -238,11 +249,15 @@ def propagation_gaps(*, now=None):
     Returns:
         list[PropagationGapRow]: newest publication first.
 
-    Only centres whose own broker answers right now are reported on. A gap
-    recorded while a broker was up and read after it went dark cannot be told
-    from this tool having stopped listening, and sending somebody to a centre
-    to ask about messages that may never have gone missing is how a diagnostic
-    stops being believed.
+    Only centres some vantage point of their own answers at right now are
+    reported on -- their broker, or the archive polled where that broker will
+    not answer. A gap recorded while a centre could be heard and read after it
+    went dark cannot be told from this tool having stopped listening, and
+    sending somebody to a centre to ask about messages that may never have
+    gone missing is how a diagnostic stops being believed.
+
+    Each row says which of the two saw the notification, for the reason
+    ``OriginTransport`` gives.
 
     And only gaps this tool can still stand behind. An open gap outlives the
     evidence that would close it: past the raw retention window the Global
@@ -451,7 +466,7 @@ def _reportable_gaps(*, now=None):
     return (
         _gaps_at_watched_centres()
         .within_evidence(now)
-        .select_related("node", "dataset")
+        .select_related("node", "dataset", "origin_source")
     )
 
 
@@ -477,11 +492,26 @@ def _propagation_gap_row(gap, *, now):
         dataset_title=gap.dataset.title if gap.dataset_id else "",
         notification_id=gap.notification_id,
         topic=gap.topic,
+        origin_transport=_transport_of(gap),
         published_at=gap.published_at,
         observed_at_origin=gap.observed_at_origin,
         detected_at=gap.detected_at,
         hours_missing=hours_between(gap.published_at, now),
     )
+
+
+def _transport_of(gap):
+    """Which of the centre's own transports observed this notification.
+
+    A vantage point may have been replaced by a later catalogue sync or
+    deleted by hand, which unmakes the note of how the notification was seen
+    without unmaking the observation. The gap is still a finding; what it can
+    no longer say is which transport carried it.
+    """
+    if gap.origin_source_id is None:
+        return OriginTransport.UNRECORDED
+
+    return OriginTransport.of(gap.origin_source.source_type)
 
 
 def _open_unregistered_centres():
@@ -627,12 +657,16 @@ def _propagation_gap_notice(row):
     is the path, and it is the path somebody is sent to look at; the
     notification named here is the evidence to open the conversation with, and
     the report holds however many others there are.
+
+    The transport is named after the finding rather than inside it, because it
+    is not part of what went wrong: it is how this tool knows.
     """
     return Notice(
         key=row.centre_id,
         summary=(
             f"{row.centre_id} published {row.notification_id} on {row.topic} "
-            f"and the Global Broker has not carried it"
+            f"and the Global Broker has not carried it. "
+            f"Seen at: {row.origin_transport_label}"
         ),
     )
 
@@ -762,9 +796,10 @@ GAP_REPORTS = (
         slug="propagation-gaps",
         title=_("Propagation gaps"),
         description=_(
-            "Notifications seen at a centre's own broker that the Global "
-            "Broker has never carried. Centres whose own broker cannot "
-            "currently be reached are left out."
+            "Notifications seen at a centre's own vantage point that the "
+            "Global Broker has never carried, each saying which of the "
+            "centre's transports saw it. Centres no vantage point of their "
+            "own currently answers at are left out."
         ),
         find_rows=propagation_gaps,
         count_rows=lambda *, now=None: _reportable_gaps(now=now).count(),
