@@ -1,0 +1,509 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "id": "edc1e42c-0641-48ee-b9bd-41129432be10",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     -2.8054,
+     7.2153
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "gh-gmet:core.surface-based-observations.synop/WIGOS_0-288-0-65492_20260809T160000",
+    "datetime": "2026-08-09T16:00:00Z",
+    "pubtime": "2026-08-09T17:09:20Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "qqxmpPiwR3Rd1I4jDeXSUvtVQ2ONA6FXt6wQ339rUaTtK4W1jWyQRB9atp75/lMpNoqpRgyOEJaCf4X2WOxmLw=="
+    },
+    "metadata_id": "urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggJEAAAAAALAAABgMGWx2AAAVMAABIAAANjU0OTIAAAAAAAAAAAAAAP////////////////////////////+P1QTABKK10hzBSBKO//////////////////////////////+YZ////////////////3Q3///J////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/9NgG/f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-288-0-65492",
+    "id": "edc1e42c-0641-48ee-b9bd-41129432be10"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.gov.gh/data/2026-08-09/wis/urn:wmo:md:gh-gmet:core.surface-based-observations.synop/WIGOS_0-288-0-65492_20260809T160000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65492"
+    }
+   ],
+   "generated_by": "wis2box 1.2.0"
+  },
+  {
+   "id": "28babf6b-1020-443c-ab4f-eb369c4f3990",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     -0.6862854,
+     7.7296587
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "gh-gmet:core.surface-based-observations.synop/WIGOS_0-288-0-65462_20260809T160000",
+    "datetime": "2026-08-09T16:00:00Z",
+    "pubtime": "2026-08-09T17:09:21Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "EP+BCsLPjhB3jVSaQNhIRd2iW6j7lf/0Wjr+z2oVA4L9yrF1U3/PiagSXgi3gOY5XMEoGlUHqvJAd5k2Ru/9GA=="
+    },
+    "metadata_id": "urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggJEAAAAAALAAABgMGWx2AAAVMAABIAAANjU0NjIAAAAAAAAAAAAAAP////////////////////////////+P1QTABKj9MiM41hZE//////////////////////////////+bC////////////////3Ve//+t////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/9mAV/f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-288-0-65462",
+    "id": "28babf6b-1020-443c-ab4f-eb369c4f3990"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.gov.gh/data/2026-08-09/wis/urn:wmo:md:gh-gmet:core.surface-based-observations.synop/WIGOS_0-288-0-65462_20260809T160000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65462"
+    }
+   ],
+   "generated_by": "wis2box 1.2.0"
+  },
+  {
+   "id": "73a97fb2-f3d6-4eb2-9dd4-2b0b10ba961b",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     -2.7762858,
+     7.5883323
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "gh-gmet:core.surface-based-observations.synop/WIGOS_0-288-0-65468_20260809T160000",
+    "datetime": "2026-08-09T16:00:00Z",
+    "pubtime": "2026-08-09T17:09:22Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "MK0HKqVAHJ7I91F2pnZLaxfPnilQkLMAHE5aMCTRUdG+QqqmDq8RkGcerqBPV7mSeo1bK2j5Slrhpqp/DZ7lvQ=="
+    },
+    "metadata_id": "urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggJEAAAAAALAAABgMGWx2AAAVMAABIAAANjU0NjgAAAAAAAAAAAAAAP////////////////////////////+P1QTABKdDihzYBhr0//////////////////////////////+ZO////////////////3UY//+r////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/8Agh/f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-288-0-65468",
+    "id": "73a97fb2-f3d6-4eb2-9dd4-2b0b10ba961b"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.gov.gh/data/2026-08-09/wis/urn:wmo:md:gh-gmet:core.surface-based-observations.synop/WIGOS_0-288-0-65468_20260809T160000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65468"
+    }
+   ],
+   "generated_by": "wis2box 1.2.0"
+  },
+  {
+   "id": "db6a1921-a6fc-4610-a7c6-f5175c1c47d6",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     -0.0364,
+     8.412
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "gh-gmet:core.surface-based-observations.synop/WIGOS_0-288-0-65483_20260809T160000",
+    "datetime": "2026-08-09T16:00:00Z",
+    "pubtime": "2026-08-09T17:09:23Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "xuNDpShExSLXUlUL12BmTwUuaqq5QuKoUDvfpIpEyrtvOxr7OO2yhPrM3YuECpc1AsbAgs6/dekCuIEj8dYhLg=="
+    },
+    "metadata_id": "urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggJEAAAAAALAAABgMGWx2AAAVMAABIAAANjU0ODMAAAAAAAAAAAAAAP////////////////////////////+P1QTABLFRgiU0kBYm//////////////////////////////+RL///////////////////////////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L//////f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-288-0-65483",
+    "id": "db6a1921-a6fc-4610-a7c6-f5175c1c47d6"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.gov.gh/data/2026-08-09/wis/urn:wmo:md:gh-gmet:core.surface-based-observations.synop/WIGOS_0-288-0-65483_20260809T160000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65483"
+    }
+   ],
+   "generated_by": "wis2box 1.2.0"
+  },
+  {
+   "id": "b318097a-4400-4213-8977-e3a2b6b7a416",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     -2.4167,
+     9.2833
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "gh-gmet:core.surface-based-observations.synop/WIGOS_0-288-0-65481_20260809T160000",
+    "datetime": "2026-08-09T16:00:00Z",
+    "pubtime": "2026-08-09T17:09:27Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "B9reM06jzDLyFz0shhE24g2gQgf1xNO/30r6evQyk7QJTvUe0Qw/1pAklzKNS7g0yihu7aIUPNyV6d9eDFvlUA=="
+    },
+    "metadata_id": "urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggJEAAAAAALAAABgMGWx2AAAVMAABIAAANjU0ODEAAAAAAAAAAAAAAP////////////////////////////+P1QTABLv0Uh3w9BRk//////////////////////////////+Yu////////////////3SZ///J////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L//////f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-288-0-65481",
+    "id": "b318097a-4400-4213-8977-e3a2b6b7a416"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.gov.gh/data/2026-08-09/wis/urn:wmo:md:gh-gmet:core.surface-based-observations.synop/WIGOS_0-288-0-65481_20260809T160000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65481"
+    }
+   ],
+   "generated_by": "wis2box 1.2.0"
+  },
+  {
+   "id": "7c55b342-88b5-4454-a740-688e6cea7b12",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -3.244370083011262,
+       11.098340969278722
+      ],
+      [
+       1.0601216976049272,
+       11.098340969278722
+      ],
+      [
+       1.0601216976049272,
+       4.710462144383371
+      ],
+      [
+       -3.244370083011262,
+       4.710462144383371
+      ],
+      [
+       -3.244370083011262,
+       11.098340969278722
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "data_id": "gh-gmet/metadata/urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+    "datetime": "2026-01-30T13:33:29Z",
+    "pubtime": "2026-08-09T15:00:01Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "f29trXH8YJE4+c85eGDKdRRf5Jpq0yrVcZPY7v+b5t8Vz6UGG1hRCyMVf2OM+kXZMYqEtqH4a+AbrqX80/5P9Q=="
+    },
+    "content": {
+     "encoding": "base64",
+     "value": "eyJpZCI6ICJ1cm46d21vOm1kOmdoLWdtZXQ6Y29yZS5zdXJmYWNlLWJhc2VkLW9ic2VydmF0aW9ucy5zeW5vcCIsICJjb25mb3Jtc1RvIjogWyJodHRwOi8vd2lzLndtby5pbnQvc3BlYy93Y21wLzIvY29uZi9jb3JlIl0sICJ0eXBlIjogIkZlYXR1cmUiLCAidGltZSI6IHsiaW50ZXJ2YWwiOiBbIjIwMjYtMDEtMzAiLCAiLi4iXSwgInJlc29sdXRpb24iOiAiUFQxSCJ9LCAiZ2VvbWV0cnkiOiB7InR5cGUiOiAiUG9seWdvbiIsICJjb29yZGluYXRlcyI6IFtbWy0zLjI0NDM3MDA4MzAxMTI2MiwgMTEuMDk4MzQwOTY5Mjc4NzIyXSwgWzEuMDYwMTIxNjk3NjA0OTI3MiwgMTEuMDk4MzQwOTY5Mjc4NzIyXSwgWzEuMDYwMTIxNjk3NjA0OTI3MiwgNC43MTA0NjIxNDQzODMzNzFdLCBbLTMuMjQ0MzcwMDgzMDExMjYyLCA0LjcxMDQ2MjE0NDM4MzM3MV0sIFstMy4yNDQzNzAwODMwMTEyNjIsIDExLjA5ODM0MDk2OTI3ODcyMl1dXX0sICJwcm9wZXJ0aWVzIjogeyJ0eXBlIjogImRhdGFzZXQiLCAiaWRlbnRpZmllciI6ICJ1cm46d21vOm1kOmdoLWdtZXQ6Y29yZS5zdXJmYWNlLWJhc2VkLW9ic2VydmF0aW9ucy5zeW5vcCIsICJ0aXRsZSI6ICJIb3VybHkgc3lub3B0aWMgb2JzZXJ2YXRpb25zIGZyb20gZml4ZWQtbGFuZCBzdGF0aW9ucyAoU1lOT1ApIChnaC1nbWV0KSIsICJkZXNjcmlwdGlvbiI6ICJvYnNlcnZhdGlvbiBkYXRhIGZvciBnaGFuYSIsICJrZXl3b3JkcyI6IFsib2JzZXJ2YXRpb25zIiwgInRlbXBlcmF0dXJlIiwgInZpc2liaWxpdHkiLCAicHJlY2lwaXRhdGlvbiIsICJwcmVzc3VyZSIsICJjbG91ZHMiLCAic25vdyBkZXB0aCIsICJldmFwb3JhdGlvbiIsICJyYWRpYXRpb24iLCAid2luZCIsICJ0b3RhbCBzdW5zaGluZSIsICJodW1pZGl0eSJdLCAidGhlbWVzIjogW3siY29uY2VwdHMiOiBbeyJpZCI6ICJ3ZWF0aGVyIiwgInRpdGxlIjogIldlYXRoZXIifV0sICJzY2hlbWUiOiAiaHR0cDovL2NvZGVzLndtby5pbnQvd2lzL3RvcGljLWhpZXJhcmNoeS9lYXJ0aC1zeXN0ZW0tZGlzY2lwbGluZSJ9XSwgImNvbnRhY3RzIjogW3sib3JnYW5pemF0aW9uIjogIkdoYW5hIE1ldGVvcm9sb2dpY2FsIEFnZW5jeSAoR01ldCkiLCAiZW1haWxzIjogW3sidmFsdWUiOiAiaW5mb0BtZXRlby5nb3YuZ2gifV0sICJhZGRyZXNzZXMiOiBbeyJjb3VudHJ5IjogIkdIQSJ9XSwgImxpbmtzIjogW3sicmVsIjogImFib3V0IiwgImhyZWYiOiAiaHR0cHM6Ly93d3cubWV0ZW8uZ292LmdoLyIsICJ0eXBlIjogInRleHQvaHRtbCJ9XSwgInJvbGVzIjogWyJob3N0Il19XSwgImNyZWF0ZWQiOiAiMjAyNi0wMS0zMFQxMzozMzoyOVoiLCAidXBkYXRlZCI6ICIyMDI2LTAxLTMwVDEzOjMzOjI5WiIsICJ3bW86ZGF0YVBvbGljeSI6ICJjb3JlIiwgImlkIjogInVybjp3bW86bWQ6Z2gtZ21ldDpjb3JlLnN1cmZhY2UtYmFzZWQtb2JzZXJ2YXRpb25zLnN5bm9wIn0sICJsaW5rcyI6IFt7ImhyZWYiOiAibXF0dHM6Ly9ldmVyeW9uZTpldmVyeW9uZUB3aXMyLm1ldGVvLmdvdi5naDo4ODgzIiwgInR5cGUiOiAiYXBwbGljYXRpb24vanNvbiIsICJuYW1lIjogIm9yaWdpbi9hL3dpczIvZ2gtZ21ldC9kYXRhL2NvcmUvd2VhdGhlci9zdXJmYWNlLWJhc2VkLW9ic2VydmF0aW9ucy9zeW5vcCIsICJyZWwiOiAiaXRlbXMiLCAiY2hhbm5lbCI6ICJvcmlnaW4vYS93aXMyL2doLWdtZXQvZGF0YS9jb3JlL3dlYXRoZXIvc3VyZmFjZS1iYXNlZC1vYnNlcnZhdGlvbnMvc3lub3AiLCAiZmlsdGVycyI6IHsid2lnb3Nfc3RhdGlvbl9pZGVudGlmaWVyIjogeyJ0eXBlIjogInN0cmluZyIsICJ0aXRsZSI6ICJXSUdPUyBTdGF0aW9uIElkZW50aWZpZXIiLCAiZGVzY3JpcHRpb24iOiAiRmlsdGVyIGJ5IFdJR09TIFN0YXRpb24gSWRlbnRpZmllciJ9fSwgInRpdGxlIjogIk5vdGlmaWNhdGlvbnMifSwgeyJocmVmIjogImh0dHBzOi8vd2lzMi5tZXRlby5nb3YuZ2gvbWV0YWRhdGEvZGF0YS91cm46d21vOm1kOmdoLWdtZXQ6Y29yZS5zdXJmYWNlLWJhc2VkLW9ic2VydmF0aW9ucy5zeW5vcC5qc29uIiwgInR5cGUiOiAiYXBwbGljYXRpb24vZ2VvK2pzb24iLCAibmFtZSI6ICJ1cm46d21vOm1kOmdoLWdtZXQ6Y29yZS5zdXJmYWNlLWJhc2VkLW9ic2VydmF0aW9ucy5zeW5vcCIsICJyZWwiOiAiY2Fub25pY2FsIiwgInRpdGxlIjogInVybjp3bW86bWQ6Z2gtZ21ldDpjb3JlLnN1cmZhY2UtYmFzZWQtb2JzZXJ2YXRpb25zLnN5bm9wIn1dfQ==",
+     "size": 2218
+    },
+    "id": "7c55b342-88b5-4454-a740-688e6cea7b12"
+   },
+   "links": [
+    {
+     "rel": "update",
+     "type": "application/geo+json",
+     "href": "https://wis2.meteo.gov.gh/data/metadata/urn:wmo:md:gh-gmet:core.surface-based-observations.synop.json",
+     "length": 2218
+    }
+   ],
+   "generated_by": "wis2box 1.2.0"
+  },
+  {
+   "id": "5c479de7-9b4c-478b-b7f8-84acd38cb390",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     -0.9833333333,
+     5.9333333333
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "gh-gmet:core.surface-based-observations.synop/WIGOS_0-20000-0-65457_20260809T140000",
+    "datetime": "2026-08-09T14:00:00Z",
+    "pubtime": "2026-08-09T15:09:05Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "du/YVhEXRfHprmjRRtCAo4MLwEblaqgrqyCqMx7wrHL9V3XAs29kUL7JzZWEUxEwXxyXy4MObidJ47miNpPs5w=="
+    },
+    "metadata_id": "urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggJDgAAAAALAAABgMGWx2AAAVMABOIAAANjU0NTcAAAAAAAAAAAAAAILk//////////////////////////+P1QS4BJMPqiJQxhUS////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L//////f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-20000-0-65457",
+    "id": "5c479de7-9b4c-478b-b7f8-84acd38cb390"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.gov.gh/data/2026-08-09/wis/urn:wmo:md:gh-gmet:core.surface-based-observations.synop/WIGOS_0-20000-0-65457_20260809T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-20000-0-65457"
+    }
+   ],
+   "generated_by": "wis2box 1.2.0"
+  },
+  {
+   "id": "4d90a052-5054-48f3-9e7c-f3207443afdf",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     0.1166666667,
+     6.1
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "gh-gmet:core.surface-based-observations.synop/WIGOS_0-20000-0-65460_20260809T140000",
+    "datetime": "2026-08-09T14:00:00Z",
+    "pubtime": "2026-08-09T15:09:00Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "TQABJOmjNccRYiP+5eToxluMazbsjLCyB0+iMr+H0ANNpkB/It94CtqQMCgW22lUp07BwTm2C/spOYkZcmNp+Q=="
+    },
+    "metadata_id": "urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggJDgAAAAALAAABgMGWx2AAAVMABOIAAANjU0NjAAAAAAAAAAAAAAAILmf/////////////////////////+P1QS4BJUYgiWsJhBO//////////////////////////////+dd///////////////////////////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/92gO/f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-20000-0-65460",
+    "id": "4d90a052-5054-48f3-9e7c-f3207443afdf"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.gov.gh/data/2026-08-09/wis/urn:wmo:md:gh-gmet:core.surface-based-observations.synop/WIGOS_0-20000-0-65460_20260809T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-20000-0-65460"
+    }
+   ],
+   "generated_by": "wis2box 1.2.0"
+  },
+  {
+   "id": "d7971f64-eebc-4092-96de-f11efae25d5a",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     -2.2333333333,
+     4.8666666667
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "gh-gmet:core.surface-based-observations.synop/WIGOS_0-20000-0-65465_20260809T140000",
+    "datetime": "2026-08-09T14:00:00Z",
+    "pubtime": "2026-08-09T15:09:07Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "aSZsz7hyKcFyyaqJV4MdDSdHbt/C3NfVAKQ2XE+BMKDu07BFtiB/YKrNIlVUPkN/x6hbH7PNdmrysSFIqYEVVA=="
+    },
+    "metadata_id": "urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggJDgAAAAALAAABgMGWx2AAAVMABOIAAANjU0NjUAAAAAAAAAAAAAAILo//////////////////////////+P1QS4BIYKWh6ANhEa//////////////////////////////+dM///////////////////////////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L//////f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-20000-0-65465",
+    "id": "d7971f64-eebc-4092-96de-f11efae25d5a"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.gov.gh/data/2026-08-09/wis/urn:wmo:md:gh-gmet:core.surface-based-observations.synop/WIGOS_0-20000-0-65465_20260809T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-20000-0-65465"
+    }
+   ],
+   "generated_by": "wis2box 1.2.0"
+  },
+  {
+   "id": "c3c18a4d-442e-49bd-ba5f-c3dc15d8063b",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     -0.0740417,
+     6.0155254
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "gh-gmet:core.surface-based-observations.synop/WIGOS_0-288-0-65469_20260809T140000",
+    "datetime": "2026-08-09T14:00:00Z",
+    "pubtime": "2026-08-09T15:09:04Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "vDcNU28+9LkqDCFZnXfQR4PLiQ/Dl89fC5ib2w+qsAYww75acAK+8XTmEpnsn3wbSNOldUn4ySh1aR56ZwXHCg=="
+    },
+    "metadata_id": "urn:wmo:md:gh-gmet:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggJDgAAAAALAAABgMGWx2AAAVMAABIAAANjU0NjkAAAAAAAAAAAAAAP////////////////////////////+P1QS4BJQQiiUXKCAI//////////////////////////////+W1////////////////3M6///J////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/8AgAff2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-288-0-65469",
+    "id": "c3c18a4d-442e-49bd-ba5f-c3dc15d8063b"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.gov.gh/data/2026-08-09/wis/urn:wmo:md:gh-gmet:core.surface-based-observations.synop/WIGOS_0-288-0-65469_20260809T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-288-0-65469"
+    }
+   ],
+   "generated_by": "wis2box 1.2.0"
+  }
+ ],
+ "numberMatched": 1757,
+ "numberReturned": 10,
+ "links": [
+  {
+   "type": "application/geo+json",
+   "rel": "self",
+   "title": "This document as GeoJSON",
+   "href": "https://wis2.meteo.gov.gh/oapi/collections/messages/items?f=json&limit=10&datetime=2026-08-09T00%3A00%3A00Z%2F2026-08-11T23%3A59%3A59Z"
+  },
+  {
+   "rel": "alternate",
+   "type": "application/ld+json",
+   "title": "This document as RDF (JSON-LD)",
+   "href": "https://wis2.meteo.gov.gh/oapi/collections/messages/items?f=jsonld&limit=10&datetime=2026-08-09T00%3A00%3A00Z%2F2026-08-11T23%3A59%3A59Z"
+  },
+  {
+   "type": "text/html",
+   "rel": "alternate",
+   "title": "This document as HTML",
+   "href": "https://wis2.meteo.gov.gh/oapi/collections/messages/items?f=html&limit=10&datetime=2026-08-09T00%3A00%3A00Z%2F2026-08-11T23%3A59%3A59Z"
+  },
+  {
+   "type": "application/geo+json",
+   "rel": "prev",
+   "title": "Items (prev)",
+   "href": "https://wis2.meteo.gov.gh/oapi/collections/messages/items?offset=376&limit=10&datetime=2026-08-09T00%3A00%3A00Z%2F2026-08-11T23%3A59%3A59Z"
+  },
+  {
+   "type": "application/geo+json",
+   "rel": "next",
+   "title": "Items (next)",
+   "href": "https://wis2.meteo.gov.gh/oapi/collections/messages/items?offset=396&limit=10&datetime=2026-08-09T00%3A00%3A00Z%2F2026-08-11T23%3A59%3A59Z"
+  },
+  {
+   "type": "application/json",
+   "title": "Data notifications",
+   "rel": "collection",
+   "href": "https://wis2.meteo.gov.gh/oapi/collections/messages"
+  }
+ ],
+ "timeStamp": "2026-08-13T10:44:48.175510Z"
+}

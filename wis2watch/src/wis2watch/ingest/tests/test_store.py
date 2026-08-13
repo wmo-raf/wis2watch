@@ -779,3 +779,45 @@ class LastSeenTests(StoreTestCase):
         store_notifications(self.source, [(KE_TOPIC, {"id": None})])
 
         self.assertEqual(NodeLastSeen.objects.count(), 0)
+
+
+class KnownNodeTests(StoreTestCase):
+    """Whose traffic a flush is, when the caller already knows.
+
+    A poll of a centre's own archive fetches messages that carry no topic, so
+    the answer the broker path reads off one has to come from the request. What
+    the store must not do with that answer is let it stand in for a topic that
+    is there.
+    """
+
+    def test_a_message_with_no_topic_is_attributed_to_the_node_that_was_asked(self):
+        payload = message_on(KE_TOPIC)["payload"]
+
+        store_notifications(self.source, [("", payload)], node=self.node)
+
+        record = NotificationMessage.objects.get()
+
+        self.assertEqual(record.node, self.node)
+        self.assertEqual(record.topic, "")
+
+    def test_a_message_that_names_its_own_centre_is_attributed_by_the_topic(self):
+        """The topic is what was observed, and observation wins."""
+        other = WIS2Node.objects.create(centre_id="dj-anm", name="Djibouti Met")
+        message = message_on(KE_TOPIC)
+
+        store_notifications(
+            self.source, [(message["topic"], message["payload"])], node=other
+        )
+
+        self.assertEqual(NotificationMessage.objects.get().node, self.node)
+
+    def test_another_region_s_traffic_is_still_refused(self):
+        """Knowing whose flush this is licenses nothing about what it carries."""
+        message = message_on(BR_TOPIC)
+
+        counts = store_notifications(
+            self.source, [(message["topic"], message["payload"])], node=self.node
+        )
+
+        self.assertEqual(counts.out_of_region, 1)
+        self.assertEqual(NotificationMessage.objects.count(), 0)

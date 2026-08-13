@@ -33,8 +33,11 @@ and a yearly dataset can never be found quiet, because its absence never
 exceeds what was looked at. So the last hour a dataset published in is asked
 of the whole history, which the index on the rollups makes one backwards walk
 per dataset, and a dataset never seen publishing at all is quiet only as far
-back as this tool holds records of anything -- absence before that is not
-evidence, it is the tool not having existed yet.
+back as this tool can show it was listening -- absence before that is not
+evidence, it is the tool not having existed yet. Which is why that floor is
+read off the vantage points it listens to live: a centre's own archive can be
+pulled months deep, and those are hours it holds one centre's word for rather
+than hours it was hearing the region.
 """
 
 from dataclasses import dataclass
@@ -44,7 +47,7 @@ from django.db.models import F, Min, OuterRef, Subquery
 from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext_lazy as _
 
-from ..models import Dataset, HourlyRollup
+from ..models import Dataset, HourlyRollup, MessageSource
 from ..rollups import floor_to_hour
 
 #: Sorts before any real last-seen time, so whatever nothing has ever been
@@ -297,14 +300,32 @@ def _last_active_hour(now):
 
 
 def _records_begin(now):
-    """The earliest moment this tool holds any record of the region publishing.
+    """The earliest hour this tool can show it was listening to the region.
 
     What a dataset never seen publishing is measured against. Absence before
     this is not evidence of silence -- there was nothing here to have seen it
     -- and treating it as evidence would greet every new deployment with a
     region-wide outage that never happened.
+
+    Read off the vantage points this tool listens to live, and off those only.
+    A centre's own message archive can be pulled months deep, which is what it
+    is for; counting those hours here would move the floor for the whole
+    region back to a stretch nobody was watching, and every dataset never seen
+    publishing -- at every other centre, whose archive was never asked --
+    would be reported quiet for months that only one centre has any record of.
+    A pull of one centre's history is evidence about that centre, and the hours
+    it reaches back through are not hours this tool was hearing anyone else.
+
+    The centre that was pulled loses nothing by it. Its datasets that did
+    publish are judged on the hours their own messages landed in, archive and
+    all; this floor is only ever reached for a dataset never seen at all, where
+    measuring from when the tool arrived understates the quiet rather than
+    inventing it.
     """
-    earliest = HourlyRollup.objects.aggregate(earliest=Min("hour"))["earliest"]
+    earliest = (
+        HourlyRollup.objects.exclude(source__source_type=MessageSource.ORIGIN_API)
+        .aggregate(earliest=Min("hour"))["earliest"]
+    )
 
     return earliest or now
 
