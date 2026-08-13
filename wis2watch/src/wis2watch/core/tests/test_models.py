@@ -13,7 +13,7 @@ from wis2watch.core.models import (
     SyncLog,
     WIS2Node,
 )
-from wis2watch.core.tests.support import origin_api
+from wis2watch.core.tests.support import origin_api, origin_broker
 
 
 def make_node(centre_id="ke-kmd", **kwargs):
@@ -223,6 +223,80 @@ class OriginVantageQuerySetTests(TestCase):
         self.assertEqual(
             {source.pk for source in MessageSource.objects.dialled()},
             {self.broker.pk},
+        )
+
+
+class ArchivesToPollTests(TestCase):
+    """Which centres are asked for their own notifications on a schedule.
+
+    The choosing is the whole of it, and it goes wrong in two directions. A
+    centre left out has no origin witness at all, so nothing this tool exists
+    to say about it can be said. A centre asked needlessly is a second copy of
+    traffic already held, fetched off a small national server every hour.
+    """
+
+    def setUp(self):
+        self.node = make_node("ke-kmd")
+        self.archive = origin_api(self.node)
+
+    def polled(self):
+        return [source.pk for source in MessageSource.objects.archives_to_poll()]
+
+    def test_a_centre_whose_broker_has_never_been_dialled_is_polled(self):
+        """Null is unprobed rather than fine, and unprobed cannot be judged."""
+        origin_broker(self.node)
+
+        self.assertEqual(self.polled(), [self.archive.pk])
+
+    def test_a_centre_whose_broker_will_not_answer_is_polled(self):
+        origin_broker(self.node, is_reachable=False)
+
+        self.assertEqual(self.polled(), [self.archive.pk])
+
+    def test_a_centre_with_no_broker_registered_at_all_is_polled(self):
+        self.assertEqual(self.polled(), [self.archive.pk])
+
+    def test_a_centre_whose_broker_answers_is_left_alone(self):
+        """The archive and the broker are the same witness."""
+        origin_broker(self.node, is_reachable=True)
+
+        self.assertEqual(self.polled(), [])
+
+    def test_a_broker_switched_off_is_not_an_answer(self):
+        """Nothing dials it any more, so what it last said has gone stale --
+        and propagation will not judge the centre on it either."""
+        origin_broker(self.node, is_reachable=True, is_active=False)
+
+        self.assertEqual(self.polled(), [self.archive.pk])
+
+    def test_an_archive_switched_off_is_not_polled(self):
+        self.archive.is_active = False
+        self.archive.save()
+
+        self.assertEqual(self.polled(), [])
+
+    def test_an_archive_with_no_address_is_not_polled(self):
+        """A poll with nowhere to ask would record the centre unreachable over
+        a hole in this tool's own registry."""
+        self.archive.api_url = ""
+        self.archive.save()
+
+        self.assertEqual(self.polled(), [])
+
+    def test_a_broker_that_answers_speaks_only_for_its_own_centre(self):
+        elsewhere = make_node("gh-gmet")
+        origin_api(elsewhere)
+        origin_broker(elsewhere, is_reachable=True)
+
+        self.assertEqual(self.polled(), [self.archive.pk])
+
+    def test_a_broker_is_not_polled_in_place_of_an_archive(self):
+        """There is nothing to fetch at a broker over HTTP."""
+        origin_broker(self.node, is_reachable=False)
+
+        self.assertEqual(
+            {source.source_type for source in MessageSource.objects.archives_to_poll()},
+            {MessageSource.ORIGIN_API},
         )
 
 

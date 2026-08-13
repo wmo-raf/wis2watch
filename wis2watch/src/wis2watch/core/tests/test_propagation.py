@@ -424,6 +424,25 @@ class SuppressionTests(PropagationTestCase):
         self.assertEqual(counts.nodes_evaluated, 1)
         self.assertEqual(counts.nodes_suppressed, 0)
 
+    def test_a_centre_heard_only_through_its_own_archive_is_judged(self):
+        """Which is what polling those archives is for.
+
+        A centre whose broker nothing outside can reach had no origin witness
+        at all until something asked its archive, so this comparison could not
+        be made for it -- and those are the shakiest centres in the region.
+        """
+        archive = origin_api(self.kenya, is_reachable=True)
+        self.kenya_origin.is_reachable = False
+        self.kenya_origin.save()
+
+        self.observe(archive, "published-and-never-carried", node=self.kenya)
+
+        counts = self.evaluate()
+
+        self.assertEqual(self.missing(), ["published-and-never-carried"])
+        self.assertEqual(counts.nodes_evaluated, 1)
+        self.assertEqual(counts.nodes_suppressed, 0)
+
     def test_what_the_connection_record_says_now_does_not_unjudge_past_hours(self):
         """Blindness is read off the traffic, not off a side record.
 

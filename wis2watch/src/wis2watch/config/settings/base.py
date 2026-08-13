@@ -467,7 +467,10 @@ VUE_FRONTEND_STATIC_PATH = 'vue'
 
 # Scheduled work is sync, rollup, cleanup and mail only. Broker connections are
 # stateful and long-lived, and belong to the ingestion supervisor rather than to
-# a task queue -- see wis2watch.ingest.supervisor.
+# a task queue -- see wis2watch.ingest.supervisor. Reading a centre's own
+# archive is scheduled work for exactly that reason: it is an HTTP fetch with
+# nothing to hold open, and it is how a centre whose broker the supervisor
+# cannot dial is heard at all.
 CELERY_BEAT_SCHEDULE = {
     'sync-catalogues': {
         'task': 'wis2watch.core.tasks.run_sync_catalogues',
@@ -476,6 +479,14 @@ CELERY_BEAT_SCHEDULE = {
     'sync-node-stations': {
         'task': 'wis2watch.core.tasks.run_sync_all_node_stations',
         'schedule': 3600.0,  # Every hour
+    },
+    # Hourly, and only for the centres whose own broker will not answer -- see
+    # wis2watch.ingest.tasks for why an hour is soon enough and why the centres
+    # that can be heard live are left alone. Off the hour, so the region's
+    # archives are not asked in the same minute as its station registries.
+    'poll-message-archives': {
+        'task': 'wis2watch.ingest.tasks.run_poll_all_message_archives',
+        'schedule': crontab(minute=20),
     },
     # OSCAR changes slowly: a country's declared set moves in months, and the
     # whole monitored region is read territory by territory in one run.
