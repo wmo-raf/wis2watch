@@ -78,12 +78,21 @@
             color: #721c24;
         }
 
-        .badge-reachable {
+        .badge-reachable,
+        .badge-watched_at_broker {
             background: #d4edda;
             color: #155724;
         }
 
-        .badge-unreachable {
+        /* The fallback is amber rather than green: the centre can be judged,
+           and the broker it is obliged to run is not answering. */
+        .badge-watched_at_archive {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .badge-unreachable,
+        .badge-unwatched {
             background: #f8d7da;
             color: #721c24;
         }
@@ -200,8 +209,8 @@
                 </th>
                 <th class="numeric">{% trans "Datasets" %}</th>
                 <th class="numeric">{% trans "Stations" %}</th>
-                <th title="{% trans "Whether this centre's own broker answers from outside" %}">
-                    {% trans "Origin broker" %}
+                <th title="{% trans "Which of this centre's own transports this tool is hearing it through. Its archive is polled only where its broker will not answer, so a centre watched there is being watched and is failing to run a broker anyone can dial." %}">
+                    {% trans "Origin" %}
                 </th>
                 <th title="{% trans "Whether the Global Caches carried this centre's core data. Only core data is cached, so a centre publishing none has nothing to pick up." %}">
                     {% trans "Global Cache" %}
@@ -233,9 +242,15 @@
                     <td class="numeric">{{ row.dataset_count }}</td>
                     <td class="numeric">{{ row.station_count }}</td>
                     <td>
-                        <span class="badge badge-{{ row.origin_reachability }}">
-                            {{ row.origin_reachability_label }}
+                        <span class="badge badge-{{ row.origin_watch }}">
+                            {{ row.origin_watch_label }}
                         </span>
+                        {% if not row.is_watched_at_broker %}
+                            <div class="silence-detail"
+                                 title="{% trans "What this centre's own broker is doing. A centre is obliged to run one anything can dial, whether or not this tool can see the centre another way." %}">
+                                {% blocktrans with reachability=row.origin_broker_reachability_label %}Broker: {{ reachability }}{% endblocktrans %}
+                            </div>
+                        {% endif %}
                         {% if row.origin_last_error %}
                             <div class="broker-error" title="{{ row.origin_last_error }}">
                                 {{ row.origin_last_error|truncatechars:60 }}

@@ -13,6 +13,9 @@
     <th>{% trans "Dataset" %}</th>
     <th>{% trans "Topic" %}</th>
     <th>{% trans "Notification" %}</th>
+    <th title="{% trans "Which of the centre's own transports observed this notification. A centre whose broker will not answer is watched through its archive instead." %}">
+        {% trans "Seen at" %}
+    </th>
     <th>{% trans "Published" %}</th>
     <th>{% trans "Missing for" %}</th>
 {% endblock %}
@@ -25,11 +28,12 @@
     <td class="wrapping"><code>{{ row.topic }}</code></td>
     <td class="wrapping"><code>{{ row.notification_id }}</code></td>
     <td>
-        {{ row.published_at|date:"Y-m-d H:i" }}
+        {{ row.origin_transport_label }}
         <div class="row-detail">
-            {% blocktrans with seen=row.observed_at_origin|date:"Y-m-d H:i" %}seen at origin {{ seen }}{% endblocktrans %}
+            {% blocktrans with seen=row.observed_at_origin|date:"Y-m-d H:i" %}observed {{ seen }}{% endblocktrans %}
         </div>
     </td>
+    <td>{{ row.published_at|date:"Y-m-d H:i" }}</td>
     <td>
         {% if row.hours_missing is not None %}
             {% blocktrans with hours=row.hours_missing|floatformat:1 %}{{ hours }}h{% endblocktrans %}
@@ -40,5 +44,5 @@
 {% endblock %}
 
 {% block empty_message %}
-    {% trans "Everything published at a reachable centre's own broker has reached the Global Broker" %}
+    {% trans "Everything seen at a centre's own vantage point has reached the Global Broker" %}
 {% endblock %}

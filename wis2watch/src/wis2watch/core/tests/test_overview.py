@@ -18,6 +18,7 @@ from django.test import TestCase
 from wis2watch.core.analysis import (
     CachePickup,
     OriginReachability,
+    OriginWatch,
     Silence,
     Staleness,
     node_overview,
@@ -32,7 +33,7 @@ from wis2watch.core.models import (
     StationSource,
     WIS2Node,
 )
-from wis2watch.core.tests.support import at, origin_broker
+from wis2watch.core.tests.support import at, origin_api, origin_broker
 
 
 NOW = at("2026-08-11T12:00:00")
@@ -420,50 +421,123 @@ class SilenceTests(OverviewTestCase):
         self.assertEqual(rows["dj-anm"].silence, Silence.ON_SCHEDULE)
 
 
-class OriginReachabilityTests(OverviewTestCase):
-    """Whether a centre's own broker answers from outside, on the same screen.
+class OriginWatchTests(OverviewTestCase):
+    """Which of a centre's own transports is carrying its view of itself.
 
     A large share of these brokers are unreachable, which is a finding about
     the centre rather than a fault to hide: read next to the volume the Global
     Broker saw, "not reachable, and yet publishing" is the row that starts an
-    investigation.
+    investigation. What the archive changes is that such a centre can still be
+    watched -- which the column has to say without letting "we can see them
+    another way" stand in for a broker that answers.
     """
 
-    def test_a_centre_whose_broker_answers_is_reachable(self):
+    def test_a_centre_whose_broker_answers_is_watched_at_its_broker(self):
         origin_broker(self.node("ke-meteo"), is_reachable=True)
 
         row = self.by_centre()["ke-meteo"]
 
-        self.assertEqual(row.origin_reachability, OriginReachability.REACHABLE)
+        self.assertEqual(row.origin_watch, OriginWatch.AT_BROKER)
+        self.assertTrue(row.is_watched_at_broker)
         self.assertEqual(row.origin_last_error, "")
 
-    def test_a_centre_whose_broker_does_not_answer_says_why(self):
-        origin_broker(
-            self.node("ke-meteo"),
-            is_reachable=False,
-            last_error="Could not reach wis.ke-meteo.example.int:1883",
-        )
+    def test_a_centre_watched_only_through_its_archive_says_the_broker_is_down(self):
+        """The fallback is not a green tick.
+
+        The centre is being watched and its broker is not answering, and the
+        row has to say both: the first is what entitles this tool to judge its
+        propagation, and the second is the WIS2 obligation it is failing.
+        """
+        node = self.node("ke-meteo")
+        origin_broker(node, is_reachable=False, last_error="Connection timed out")
+        origin_api(node, is_reachable=True)
 
         row = self.by_centre()["ke-meteo"]
 
-        self.assertEqual(row.origin_reachability, OriginReachability.UNREACHABLE)
+        self.assertEqual(row.origin_watch, OriginWatch.AT_ARCHIVE)
+        self.assertFalse(row.is_watched_at_broker)
         self.assertEqual(
-            row.origin_last_error, "Could not reach wis.ke-meteo.example.int:1883"
+            row.origin_broker_reachability, OriginReachability.UNREACHABLE
+        )
+        self.assertEqual(row.origin_last_error, "Connection timed out")
+
+    def test_a_centre_watched_at_an_archive_it_never_advertised_a_broker_for(self):
+        """The fallback does not assert a broker that was never advertised.
+
+        The archive is polled for these centres too -- a centre with no broker
+        on the record has never been heard from at all -- so the state has to
+        be true of them, and what its broker is doing is the line beneath.
+        """
+        origin_api(self.node("ke-meteo"), is_reachable=True)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.origin_watch, OriginWatch.AT_ARCHIVE)
+        self.assertEqual(
+            row.origin_broker_reachability, OriginReachability.NOT_ADVERTISED
         )
 
-    def test_a_broker_nothing_has_tried_yet_is_not_called_reachable(self):
+    def test_a_broker_that_answers_is_what_the_row_reports_watching_at(self):
+        """The two transports are one witness, and the broker is the one owed."""
+        node = self.node("ke-meteo")
+        origin_broker(node, is_reachable=True)
+        origin_api(node, is_reachable=True)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.origin_watch, OriginWatch.AT_BROKER)
+
+    def test_a_centre_neither_transport_answers_for_is_not_watched(self):
+        node = self.node("ke-meteo")
+        origin_broker(node, is_reachable=False, last_error="Connection timed out")
+        origin_api(node, is_reachable=False)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.origin_watch, OriginWatch.UNWATCHED)
+        self.assertEqual(row.origin_last_error, "Connection timed out")
+
+    def test_a_broker_nothing_has_tried_yet_is_not_read_as_watching(self):
         origin_broker(self.node("ke-meteo"))
 
         row = self.by_centre()["ke-meteo"]
 
-        self.assertEqual(row.origin_reachability, OriginReachability.NOT_ATTEMPTED)
+        self.assertEqual(row.origin_watch, OriginWatch.UNWATCHED)
+        self.assertEqual(
+            row.origin_broker_reachability, OriginReachability.NOT_ATTEMPTED
+        )
 
-    def test_a_centre_advertising_no_broker_of_its_own_says_so(self):
+    def test_an_archive_nothing_has_polled_yet_is_not_read_as_watching(self):
+        node = self.node("ke-meteo")
+        origin_broker(node, is_reachable=False)
+        origin_api(node)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.origin_watch, OriginWatch.UNWATCHED)
+
+    def test_a_vantage_point_switched_off_is_not_read_as_watching(self):
+        """What is not being asked any more carries an answer that has gone stale.
+
+        The same rule the propagation evaluation applies, because a row
+        claiming a centre is watched while the evaluation refuses to judge it
+        is the contradiction that costs the table its credibility.
+        """
+        origin_broker(self.node("ke-meteo"), is_reachable=True, is_active=False)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.origin_watch, OriginWatch.UNWATCHED)
+
+    def test_a_centre_with_no_vantage_point_at_all_says_so(self):
         self.node("ke-meteo")
 
         row = self.by_centre()["ke-meteo"]
 
-        self.assertEqual(row.origin_reachability, OriginReachability.NOT_ADVERTISED)
+        self.assertEqual(row.origin_watch, OriginWatch.UNWATCHED)
+        self.assertEqual(
+            row.origin_broker_reachability, OriginReachability.NOT_ADVERTISED
+        )
         self.assertEqual(row.origin_last_error, "")
 
     def test_the_global_broker_is_not_mistaken_for_a_centres_own(self):
@@ -475,20 +549,19 @@ class OriginReachabilityTests(OverviewTestCase):
 
         row = self.by_centre()["ke-meteo"]
 
-        self.assertEqual(row.origin_reachability, OriginReachability.NOT_ADVERTISED)
+        self.assertEqual(row.origin_watch, OriginWatch.UNWATCHED)
+        self.assertEqual(
+            row.origin_broker_reachability, OriginReachability.NOT_ADVERTISED
+        )
 
-    def test_each_centre_carries_its_own_brokers_state(self):
+    def test_each_centre_carries_its_own_state(self):
         origin_broker(self.node("ke-meteo"), is_reachable=True)
         origin_broker(self.node("dj-anm"), is_reachable=False)
 
         rows = self.by_centre()
 
-        self.assertEqual(
-            rows["ke-meteo"].origin_reachability, OriginReachability.REACHABLE
-        )
-        self.assertEqual(
-            rows["dj-anm"].origin_reachability, OriginReachability.UNREACHABLE
-        )
+        self.assertEqual(rows["ke-meteo"].origin_watch, OriginWatch.AT_BROKER)
+        self.assertEqual(rows["dj-anm"].origin_watch, OriginWatch.UNWATCHED)
 
 
 class CachePickupTests(OverviewTestCase):

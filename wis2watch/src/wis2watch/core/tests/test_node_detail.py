@@ -20,6 +20,8 @@ from django.test import TestCase
 from wis2watch.core.analysis import (
     Expectation,
     OriginReachability,
+    OriginTransport,
+    OriginWatch,
     Silence,
     StationStanding,
     SyncScope,
@@ -37,7 +39,7 @@ from wis2watch.core.models import (
     SyncLog,
     WIS2Node,
 )
-from wis2watch.core.tests.support import at, origin_broker
+from wis2watch.core.tests.support import at, origin_api, origin_broker
 
 
 NOW = at("2026-08-11T12:00:00")
@@ -437,38 +439,117 @@ class SyncRunTests(NodeDetailTestCase):
         self.assertEqual(self.detail().sync_runs, [])
 
 
-class OriginBrokerTests(NodeDetailTestCase):
-    """Whether the missing data is a broker nothing outside can reach."""
+class OriginTests(NodeDetailTestCase):
+    """Which transport carries this centre's own view, and how that one is faring.
 
-    def test_a_broker_that_answers_is_reachable_and_says_where_it_is(self):
+    The page is where an operator lands having read one badge on the overview,
+    so the vantage point behind that badge has to be named here with the
+    address that was asked and whatever it last said -- half of what this
+    reports is a transport advertised somewhere that was never open.
+    """
+
+    def test_a_broker_that_answers_is_what_the_page_reports_watching_at(self):
         broker = origin_broker(
             self.kenya, is_reachable=True, last_connected_at=NOW - timedelta(minutes=5)
         )
 
         origin = self.detail().origin
 
+        self.assertEqual(origin.watch, OriginWatch.AT_BROKER)
+        self.assertEqual(origin.transport, OriginTransport.BROKER)
         self.assertEqual(origin.reachability, OriginReachability.REACHABLE)
         self.assertEqual(origin.address, f"{broker.host}:{broker.port}")
         self.assertEqual(origin.last_connected_at, NOW - timedelta(minutes=5))
+
+    def test_a_centre_watched_at_its_archive_says_so_and_where_that_is(self):
+        """The vantage point in play is the one the page has to describe.
+
+        An operator sent here by an archive-only badge is being asked to check
+        an HTTPS endpoint, and a page showing them the broker's address and
+        the broker's error would send them after the wrong thing.
+        """
+        origin_broker(self.kenya, is_reachable=False, last_error="Connection timed out")
+        archive = origin_api(
+            self.kenya,
+            is_reachable=True,
+            last_connected_at=NOW - timedelta(minutes=20),
+        )
+
+        origin = self.detail().origin
+
+        self.assertEqual(origin.watch, OriginWatch.AT_ARCHIVE)
+        self.assertEqual(origin.transport, OriginTransport.ARCHIVE)
+        self.assertEqual(origin.reachability, OriginReachability.REACHABLE)
+        self.assertEqual(origin.address, archive.api_url)
+        self.assertEqual(origin.last_connected_at, NOW - timedelta(minutes=20))
+        self.assertEqual(origin.last_error, "")
+
+    def test_a_broker_that_answers_is_preferred_to_an_archive_that_does(self):
+        broker = origin_broker(self.kenya, is_reachable=True)
+        origin_api(self.kenya, is_reachable=True)
+
+        origin = self.detail().origin
+
+        self.assertEqual(origin.watch, OriginWatch.AT_BROKER)
+        self.assertEqual(origin.address, f"{broker.host}:{broker.port}")
 
     def test_a_broker_that_does_not_answer_says_what_went_wrong(self):
         origin_broker(self.kenya, is_reachable=False, last_error="Connection timed out")
 
         origin = self.detail().origin
 
+        self.assertEqual(origin.watch, OriginWatch.UNWATCHED)
+        self.assertEqual(origin.transport, OriginTransport.BROKER)
         self.assertEqual(origin.reachability, OriginReachability.UNREACHABLE)
+        self.assertEqual(origin.last_error, "Connection timed out")
+
+    def test_an_unwatched_centre_is_described_by_the_broker_it_owes(self):
+        """Where nothing answers, the broker is the vantage point to describe.
+
+        Its archive is an address this tool inferred and polls as a fallback;
+        its broker is the one the centre is obliged to run, and the one whose
+        error somebody is going to be asked about.
+        """
+        origin_broker(self.kenya, is_reachable=False, last_error="Connection timed out")
+        origin_api(self.kenya, is_reachable=False, last_error="404 Not Found")
+
+        origin = self.detail().origin
+
+        self.assertEqual(origin.watch, OriginWatch.UNWATCHED)
+        self.assertEqual(origin.transport, OriginTransport.BROKER)
         self.assertEqual(origin.last_error, "Connection timed out")
 
     def test_a_broker_nothing_has_tried_yet_is_not_called_unreachable(self):
         origin_broker(self.kenya)
 
-        self.assertEqual(
-            self.detail().origin.reachability, OriginReachability.NOT_ATTEMPTED
-        )
-
-    def test_a_centre_advertising_no_broker_of_its_own_says_so(self):
         origin = self.detail().origin
 
+        self.assertEqual(origin.watch, OriginWatch.UNWATCHED)
+        self.assertEqual(origin.reachability, OriginReachability.NOT_ATTEMPTED)
+
+    def test_a_vantage_point_switched_off_is_not_read_as_watching(self):
+        origin_broker(self.kenya, is_reachable=True, is_active=False)
+
+        origin = self.detail().origin
+
+        self.assertEqual(origin.watch, OriginWatch.UNWATCHED)
+        self.assertFalse(origin.connections_enabled)
+
+    def test_a_centre_with_only_an_archive_is_described_by_it(self):
+        archive = origin_api(self.kenya, is_reachable=False, last_error="404 Not Found")
+
+        origin = self.detail().origin
+
+        self.assertEqual(origin.watch, OriginWatch.UNWATCHED)
+        self.assertEqual(origin.transport, OriginTransport.ARCHIVE)
+        self.assertEqual(origin.address, archive.api_url)
+        self.assertEqual(origin.last_error, "404 Not Found")
+
+    def test_a_centre_with_no_vantage_point_at_all_says_so(self):
+        origin = self.detail().origin
+
+        self.assertEqual(origin.watch, OriginWatch.UNWATCHED)
+        self.assertEqual(origin.transport, OriginTransport.NONE)
         self.assertEqual(origin.reachability, OriginReachability.NOT_ADVERTISED)
         self.assertEqual(origin.address, "")
 
@@ -477,6 +558,7 @@ class OriginBrokerTests(NodeDetailTestCase):
         self.global_broker.is_reachable = True
         self.global_broker.save()
 
-        self.assertEqual(
-            self.detail().origin.reachability, OriginReachability.NOT_ADVERTISED
-        )
+        origin = self.detail().origin
+
+        self.assertEqual(origin.watch, OriginWatch.UNWATCHED)
+        self.assertEqual(origin.reachability, OriginReachability.NOT_ADVERTISED)
