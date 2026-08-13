@@ -106,6 +106,25 @@ def origin_broker(node, **kwargs):
     )
 
 
+def origin_api(node, **kwargs):
+    """A node's own message archive, as a catalogue sync leaves it.
+
+    Nothing is said about whether it answers, for the same reason a freshly
+    synced broker says nothing: no poll has settled it yet.
+    """
+    base_url = node.base_url or f"https://wis2.{node.centre_id}.example.int"
+
+    kwargs.setdefault("name", f"{node.centre_id} origin API")
+    kwargs.setdefault("api_url", f"{base_url}/oapi/collections/messages")
+
+    return MessageSource.objects.create(
+        source_type=MessageSource.ORIGIN_API,
+        node=node,
+        centre_id=node.centre_id,
+        **kwargs,
+    )
+
+
 class NetworkAccessInTest(AssertionError):
     """Raised when a test that must be offline opens a socket."""
 

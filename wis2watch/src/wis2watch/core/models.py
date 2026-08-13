@@ -1,6 +1,7 @@
 from django.contrib.gis.db import models
 from django.contrib.gis.geos import Polygon
 from django.contrib.postgres.fields import ArrayField
+from django.core.exceptions import ValidationError
 from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext_lazy as _
 from django_countries.fields import CountryField
@@ -225,33 +226,50 @@ class MessageSourceQuerySet(models.QuerySet):
         """
         return self.filter(carried_by__isnull=True)
 
-    def origin_brokers(self):
-        """The nodes' own brokers this tool is currently meant to be watching.
+    def dialled(self):
+        """The sources a connection is actually opened to.
 
-        A broker switched off in the admin is not one of them: reachability is
-        only ever what the last live connection recorded, so a source nothing
-        is dialling any more carries an answer that has since gone stale.
+        Narrower than :meth:`connections` by one more kind: a centre's own
+        message archive is read over HTTP on a schedule, so it has an address
+        of its own to correct but nothing that holds a connection open. Asked
+        wherever the question is how the connections are faring, since an
+        archive counted among them would sit there for ever as one that never
+        came up.
+        """
+        return self.connections().exclude(source_type=MessageSource.ORIGIN_API)
+
+    def origin_vantages(self):
+        """The centres' own vantage points this tool is meant to be watching.
+
+        Both transports a centre offers on its own account: the broker it
+        publishes to, and the archive of those notifications it serves over
+        HTTP. Which of the two a centre was heard through does not change what
+        being heard entitles this tool to say about it.
+
+        A vantage point switched off in the admin is not one of them:
+        reachability is only ever what the last attempt recorded, so a source
+        nothing is asking any more carries an answer that has since gone stale.
         """
         return self.filter(
-            source_type=MessageSource.ORIGIN_BROKER,
+            source_type__in=MessageSource.ORIGIN_TRANSPORTS,
             is_active=True,
             node__isnull=False,
         )
 
     def watched_origins(self):
-        """The origin brokers whose view of their centre can be trusted now.
+        """The origin vantage points whose view of their centre can be trusted now.
 
         What decides whether a centre may be judged on the difference between
-        its own broker and the Global Broker -- and so is asked both by the
-        evaluation that records propagation gaps and by the report that lists
-        them. Written once, because a gap recorded while a broker answered and
-        then reported after it went dark is exactly the finding neither of them
-        should stand behind.
+        what it published itself and what the Global Broker carried -- and so
+        is asked both by the evaluation that records propagation gaps and by
+        the report that lists them. Written once, because a gap recorded while
+        a centre answered and then reported after it went dark is exactly the
+        finding neither of them should stand behind.
 
         A null reachability is "not attempted yet", and is no more a licence to
         judge a centre than a failure is.
         """
-        return self.origin_brokers().filter(is_reachable=True)
+        return self.origin_vantages().filter(is_reachable=True)
 
 
 class MessageSource(TimeStampedModel):
@@ -268,18 +286,28 @@ class MessageSource(TimeStampedModel):
     A vantage point is not always a connection of its own. Global Cache pickup
     is read off the ``cache/`` topics of a Global Broker connection, so its
     source records which connection carries it rather than an address anything
-    dials; ``carried_by`` is what says so.
+    dials; ``carried_by`` is what says so. Nor is it always a connection at
+    all: a centre's own notification archive is an HTTP endpoint asked on a
+    schedule, and what it carries is the same centre's traffic seen a second
+    way rather than a second kind of finding.
     """
 
     GLOBAL_BROKER = "global_broker"
     GLOBAL_CACHE = "global_cache"
     ORIGIN_BROKER = "origin_broker"
+    ORIGIN_API = "origin_api"
 
     SOURCE_TYPE_CHOICES = [
         (GLOBAL_BROKER, _("Global Broker")),
         (GLOBAL_CACHE, _("Global Cache")),
         (ORIGIN_BROKER, _("Origin Broker")),
+        (ORIGIN_API, _("Origin API")),
     ]
+
+    #: The ways a centre offers its own traffic on its own account. Both are
+    #: the centre speaking for itself, which is what a propagation finding is
+    #: entitled to be judged against; how it was reached is transport.
+    ORIGIN_TRANSPORTS = (ORIGIN_BROKER, ORIGIN_API)
 
     name = models.CharField(max_length=200)
     source_type = models.CharField(
@@ -312,11 +340,29 @@ class MessageSource(TimeStampedModel):
         ),
     )
 
-    host = models.CharField(max_length=255)
+    host = models.CharField(max_length=255, blank=True)
     port = models.IntegerField(default=1883)
     username = models.CharField(max_length=100, blank=True)
     password = models.CharField(max_length=255, blank=True)
     use_tls = models.BooleanField(default=False)
+
+    # Nothing advertises where a centre's notification archive lives: no WCMP2
+    # link relation names it, and serving one at all is a wis2box convention
+    # rather than a WIS2 requirement. So the address is worked out from the
+    # node's base URL, which is itself inferred from a canonical link -- and a
+    # centre that publishes those into separate object storage yields a base
+    # URL the archive does not live under. Correcting it by hand has to be the
+    # last word, which is why a sync offers this once and never writes over it.
+    api_url = models.URLField(
+        max_length=1000,
+        blank=True,
+        verbose_name=_("Message archive URL"),
+        help_text=_(
+            "Where this centre serves its own notification archive. Offered "
+            "from the node's address, which is a guess; correct it here and "
+            "the correction stands."
+        ),
+    )
 
     is_active = models.BooleanField(
         default=True,
@@ -334,6 +380,7 @@ class MessageSource(TimeStampedModel):
     # catalogue sync has just advertised is in the first state, not the second.
     is_reachable = models.BooleanField(
         null=True,
+        blank=True,
         default=None,
         help_text=_("Null until a connection to this broker has been attempted"),
     )
@@ -362,15 +409,23 @@ class MessageSource(TimeStampedModel):
             ],
             heading=_("Broker Connection"),
         ),
+        # Editable, and the only field on this form that is meant to be
+        # corrected by hand: the address is derived from an inference about
+        # where the centre answers, and the operator is the one who can tell
+        # that it is wrong.
+        MultiFieldPanel(
+            [FieldPanel("api_url")],
+            heading=_("Message Archive"),
+        ),
         FieldPanel("is_active"),
     ]
 
     class Meta:
         ordering = ["source_type", "name"]
         constraints = [
-            # A node has one broker of any given kind. The source type takes
-            # part so that a node can later gain a second vantage point (a
-            # cache feed, say) without a schema change.
+            # A node has one vantage point of any given kind: one broker of
+            # its own, and one archive of its own. The source type takes part
+            # so that a node can gain a further one without a schema change.
             models.UniqueConstraint(
                 fields=["node", "source_type"],
                 condition=models.Q(node__isnull=False),
@@ -403,13 +458,39 @@ class MessageSource(TimeStampedModel):
     def __str__(self):
         return f"{self.name} ({self.get_source_type_display()})"
 
+    def clean(self):
+        """A vantage point is nothing without the address it is reached at.
+
+        Which address that is depends on what kind it is, and neither field
+        can be required of every kind: a broker has no archive to read and an
+        archive has no host to dial. Checked here rather than on the fields so
+        that the admin refuses the one that is actually missing, instead of
+        asking an operator correcting an archive's URL for a broker host that
+        would mean nothing.
+        """
+        super().clean()
+
+        if self.source_type == self.ORIGIN_API:
+            if not self.api_url:
+                raise ValidationError(
+                    {
+                        "api_url": _(
+                            "An origin API needs the address of the archive it "
+                            "is read from."
+                        )
+                    }
+                )
+        elif not self.host:
+            raise ValidationError({"host": _("A broker needs a host to dial.")})
+
     @property
     def owning_centre_id(self):
         """The centre this source belongs to, or an empty string.
 
-        A Global Broker names its own centre; an origin broker's centre is the
-        node it belongs to. Resolving that here keeps callers from walking the
-        node relation and guessing which of the two applies.
+        A Global Broker names its own centre; a centre's own vantage points
+        take their centre from the node they belong to. Resolving that here
+        keeps callers from walking the node relation and guessing which of the
+        two applies.
         """
         if self.centre_id:
             return self.centre_id

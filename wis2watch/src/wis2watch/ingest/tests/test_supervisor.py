@@ -22,7 +22,12 @@ from wis2watch.core.models import (
     NotificationMessage,
     WIS2Node,
 )
-from wis2watch.core.tests.support import in_region, load_jsonl_fixture, origin_broker
+from wis2watch.core.tests.support import (
+    in_region,
+    load_jsonl_fixture,
+    origin_api,
+    origin_broker,
+)
 from wis2watch.ingest.client import RECONNECT_MAX_DELAY
 from wis2watch.ingest.store import store_notifications
 from wis2watch.ingest.supervisor import Supervisor
@@ -471,6 +476,24 @@ class OriginBrokersFollowTheRegistryTests(SupervisorTestCase):
         self.assertTrue(self.is_connected(dj))
         self.assertTrue(self.listeners[ke].started)
         self.assertTrue(self.listeners[dj].started)
+
+    def test_a_centre_own_message_archive_is_never_connected_to(self):
+        """A vantage point read over HTTP has nothing for this loop to dial."""
+        archive = origin_api(self.node("ke-meteo"))
+
+        self.supervisor.start_listeners()
+        self.supervisor.refresh_from_registry()
+
+        self.assertFalse(self.is_connected(archive))
+
+    def test_an_archive_beside_a_broker_leaves_the_broker_connected(self):
+        broker = self.origin_broker("ke-meteo")
+        archive = origin_api(broker.node)
+
+        self.supervisor.start_listeners()
+
+        self.assertTrue(self.is_connected(broker))
+        self.assertFalse(self.is_connected(archive))
 
     def test_a_node_broker_is_asked_for_its_own_centre_only(self):
         origin = self.origin_broker("ke-meteo")

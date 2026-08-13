@@ -291,9 +291,17 @@ def _ingestion_symptom(*, now):
     a centre whose clock is days out is not a stall. The publication time is
     the publisher's claim, and this is a question about this tool.
 
-    Any source counts. One centre's origin broker still delivering is not a
-    healthy region, but it is not a stall either, and this alert exists for
+    Any connection counts. One centre's origin broker still delivering is not
+    a healthy region, but it is not a stall either, and this alert exists for
     the case where nothing is arriving at all.
+
+    What a poller wrote does not count, and that exclusion is the whole
+    integrity of this alert. It is the only thing standing between the
+    single-replica ingest process dying and nobody noticing, and it works by
+    reading a clock that only that process winds. A poller runs elsewhere, on
+    a schedule of its own, and its rows would hold the clock up indefinitely
+    while nothing at all was being listened to -- an alert silently disabled
+    by another feature working correctly.
 
     Unlike the broker check, this one can date its own failure: the moment the
     last message arrived is the moment ingestion stopped. An installation that
@@ -301,7 +309,10 @@ def _ingestion_symptom(*, now):
     was first looked at instead.
     """
     arrived = (
-        NotificationMessage.objects.order_by("-received_datetime")
+        NotificationMessage.objects.exclude(
+            source__source_type=MessageSource.ORIGIN_API
+        )
+        .order_by("-received_datetime")
         .values_list("received_datetime", flat=True)
         .first()
     )

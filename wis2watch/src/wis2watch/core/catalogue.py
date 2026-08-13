@@ -54,6 +54,14 @@ FETCH_TIMEOUT = 60
 #: the base URL is worth learning.
 DERIVED_FROM_BASE_URL = ("discovery_metadata_url", "stations_url")
 
+#: Where a wis2box serves the archive of the notifications it has published,
+#: relative to the node's own address. A wis2box convention rather than a WIS2
+#: requirement: nodes running other software answer 404 here, and among those
+#: that do serve it the retention observed in the wild runs from about a day
+#: to several months. Nothing in WCMP2 advertises it, which is why this is a
+#: guess offered to an operator rather than a fact read off a record.
+MESSAGE_ARCHIVE_PATH = "/oapi/collections/messages"
+
 
 def discovery_metadata_url(catalogue):
     """Where a catalogue serves its discovery metadata records."""
@@ -145,6 +153,44 @@ def _apply_origin_broker(node, broker):
     )
 
 
+def message_archive_url(base_url):
+    """Where a node is expected to serve its own notification archive."""
+    return f"{base_url.rstrip('/')}{MESSAGE_ARCHIVE_PATH}"
+
+
+def _apply_origin_api(node):
+    """The node's own message archive, as a vantage point on it.
+
+    Created beside the origin broker, and settled by nothing: reachability
+    stays null until something has actually asked, in the way a freshly synced
+    broker's does until something dials it. A row here is the tool knowing
+    where a centre's archive would be, not a claim that one is there.
+
+    Offered once and never written over, because the address is a guess twice
+    removed -- a path a wis2box happens to serve, under a base URL inferred
+    from a canonical link -- and an operator who has corrected it knows
+    something this sync does not. That is also why it is offered to a manually
+    managed node: what it is derived from is the node's own address, which for
+    such a node is the operator's own correction rather than the catalogue's.
+
+    A node with no address of its own gets nothing. There is nowhere to guess
+    from, and a row pointing at a path with no host would be a vantage point on
+    nothing.
+    """
+    if not node.base_url:
+        return
+
+    MessageSource.objects.get_or_create(
+        node=node,
+        source_type=MessageSource.ORIGIN_API,
+        defaults={
+            "name": f"{node.centre_id} origin API",
+            "centre_id": node.centre_id,
+            "api_url": message_archive_url(node.base_url),
+        },
+    )
+
+
 def _apply_dataset(node, discovered):
     """The dataset a record describes, created or refreshed."""
     _, created = Dataset.objects.update_or_create(
@@ -181,6 +227,8 @@ def apply_discovery_record(record):
 
             if not node.is_manually_managed:
                 _apply_origin_broker(node, record.origin_broker)
+
+            _apply_origin_api(node)
 
             return _apply_dataset(node, record.dataset)
     except Exception as exc:

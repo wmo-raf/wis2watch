@@ -9,7 +9,7 @@ confidently wrong answer rather than an exception.
 from django.test import TestCase
 
 from wis2watch.core.models import MessageSource, WIS2Node
-from wis2watch.core.tests.support import origin_broker
+from wis2watch.core.tests.support import origin_api, origin_broker
 from wis2watch.ingest.subscriptions import (
     active_global_broker_sources,
     active_origin_broker_sources,
@@ -195,6 +195,11 @@ def broker_for(centre_id, **kwargs):
     return origin_broker(node(centre_id), **kwargs)
 
 
+def origin_api_for(centre_id, *, on=None, **kwargs):
+    """A new node with a message archive of its own, as a sync leaves it."""
+    return origin_api(on or node(centre_id), **kwargs)
+
+
 class OriginBrokerSourceTests(TestCase):
     """Every monitored node's own broker is attempted, reachable or not."""
 
@@ -235,6 +240,20 @@ class OriginBrokerSourceTests(TestCase):
         )
 
         self.assertEqual(list(active_origin_broker_sources()), [])
+
+    def test_a_centre_own_message_archive_is_never_dialled(self):
+        """It is a vantage point read over HTTP; there is nothing to connect to."""
+        origin_api_for("ke-meteo")
+
+        self.assertEqual(list(active_origin_broker_sources()), [])
+
+    def test_an_archive_beside_a_broker_leaves_the_broker_dialled_alone(self):
+        broker = broker_for("ke-meteo")
+        origin_api_for("ke-meteo", on=broker.node)
+
+        self.assertEqual(
+            [source.pk for source in active_origin_broker_sources()], [broker.pk]
+        )
 
 
 class OriginBrokerSubscriptionTests(TestCase):
