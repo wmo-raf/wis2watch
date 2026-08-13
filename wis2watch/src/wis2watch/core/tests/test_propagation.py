@@ -35,8 +35,24 @@ NOW = at("2026-08-11T12:00:00")
 #: without a time of its own is one the tool is entitled to judge.
 LONG_ENOUGH_AGO = NOW - timedelta(hours=1)
 
+#: How far back the world is heard by default: wider than the evaluation
+#: window these cases use, so that anything inside it is in hours the run can
+#: prove it was listening through.
+HEARD_SINCE = NOW - timedelta(hours=50)
+
 
 class PropagationTestCase(TestCase):
+    """One centre, one Global Broker, and a world that is being heard.
+
+    The last of those is a fixture rather than a subject: a run judges only
+    the hours it can prove it was listening through, so ordinary Global Broker
+    traffic is the background every case about something else is set against.
+    A case about blindness turns it off.
+    """
+
+    #: Whether to seed that background.
+    the_world_is_heard = True
+
     def setUp(self):
         self.global_broker = MessageSource.objects.create(
             name="Global Broker",
@@ -46,6 +62,38 @@ class PropagationTestCase(TestCase):
         )
         self.kenya = WIS2Node.objects.create(centre_id="ke-meteo", name="Kenya Met")
         self.kenya_origin = origin_broker(self.kenya, is_reachable=True)
+
+        if self.the_world_is_heard:
+            self.world_heard_throughout()
+
+    def world_heard_throughout(
+        self, since=HEARD_SINCE, until=NOW, every=timedelta(minutes=10)
+    ):
+        """The rest of the world's traffic, arriving steadily on the Global Broker.
+
+        Nothing here is about these messages: they belong to no monitored
+        centre and are never matched against anything. What they are is the
+        evidence that the connection was up, arriving often enough that every
+        grace period in these cases contains one -- and a run will not judge a
+        notification whose grace period contains none.
+        """
+        arrivals = []
+        arrival = since
+
+        while arrival <= until:
+            arrivals.append(
+                NotificationMessage(
+                    source=self.global_broker,
+                    notification_id=f"elsewhere-{arrival.isoformat()}",
+                    topic="origin/a/wis2/xx-elsewhere/data/core/weather",
+                    time=arrival,
+                    received_datetime=arrival,
+                    raw_json={},
+                )
+            )
+            arrival += every
+
+        NotificationMessage.objects.bulk_create(arrivals)
 
     def observe(self, source, notification_id, *, node, published=None, received=None):
         """One notification, as one vantage point observed it.
@@ -357,32 +405,17 @@ class SuppressionTests(PropagationTestCase):
         self.assertEqual(counts.nodes_evaluated, 1)
         self.assertEqual(counts.nodes_suppressed, 1)
 
-    def test_nothing_is_judged_while_the_world_itself_is_not_being_watched(self):
-        """The other half of the blind spot, and the one that scales.
+    def test_what_the_connection_record_says_now_does_not_unjudge_past_hours(self):
+        """Blindness is read off the traffic, not off a side record.
 
-        A Global Broker connection that is down does not stop the origin
-        brokers delivering, and a broker does not redeliver what it sent while
-        nobody was listening -- so every centre at once would accrue phantom
-        gaps that nothing could ever close.
+        A connection marked down at the moment a run happens says nothing
+        about the hours that run is judging, which are hours it heard the
+        world throughout.
         """
-        self.at_origin("published-during-our-own-outage")
-        self.global_broker.is_reachable = False
-        self.global_broker.save()
-
-        counts = self.evaluate()
-
-        self.assertEqual(self.missing(), [])
-        self.assertEqual(counts.nodes_evaluated, 0)
-        self.assertEqual(counts.nodes_suppressed, 1)
-
-    def test_judging_resumes_once_the_world_is_watched_again(self):
         self.at_origin("really-lost")
         self.global_broker.is_reachable = False
         self.global_broker.save()
-        self.evaluate()
 
-        self.global_broker.is_reachable = True
-        self.global_broker.save()
         self.evaluate()
 
         self.assertEqual(self.missing(), ["really-lost"])
@@ -397,6 +430,142 @@ class SuppressionTests(PropagationTestCase):
         self.evaluate()
 
         self.assertEqual(self.missing(), ["lost-while-watching"])
+
+
+class UnheardWorldTests(PropagationTestCase):
+    """The hours the tool cannot prove it was listening through.
+
+    A Global Broker connection that drops does not stop the origin brokers
+    delivering, so every notification observed at origin during the outage
+    looks unpropagated -- and a broker does not redeliver what it sent while
+    nobody was listening, so each of those would be a phantom gap nothing
+    could ever close. The connection coming back does not make those hours
+    judgeable; it only makes a recompute reach them.
+
+    So blindness is read off the evidence: a notification is judged only if
+    some Global Broker message arrived inside the same grace period it is
+    being judged against. Hours with no arrivals in them are hours the tool
+    was not hearing the world, whatever the reason -- a dropped connection, an
+    instance switched off, a machine that never ran at all.
+
+    One edge stays open, and is known: at the moment a connection comes back,
+    the burst delivered on reconnect can fall inside the grace period of a
+    notification observed shortly before it, which makes that one notification
+    judgeable on evidence that arrived after its window opened rather than
+    through it. See the module's own documentation.
+    """
+
+    the_world_is_heard = False
+
+    OUTAGE_BEGAN = NOW - timedelta(hours=4)
+    OUTAGE_ENDED = NOW - timedelta(hours=1)
+
+    def the_connection_dropped_and_came_back(self):
+        """What an outage leaves behind, which is not a record of itself.
+
+        Traffic up to the moment the connection dropped, traffic from the
+        moment it returned, and hours in between with nothing in them.
+        """
+        self.world_heard_throughout(until=self.OUTAGE_BEGAN)
+        self.world_heard_throughout(since=self.OUTAGE_ENDED)
+
+    def published_at_origin(self, notification_id, when):
+        """A notification the centre published, and this tool saw, at one instant.
+
+        Which hour a notification belongs to is the whole subject here, so
+        both times are the same one and are said rather than defaulted.
+        """
+        return self.at_origin(notification_id, published=when, received=when)
+
+    def test_a_notification_seen_at_origin_during_the_outage_is_never_a_gap(self):
+        """The whole point: a recompute after recovery must not judge those hours."""
+        self.the_connection_dropped_and_came_back()
+        self.published_at_origin("published-in-the-dark", NOW - timedelta(hours=3))
+
+        self.evaluate()
+
+        self.assertEqual(self.missing(), [])
+
+    def test_a_notification_lost_while_the_world_was_heard_is_still_a_gap(self):
+        """Suppressing the blind hours must not suppress the ones either side."""
+        self.the_connection_dropped_and_came_back()
+        self.published_at_origin("lost-before-the-outage", NOW - timedelta(hours=6))
+        self.published_at_origin("lost-after-the-outage", NOW - timedelta(minutes=40))
+
+        self.evaluate()
+
+        self.assertEqual(
+            self.missing(), ["lost-after-the-outage", "lost-before-the-outage"]
+        )
+
+    def test_an_installation_that_has_heard_no_global_broker_traffic_judges_nothing(
+        self,
+    ):
+        """A tool that has never heard the world knows nothing about the world.
+
+        The failure mode this shape has to survive: not an outage but an
+        instance that was simply never listening, which recorded no outage
+        because nothing was running to record one. Judging on that would call
+        every notification every centre published a gap.
+        """
+        self.at_origin("the-only-thing-anyone-saw")
+
+        counts = self.evaluate()
+
+        self.assertEqual(self.missing(), [])
+        self.assertEqual(counts.detected, 0)
+
+    def test_the_run_says_how_much_it_could_not_judge(self):
+        """A run that judged nothing because it was blind is not good news.
+
+        Nothing found and nothing judgeable read identically in a log unless
+        the run says which it was.
+        """
+        self.the_connection_dropped_and_came_back()
+        self.published_at_origin("in-the-dark", NOW - timedelta(hours=3))
+        self.published_at_origin("also-in-the-dark", NOW - timedelta(hours=2))
+        self.published_at_origin("really-lost", NOW - timedelta(hours=6))
+
+        counts = self.evaluate()
+
+        self.assertEqual(counts.detected, 1)
+        self.assertEqual(counts.unheard, 2)
+        self.assertIn("unheard=2", counts.summary)
+
+    def test_a_gap_found_before_the_outage_keeps_the_moment_it_was_found(self):
+        """The change is to what is newly found, not to what is on the record."""
+        self.the_connection_dropped_and_came_back()
+        self.published_at_origin("lost-before-the-outage", NOW - timedelta(hours=6))
+
+        found_at = NOW - timedelta(hours=5)
+        self.evaluate(now=found_at)
+
+        counts = self.evaluate()
+
+        self.assertEqual(self.missing(), ["lost-before-the-outage"])
+        self.assertEqual(self.gaps()[0].detected_at, found_at)
+        self.assertEqual(counts.detected, 0)
+
+    def test_a_gap_recorded_before_the_outage_is_still_closed_by_a_late_arrival(self):
+        """Blindness bounds what is found, not what is settled.
+
+        A message the world turns out to have carried after all is closed
+        whenever the evidence of it shows up, including the reconnection burst
+        that ends an outage.
+        """
+        self.the_connection_dropped_and_came_back()
+        self.published_at_origin("very-slow", NOW - timedelta(hours=6))
+        self.evaluate(now=NOW - timedelta(hours=5))
+
+        self.at_global(
+            "very-slow",
+            published=NOW - timedelta(hours=6),
+            received=self.OUTAGE_ENDED,
+        )
+        counts = self.evaluate()
+
+        self.assertEqual(self.gaps()[0].resolved_at, self.OUTAGE_ENDED)
+        self.assertEqual(counts.resolved, 1)
 
 
 class WindowTests(PropagationTestCase):
