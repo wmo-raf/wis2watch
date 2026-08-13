@@ -165,20 +165,29 @@ def evaluate_propagation(*, now=None, grace_minutes=None, window_hours=None):
     )
     since = evaluation_window_start(now, window_hours)
 
-    # Which brokers may be judged on is the model's answer rather than this
-    # module's, because the report that lists the gaps recorded here asks the
-    # same question of the same brokers: the two answering differently would
-    # put a centre's gaps on a page the evaluation had decided it could not
-    # judge.
+    # Which vantage points may be judged on is the model's answer rather than
+    # this module's, because the report that lists the gaps recorded here asks
+    # the same question of the same vantage points: the two answering
+    # differently would put a centre's gaps on a page the evaluation had
+    # decided it could not judge.
     sources = list(MessageSource.objects.watched_origins())
+    evaluated_nodes = {source.node_id for source in sources}
     counts = PropagationCounts(
-        nodes_evaluated=len(sources),
-        # A node has at most one broker of its own, so counting the sources
-        # not evaluated counts the centres passed over entirely. What is
+        # Counted by centre rather than by row. A centre may offer more than
+        # one vantage point on itself -- its broker and its own archive -- and
+        # what these two numbers are about is which centres this run could
+        # look at, not how many ways it could have looked at them. What is
         # passed over one notification at a time, for hours the world was not
         # being heard through, is counted separately: it is a bound on what
         # this run could judge, not on which centres it looked at.
-        nodes_suppressed=MessageSource.objects.origin_brokers().count() - len(sources),
+        nodes_evaluated=len(evaluated_nodes),
+        nodes_suppressed=(
+            MessageSource.objects.origin_vantages()
+            .exclude(node_id__in=evaluated_nodes)
+            .values("node_id")
+            .distinct()
+            .count()
+        ),
     )
 
     # Closing first costs nothing and keeps a run's own two halves consistent:

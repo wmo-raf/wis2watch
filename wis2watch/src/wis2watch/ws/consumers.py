@@ -78,10 +78,12 @@ class IngestFeedConsumer(AsyncWebsocketConsumer):
         """How each broker connection is faring, as the supervisor last left it."""
         from wis2watch.core.models import MessageSource
 
-        # Connections only. A carried vantage point has no reachability of its
-        # own to report, and would show here as one that never came up.
+        # Connections only. A vantage point nothing dials -- one carried by
+        # another connection, or an archive read over HTTP -- has no
+        # reachability of its own to report here, and would show as one that
+        # never came up.
         sources = (
-            MessageSource.objects.connections()
+            MessageSource.objects.dialled()
             .filter(is_active=True)
             .select_related("node")
         )

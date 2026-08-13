@@ -245,7 +245,9 @@ class OriginBrokerTests(CatalogueSyncTestCase):
     def test_an_advertised_origin_broker_becomes_a_message_source(self):
         self.sync()
 
-        source = MessageSource.objects.get(node__centre_id="cg-met")
+        source = MessageSource.objects.get(
+            node__centre_id="cg-met", source_type=MessageSource.ORIGIN_BROKER
+        )
 
         self.assertEqual(source.source_type, MessageSource.ORIGIN_BROKER)
         self.assertEqual(source.host, "wis.dirmet.cg")
@@ -259,7 +261,9 @@ class OriginBrokerTests(CatalogueSyncTestCase):
         self.sync()
 
         self.assertFalse(
-            MessageSource.objects.filter(node__centre_id="ke-meteo").exists()
+            MessageSource.objects.filter(
+                node__centre_id="ke-meteo", source_type=MessageSource.ORIGIN_BROKER
+            ).exists()
         )
 
     def test_a_re_advertised_broker_updates_in_place(self):
@@ -273,10 +277,128 @@ class OriginBrokerTests(CatalogueSyncTestCase):
 
         self.sync(moved)
 
-        source = MessageSource.objects.get(node__centre_id="cg-met")
+        source = MessageSource.objects.get(
+            node__centre_id="cg-met", source_type=MessageSource.ORIGIN_BROKER
+        )
 
         self.assertEqual(source.port, 8883)
         self.assertTrue(source.use_tls)
+
+
+class OriginApiTests(CatalogueSyncTestCase):
+    """A centre's own message archive, offered from where its node answers.
+
+    Nothing advertises the archive -- no WCMP2 link relation names it -- so its
+    address is worked out from the node's base URL, which is itself an
+    inference from a canonical link. That is why the address is offered rather
+    than asserted: an operator correcting it has to be the last word.
+    """
+
+    def api_source(self, centre_id):
+        return MessageSource.objects.filter(
+            node__centre_id=centre_id, source_type=MessageSource.ORIGIN_API
+        ).first()
+
+    def test_a_node_with_an_address_gains_a_vantage_on_its_own_archive(self):
+        self.sync()
+
+        source = self.api_source("ke-meteo")
+
+        self.assertEqual(
+            source.api_url, "http://wis.meteo.go.ke/oapi/collections/messages"
+        )
+        self.assertEqual(source.centre_id, "ke-meteo")
+
+    def test_a_node_with_no_address_gains_nothing(self):
+        """Where the node answers is unknown, so where its archive is, is too."""
+        self.sync()
+
+        self.assertEqual(WIS2Node.objects.get(centre_id="cg-met").base_url, "")
+        self.assertIsNone(self.api_source("cg-met"))
+
+    def test_nothing_has_been_asked_of_it_yet(self):
+        self.sync()
+
+        source = self.api_source("ke-meteo")
+
+        self.assertIsNone(source.is_reachable)
+        self.assertIsNone(source.last_connected_at)
+
+    def test_it_sits_beside_the_node_own_broker_rather_than_replacing_it(self):
+        self.sync()
+
+        node = WIS2Node.objects.get(centre_id="tg-anamet")
+        MessageSource.objects.create(
+            name="tg-anamet origin broker",
+            source_type=MessageSource.ORIGIN_BROKER,
+            node=node,
+            centre_id="tg-anamet",
+            host="wis.anamet.tg",
+        )
+
+        self.sync()
+
+        self.assertEqual(node.message_sources.count(), 2)
+        self.assertEqual(
+            node.message_sources.get(source_type=MessageSource.ORIGIN_BROKER).host,
+            "wis.anamet.tg",
+        )
+
+    def test_a_corrected_address_survives_the_next_sync(self):
+        self.sync()
+
+        source = self.api_source("ke-meteo")
+        source.api_url = "https://api.meteo.go.ke/oapi/collections/messages"
+        source.save()
+
+        self.sync()
+        source.refresh_from_db()
+
+        self.assertEqual(
+            source.api_url, "https://api.meteo.go.ke/oapi/collections/messages"
+        )
+
+    def test_re_running_the_sync_leaves_one_archive_per_node(self):
+        self.sync()
+        self.sync()
+
+        self.assertEqual(
+            MessageSource.objects.filter(
+                source_type=MessageSource.ORIGIN_API
+            ).count(),
+            2,
+        )
+
+    def test_a_node_whose_address_arrives_later_gains_one_then(self):
+        """A centre nobody could place is offered an archive once somebody can."""
+        self.sync()
+
+        self.assertIsNone(self.api_source("cg-met"))
+
+        node = WIS2Node.objects.get(centre_id="cg-met")
+        node.base_url = "https://wis.dirmet.cg"
+        node.save()
+
+        self.sync()
+
+        self.assertEqual(
+            self.api_source("cg-met").api_url,
+            "https://wis.dirmet.cg/oapi/collections/messages",
+        )
+
+    def test_a_trailing_slash_on_the_node_address_is_not_doubled(self):
+        self.sync()
+
+        node = WIS2Node.objects.get(centre_id="cg-met")
+        node.base_url = "https://wis.dirmet.cg/"
+        node.save()
+
+        self.sync()
+
+        self.assertEqual(
+            self.api_source("cg-met").api_url,
+            "https://wis.dirmet.cg/oapi/collections/messages",
+        )
 
 
 class ManuallyManagedNodeTests(CatalogueSyncTestCase):
@@ -315,6 +437,19 @@ class ManuallyManagedNodeTests(CatalogueSyncTestCase):
         source.refresh_from_db()
 
         self.assertEqual(source.host, "broker.dirmet.cg")
+
+    def test_it_is_still_offered_a_vantage_on_its_own_archive(self):
+        """The address is derived from the operator's own base URL, not the
+        catalogue's, and offering it overwrites nothing they have said."""
+        self.sync()
+
+        source = MessageSource.objects.get(
+            node=self.node, source_type=MessageSource.ORIGIN_API
+        )
+
+        self.assertEqual(
+            source.api_url, "https://wis.dirmet.cg/oapi/collections/messages"
+        )
 
     def test_its_datasets_still_sync(self):
         """The manual flag protects the node's own fields, not its datasets."""
@@ -364,7 +499,10 @@ class IdempotenceTests(CatalogueSyncTestCase):
 
         self.assertEqual(WIS2Node.objects.count(), len(MONITORED_CENTRE_IDS))
         self.assertEqual(Dataset.objects.count(), len(MONITORED_CENTRE_IDS))
-        self.assertEqual(MessageSource.objects.count(), 1)
+
+        # One advertised broker, and an archive apiece for the two centres
+        # whose records say where they answer.
+        self.assertEqual(MessageSource.objects.count(), 3)
 
     def test_the_second_run_updates_rather_than_creates(self):
         self.sync()

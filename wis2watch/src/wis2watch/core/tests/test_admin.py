@@ -76,6 +76,61 @@ class AdminSmokeTests(TestCase):
         self.assertContains(response, "Global Broker")
         self.assertNotContains(response, "Global Cache via")
 
+    def test_a_centre_own_archive_is_listed_at_the_address_it_is_read_from(self):
+        """Nothing dials it, so what it needs corrected is its URL, not a port."""
+        node = WIS2Node.objects.create(
+            centre_id="ke-meteo", name="Kenya Met", base_url="https://wis2.meteo.test"
+        )
+        MessageSource.objects.create(
+            name="ke-meteo origin API",
+            source_type=MessageSource.ORIGIN_API,
+            node=node,
+            centre_id="ke-meteo",
+            api_url="https://wis2.meteo.test/oapi/collections/messages",
+        )
+
+        response = self.client.get(reverse(MessageSourceViewSet().get_url_name("index")))
+
+        self.assertContains(response, "ke-meteo origin API")
+        self.assertContains(
+            response, "https://wis2.meteo.test/oapi/collections/messages"
+        )
+
+    def test_a_guessed_archive_address_can_be_corrected_by_hand(self):
+        """The whole reason the field is editable: the guess is often wrong."""
+        node = WIS2Node.objects.create(
+            centre_id="ke-meteo", name="Kenya Met", base_url="https://files.meteo.test"
+        )
+        source = MessageSource.objects.create(
+            name="ke-meteo origin API",
+            source_type=MessageSource.ORIGIN_API,
+            node=node,
+            centre_id="ke-meteo",
+            api_url="https://files.meteo.test/oapi/collections/messages",
+        )
+
+        response = self.client.post(
+            reverse(MessageSourceViewSet().get_url_name("edit"), args=[source.pk]),
+            {
+                "name": source.name,
+                "source_type": MessageSource.ORIGIN_API,
+                "centre_id": "ke-meteo",
+                "node": node.pk,
+                "host": "",
+                "port": "1883",
+                "username": "",
+                "password": "",
+                "api_url": "https://wis2.meteo.test/oapi/collections/messages",
+                "is_active": "on",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        source.refresh_from_db()
+        self.assertEqual(
+            source.api_url, "https://wis2.meteo.test/oapi/collections/messages"
+        )
+
     def test_a_node_can_be_created_by_hand(self):
         response = self.client.post(
             reverse(WIS2NodeViewSet().get_url_name("add")),

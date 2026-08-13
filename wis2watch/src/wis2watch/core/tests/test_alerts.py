@@ -73,19 +73,34 @@ class HardFailureTestCase(TestCase):
 
         return source
 
-    def ingested(self, *, minutes_ago, published=None):
+    def ingested(self, *, minutes_ago, published=None, source=None):
         """One notification, stored when this tool actually received it."""
         received = NOW - timedelta(minutes=minutes_ago)
+        source = source or self.global_broker
 
         return NotificationMessage.objects.create(
-            source=self.global_broker,
+            source=source,
             node=self.node,
-            notification_id=f"notification-{minutes_ago}",
+            notification_id=f"notification-{source.pk}-{minutes_ago}",
             topic="origin/a/wis2/ke-meteo/data/core/weather",
             time=published or received,
             received_datetime=received,
             raw_json={},
         )
+
+    def polled(self, *, minutes_ago):
+        """One notification read out of a centre's own message archive."""
+        archive, _ = MessageSource.objects.get_or_create(
+            node=self.node,
+            source_type=MessageSource.ORIGIN_API,
+            defaults={
+                "name": "ke-meteo origin API",
+                "centre_id": "ke-meteo",
+                "api_url": "https://wis2.meteo.go.ke/oapi/collections/messages",
+            },
+        )
+
+        return self.ingested(minutes_ago=minutes_ago, source=archive)
 
     # -- reading ---------------------------------------------------------
 
@@ -263,6 +278,20 @@ class IngestionStalledTests(HardFailureTestCase):
 
         (sent,) = mail.outbox
         self.assertIn("Ingestion", sent.subject)
+
+    def test_rows_a_poller_wrote_do_not_hold_the_clock_up(self):
+        """The alert is what stands between the ingest dying and nobody noticing.
+
+        A poller writes rows on a schedule of its own, from a process that is
+        not the one this alert is watching, so counting them would leave the
+        clock permanently fresh and the alert permanently silent.
+        """
+        self.ingested(minutes_ago=STALL_MINUTES + 10)
+        self.polled(minutes_ago=1)
+
+        self.check()
+
+        self.assertIsNotNone(self.open_failure(self.KIND))
 
     def test_a_stall_is_measured_from_when_a_message_arrived(self):
         """A cache republishing an old notification is still ingestion alive."""

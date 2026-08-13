@@ -1,3 +1,4 @@
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.test import TestCase, override_settings
 from django.utils import timezone as dj_timezone
@@ -12,6 +13,7 @@ from wis2watch.core.models import (
     SyncLog,
     WIS2Node,
 )
+from wis2watch.core.tests.support import origin_api
 
 
 def make_node(centre_id="ke-kmd", **kwargs):
@@ -110,6 +112,152 @@ class MessageSourceTests(TestCase):
 
         self.assertEqual(node.message_sources.count(), 2)
         self.assertEqual(node.origin_source.host, "broker.kmd.test")
+
+
+class OriginApiSourceTests(TestCase):
+    """A centre's own notification archive, as a vantage point of its own."""
+
+    def test_a_node_has_at_most_one_origin_api(self):
+        node = make_node()
+        origin_api(node)
+
+        with self.assertRaises(IntegrityError):
+            origin_api(node, name="KMD archive duplicate")
+
+    def test_it_sits_beside_the_node_own_broker(self):
+        node = make_node()
+        make_source(
+            name="KMD origin",
+            source_type=MessageSource.ORIGIN_BROKER,
+            host="broker.kmd.test",
+            node=node,
+        )
+
+        source = origin_api(node)
+
+        self.assertEqual(node.message_sources.count(), 2)
+        self.assertEqual(
+            source.api_url, "https://example.test/oapi/collections/messages"
+        )
+
+    def test_it_carries_no_reachability_until_something_has_asked(self):
+        self.assertIsNone(origin_api(make_node()).is_reachable)
+
+    def test_the_node_own_broker_is_still_the_node_origin_source(self):
+        """``origin_source`` names the broker, which is what dials the centre."""
+        node = make_node()
+        origin_api(node)
+        make_source(
+            name="KMD origin",
+            source_type=MessageSource.ORIGIN_BROKER,
+            host="broker.kmd.test",
+            node=node,
+        )
+
+        self.assertEqual(node.origin_source.host, "broker.kmd.test")
+
+    def test_it_belongs_to_the_centre_its_node_names(self):
+        self.assertEqual(origin_api(make_node("ke-kmd")).owning_centre_id, "ke-kmd")
+
+
+class OriginVantageQuerySetTests(TestCase):
+    """Which vantage points may be judged against the Global Broker.
+
+    Both origin transports answer here, so that the evaluation recording a
+    centre's gaps and the report listing them are asking one question.
+    """
+
+    def setUp(self):
+        self.node = make_node("ke-kmd")
+        self.broker = make_source(
+            name="KMD origin",
+            source_type=MessageSource.ORIGIN_BROKER,
+            host="broker.kmd.test",
+            node=self.node,
+        )
+        self.archive = origin_api(self.node)
+
+    def test_both_origin_transports_are_origin_vantages(self):
+        self.assertEqual(
+            {source.pk for source in MessageSource.objects.origin_vantages()},
+            {self.broker.pk, self.archive.pk},
+        )
+
+    def test_a_global_broker_is_not_an_origin_vantage(self):
+        make_source()
+
+        self.assertNotIn(
+            MessageSource.GLOBAL_BROKER,
+            {source.source_type for source in MessageSource.objects.origin_vantages()},
+        )
+
+    def test_a_vantage_switched_off_is_not_one(self):
+        self.archive.is_active = False
+        self.archive.save()
+
+        self.assertEqual(
+            [source.pk for source in MessageSource.objects.origin_vantages()],
+            [self.broker.pk],
+        )
+
+    def test_only_the_vantages_that_answered_may_be_judged_on(self):
+        self.broker.is_reachable = True
+        self.broker.save()
+
+        self.assertEqual(
+            [source.pk for source in MessageSource.objects.watched_origins()],
+            [self.broker.pk],
+        )
+
+    def test_a_reachable_archive_may_be_judged_on_too(self):
+        self.archive.is_reachable = True
+        self.archive.save()
+
+        self.assertEqual(
+            [source.pk for source in MessageSource.objects.watched_origins()],
+            [self.archive.pk],
+        )
+
+    def test_nothing_is_dialled_at_an_archive(self):
+        """The status panel reports connections; nothing connects to an archive."""
+        self.assertEqual(
+            {source.pk for source in MessageSource.objects.dialled()},
+            {self.broker.pk},
+        )
+
+
+class MessageSourceAddressTests(TestCase):
+    """What an operator has to give a vantage point before it will save."""
+
+    def test_a_broker_needs_a_host(self):
+        source = MessageSource(name="Nowhere", source_type=MessageSource.GLOBAL_BROKER)
+
+        with self.assertRaises(ValidationError) as raised:
+            source.full_clean()
+
+        self.assertIn("host", raised.exception.error_dict)
+
+    def test_an_origin_api_needs_an_archive_address(self):
+        source = MessageSource(
+            name="ke-kmd origin API",
+            source_type=MessageSource.ORIGIN_API,
+            node=make_node("ke-kmd"),
+        )
+
+        with self.assertRaises(ValidationError) as raised:
+            source.full_clean()
+
+        self.assertIn("api_url", raised.exception.error_dict)
+
+    def test_an_origin_api_needs_no_host(self):
+        source = MessageSource(
+            name="ke-kmd origin API",
+            source_type=MessageSource.ORIGIN_API,
+            node=make_node("ke-kmd"),
+            api_url="https://example.test/oapi/collections/messages",
+        )
+
+        source.full_clean()
 
 
 class NotificationMessageTests(TestCase):

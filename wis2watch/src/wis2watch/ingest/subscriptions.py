@@ -83,6 +83,11 @@ def active_origin_broker_sources():
     to be unreachable is still knocked on -- it may come back, and until it
     does its silence is the answer. Deactivating the source in the admin is
     the one way to stop attempting it.
+
+    Brokers alone, deliberately. A centre also offers its own notifications
+    over HTTP, and that vantage point stands beside this one everywhere a
+    centre is judged on what it published -- but there is no connection to
+    hold open to an archive, so it has no business in a list of what to dial.
     """
     return (
         MessageSource.objects.filter(

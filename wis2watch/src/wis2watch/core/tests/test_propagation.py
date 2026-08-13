@@ -26,7 +26,7 @@ from wis2watch.core.models import (
 )
 from wis2watch.core.propagation import evaluate_propagation
 from wis2watch.core.retention import raw_retention_cutoff
-from wis2watch.core.tests.support import at, origin_broker
+from wis2watch.core.tests.support import at, origin_api, origin_broker
 
 
 NOW = at("2026-08-11T12:00:00")
@@ -404,6 +404,25 @@ class SuppressionTests(PropagationTestCase):
         self.assertEqual(self.missing(), ["kenyan"])
         self.assertEqual(counts.nodes_evaluated, 1)
         self.assertEqual(counts.nodes_suppressed, 1)
+
+    def test_a_second_vantage_on_one_centre_is_still_one_centre_suppressed(self):
+        """The count is of centres passed over, not of rows behind them."""
+        self.kenya_origin.is_reachable = False
+        self.kenya_origin.save()
+        origin_api(self.kenya)
+
+        counts = self.evaluate()
+
+        self.assertEqual(counts.nodes_evaluated, 0)
+        self.assertEqual(counts.nodes_suppressed, 1)
+
+    def test_a_centre_watched_through_one_vantage_is_not_also_suppressed(self):
+        origin_api(self.kenya)
+
+        counts = self.evaluate()
+
+        self.assertEqual(counts.nodes_evaluated, 1)
+        self.assertEqual(counts.nodes_suppressed, 0)
 
     def test_what_the_connection_record_says_now_does_not_unjudge_past_hours(self):
         """Blindness is read off the traffic, not off a side record.
