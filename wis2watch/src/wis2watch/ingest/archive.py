@@ -48,7 +48,7 @@ from django.utils import timezone as dj_timezone
 from ..core.interpretation import archived_notifications
 from ..core.models import SyncLog
 from ..core.rollups import window_start
-from ..core.sync import SyncCounts, fetch_pages
+from ..core.sync import PagingDidNotTerminate, SyncCounts, fetch_pages
 from .store import store_notifications
 
 logger = logging.getLogger(__name__)
@@ -63,17 +63,14 @@ ITEMS_PATH = "/items"
 #: a pull is a hundred requests or fifty thousand.
 PAGE_SIZE = 500
 
-#: How long a centre is given to answer one page. As generous as a catalogue's,
-#: because this is asked of one centre at a time by somebody waiting for it,
-#: rather than of every centre on a schedule.
-FETCH_TIMEOUT = 60
-
 #: A ceiling on paging, far above the one the scheduled syncs use. Those read
 #: registries of a few hundred records, where fifty pages already means the
 #: links are cycling; an archive of a year of a busy centre's traffic is
 #: legitimately hundreds of pages, and a ceiling that stopped it would report a
-#: half-read archive as a failure every time.
-MAX_PAGES = 2000
+#: half-read archive as a failure every time. Named for the archive, because a
+#: bare ``MAX_PAGES`` beside the one every other read uses would be two rules
+#: with one name.
+MAX_ARCHIVE_PAGES = 2000
 
 
 def archive_items_url(source):
@@ -88,10 +85,10 @@ def publication_interval(since, until):
     archive are, and an interval offered in a local offset would silently ask
     for a different few hours than the one that was meant.
     """
-    return f"{_rfc3339(since)}/{_rfc3339(until)}"
+    return f"{_utc_instant(since)}/{_utc_instant(until)}"
 
 
-def _rfc3339(moment):
+def _utc_instant(moment):
     """An instant as the archive spells one."""
     return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -110,7 +107,7 @@ def trailing_window(hours, now=None):
     return window_start(now, hours), now
 
 
-def fetch_archive_pages(source, since, until, max_pages=MAX_PAGES):
+def fetch_archive_pages(source, since, until, max_pages=MAX_ARCHIVE_PAGES):
     """Every page of a centre's archive for a window, exactly as returned.
 
     The interval matches on publication time, which is what makes the reply
@@ -129,8 +126,7 @@ def fetch_archive_pages(source, since, until, max_pages=MAX_PAGES):
             "datetime": publication_interval(since, until),
         },
         verify=source.node.verify_ssl,
-        timeout=FETCH_TIMEOUT,
-        read_from=f"{source.node.centre_id}'s message archive",
+        read_from=f"{source.owning_centre_id}'s message archive",
         max_pages=max_pages,
     )
 
@@ -163,6 +159,12 @@ def _store_page(source, payload):
     that would say. Everything else about a row -- the dataset, the station,
     what to do with one that cannot be identified in time -- is the store's,
     which is the point of writing through it.
+
+    Two of the store's outcomes are the only ones a poll can come back with:
+    accepted, and unstorable. Nothing here can be refused for belonging to
+    another region, since that is decided from the centre a message's topic
+    names and these name none -- which is why what the run reports adds up
+    without counting it.
     """
     notifications = archived_notifications(payload)
 
@@ -175,7 +177,9 @@ def _store_page(source, payload):
     return len(notifications), counts
 
 
-def poll_message_archive(source, *, since, until, max_pages=MAX_PAGES, fetch=None):
+def poll_message_archive(
+    source, *, since, until, max_pages=MAX_ARCHIVE_PAGES, fetch=None
+):
     """Pull a window of one centre's archive, returning the ``SyncLog``.
 
     Reported through a sync log like every other run against a node, so that
@@ -211,9 +215,22 @@ def poll_message_archive(source, *, since, until, max_pages=MAX_PAGES, fetch=Non
             counts.found += offered
             counts.created += stored.accepted
             counts.errored += stored.discarded
+    except PagingDidNotTerminate as exc:
+        # It answered -- too many times. A read this could not finish is a
+        # failed run, but recording the centre as unreachable would send
+        # somebody looking for a network fault at a centre that replied to
+        # every request, and would disqualify it from being judged at all.
+        logger.error(
+            "Could not read %s's message archive through: %s",
+            source.owning_centre_id,
+            exc,
+        )
+        _record_answer(source)
+
+        return counts.close(sync_log, SyncLog.FAILED, str(exc))
     except Exception as exc:
         logger.error(
-            "Could not read %s's message archive: %s", source.node.centre_id, exc
+            "Could not read %s's message archive: %s", source.owning_centre_id, exc
         )
         _record_answer(source, error=str(exc))
 
@@ -223,7 +240,7 @@ def poll_message_archive(source, *, since, until, max_pages=MAX_PAGES, fetch=Non
     counts.close(sync_log, counts.status)
 
     logger.info(
-        "Message archive poll for %s: %s", source.node.centre_id, sync_log.summary
+        "Message archive poll for %s: %s", source.owning_centre_id, sync_log.summary
     )
 
     return sync_log

@@ -275,6 +275,67 @@ class NeverHeardFromTests(SilenceTestCase):
         self.assertFalse(self.row().is_silent)
 
 
+class PulledHistoryTests(SilenceTestCase):
+    """One centre's archive, pulled deep, says nothing about anyone else.
+
+    A centre's own message archive can be asked for months of its history, and
+    those hours are that centre's word for itself rather than hours this tool
+    was hearing the region. Counted as the region's floor they would report
+    every dataset never seen publishing -- at every other centre, whose archive
+    was never asked -- as quiet for months.
+    """
+
+    def setUp(self):
+        super().setUp()
+
+        self.ghana = self.node("gh-gmet")
+        self.archive = MessageSource.objects.create(
+            name="gh-gmet origin API",
+            source_type=MessageSource.ORIGIN_API,
+            node=self.ghana,
+            centre_id="gh-gmet",
+            api_url="https://wis2.meteo.gov.gh/oapi/collections/messages",
+        )
+
+    def pulled(self, dataset, hour):
+        """A rollup from a pull of the centre's own archive."""
+        return HourlyRollup.objects.create(
+            hour=hour,
+            source=self.archive,
+            node=dataset.node,
+            dataset=dataset,
+            message_count=1,
+        )
+
+    def test_a_deep_pull_does_not_backdate_what_the_region_was_watched_from(self):
+        pulled = self.dataset("pulled", node=self.ghana)
+        self.pulled(pulled, NOW - timedelta(days=90))
+        self.last_published(self.dataset("something-else"), NOW - timedelta(hours=40))
+
+        self.learned(self.dataset(), 6)
+
+        self.assertEqual(self.row().hours_quiet, 40)
+
+    def test_a_pull_alone_leaves_a_dataset_never_seen_unjudged_on_it(self):
+        """Nothing but a pulled archive is no record of watching the region."""
+        pulled = self.dataset("pulled", node=self.ghana)
+        self.pulled(pulled, NOW - timedelta(days=90))
+
+        self.learned(self.dataset(), 6)
+
+        self.assertEqual(self.row().hours_quiet, 0)
+        self.assertFalse(self.row().is_silent)
+
+    def test_the_pulled_centre_is_still_judged_on_the_hours_it_published_in(self):
+        """The floor is only ever reached for a dataset never seen at all."""
+        pulled = self.dataset("pulled", node=self.ghana)
+        self.pulled(pulled, NOW - timedelta(hours=30))
+        self.learned(pulled, 6)
+
+        self.assertEqual(self.row("pulled").hours_quiet, 29)
+        self.assertTrue(self.row("pulled").is_silent)
+
+
 class LongMemoryTests(SilenceTestCase):
     """How far back the last publication is looked for: all the way.
 

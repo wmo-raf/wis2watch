@@ -32,12 +32,13 @@ from wis2watch.core.tests.support import (
     pages,
 )
 from wis2watch.ingest.archive import (
-    MAX_PAGES,
+    MAX_ARCHIVE_PAGES,
     PAGE_SIZE,
     archive_items_url,
     fetch_archive_pages,
     poll_message_archive,
     publication_interval,
+    trailing_window,
 )
 
 SHALLOW = "node_messages_sc_seychelles_met.json"
@@ -382,7 +383,7 @@ class FetchTests(ArchiveTestCase):
 
     def test_it_pages_far_beyond_what_a_scheduled_sync_is_given(self):
         """A registry is a few hundred records; an archive is months of traffic."""
-        self.assertGreater(MAX_PAGES, SCHEDULED_MAX_PAGES)
+        self.assertGreater(MAX_ARCHIVE_PAGES, SCHEDULED_MAX_PAGES)
 
     def test_an_archive_that_never_stops_paging_fails_rather_than_half_reads(self):
         forever = {
@@ -401,6 +402,30 @@ class FetchTests(ArchiveTestCase):
         self.assertIn("do not terminate", sync_log.error_message)
         self.assertEqual(get.call_count, 3)
 
+    def test_an_archive_that_answered_too_often_is_not_called_unreachable(self):
+        """It replied to every request. The read is what failed, not the centre.
+
+        Recorded as unreachable it would send somebody looking for a network
+        fault that is not there, and would disqualify the centre from being
+        judged against the Global Broker at all.
+        """
+        forever = {
+            "features": [],
+            "links": [{"rel": "next", "href": "https://wis2.meteo.sc/on"}],
+        }
+
+        with mock.patch("wis2watch.core.sync.requests.get") as get:
+            get.return_value = self.response(forever)
+
+            poll_message_archive(
+                self.source, since=SINCE, until=UNTIL, max_pages=3
+            )
+
+        self.source.refresh_from_db()
+
+        self.assertIs(self.source.is_reachable, True)
+        self.assertEqual(self.source.last_error, "")
+
 
 class WindowTests(ArchiveTestCase):
     """The window is asked for outright, rather than resumed from a watermark."""
@@ -412,6 +437,18 @@ class WindowTests(ArchiveTestCase):
             publication_interval(since, UNTIL),
             "2026-05-15T00:00:00Z/2026-08-13T00:00:00Z",
         )
+
+    def test_a_pull_covers_whole_hourly_buckets_ending_with_this_one(self):
+        """Because what is pulled is afterwards counted into those buckets.
+
+        A window beginning mid-hour would have its first bucket recomputed from
+        a fraction of that hour's messages, and a partial count overwrites a
+        complete one with a smaller number.
+        """
+        since, until = trailing_window(6, now=at("2026-08-12T16:30:00"))
+
+        self.assertEqual(since, at("2026-08-12T11:00:00"))
+        self.assertEqual(until, at("2026-08-12T16:30:00"))
 
     def test_the_interval_is_stated_in_utc_whatever_it_is_given_in(self):
         """Publication time is UTC in WIS2, and the request has to say so."""
