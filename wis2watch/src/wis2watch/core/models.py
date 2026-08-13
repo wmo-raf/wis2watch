@@ -271,6 +271,53 @@ class MessageSourceQuerySet(models.QuerySet):
         """
         return self.origin_vantages().filter(is_reachable=True)
 
+    def archives_to_poll(self):
+        """The centres' own archives worth asking on a schedule.
+
+        The ones whose own broker will not answer, which are the shakiest
+        centres in the region and the ones most worth watching. Until something
+        polls them they have no origin witness at all, and the comparison this
+        tool exists to make cannot be made for them.
+
+        Confirmed reachable is the only thing that keeps a centre out. A broker
+        never attempted is null rather than fine; a broker switched off carries
+        an answer that has since gone stale; and a centre with no broker
+        registered has never been heard from at all. None of those three can be
+        judged on propagation until its archive is asked, which is precisely
+        what makes them worth asking.
+
+        A centre whose broker does answer is left alone. Its archive and its
+        broker are the same witness -- the same notifications published by the
+        same centre -- so polling it would buy a second copy of what is already
+        held rather than any further evidence. The cost of that is accepted
+        deliberately: a healthy centre gets no protection from this tool's own
+        downtime, and recovering such a window is the management command's job
+        rather than the schedule's.
+
+        An archive with no address is not asked either. Where a centre serves
+        its notifications is inferred rather than advertised, so a poll of one
+        this tool has nowhere to ask would record the centre as unreachable
+        over a hole in our own registry.
+
+        The broker is looked for through the manager rather than through
+        ``self``, because what it asks is a different question of the same
+        table: whichever archives this queryset has been narrowed to, the
+        broker that speaks for one of their centres is not among them.
+        """
+        broker_that_answers = MessageSource.objects.filter(
+            node_id=models.OuterRef("node_id"),
+            source_type=MessageSource.ORIGIN_BROKER,
+            is_active=True,
+            is_reachable=True,
+        )
+
+        return (
+            self.origin_vantages()
+            .filter(source_type=MessageSource.ORIGIN_API)
+            .exclude(api_url="")
+            .exclude(models.Exists(broker_that_answers))
+        )
+
 
 class MessageSource(TimeStampedModel):
     """
