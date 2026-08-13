@@ -15,11 +15,38 @@ than finding every gap. A grace period absorbs ordinary propagation latency,
 counted from when this tool saw the message at origin rather than from the
 time the publisher stamped on it -- a centre whose clock runs hours behind
 would otherwise have every message instantly overdue. Evaluation is suppressed
-entirely for nodes whose own broker is not currently reachable, and for every
-node while no Global Broker is: comparing a partial view of either side
-against a complete view of the other reports this tool's blind spot as the
-centre's loss. And a gap the world turns out to have received after all is
-closed rather than left standing.
+entirely for nodes whose own broker is not currently reachable, and one
+notification at a time for the hours this tool cannot show it was hearing the
+world through: comparing a partial view of either side against a complete view
+of the other reports this tool's blind spot as the centre's loss. And a gap
+the world turns out to have received after all is closed rather than left
+standing.
+
+That second suppression is a statement about the hours being judged rather
+than about the instant a run happened to start, because those are not the same
+hours. A Global Broker connection that drops does not stop the origin brokers
+delivering; refusing to judge while it is down only defers the question to the
+next run, which recomputes a trailing window and reaches those hours anyway --
+and a broker does not redeliver what it sent while nobody was listening, so
+every notification seen at origin during the outage would become a gap nothing
+could ever close. So a notification is judged only where some Global Broker
+message arrived inside the same grace period it is judged against. Silence
+there means the tool was not hearing the world, whatever the reason: a dropped
+connection, an instance switched off, an install that has never run. Reading
+it off the traffic rather than off a recorded outage is what covers the last
+of those, which recorded nothing because nothing was running to record it.
+
+Sparse traffic makes this suppress more, and the gaps it passes over are gaps
+missed rather than invented, which is this module's governing trade.
+
+One edge is known and left open. At the moment a connection comes back, the
+burst delivered on reconnect can fall inside the grace period of a
+notification observed shortly before it -- so that one notification is judged
+on evidence that arrived at the end of its window rather than through it, and
+can still become a phantom gap one grace period wide. Closing it means
+demanding Global Broker arrivals on both sides of the origin sighting, which
+would suppress more of the ordinary sparse-traffic case; it is written down
+here rather than fixed.
 
 Gaps are written down rather than derived when asked for. Raw messages are
 kept for a forensic window only and the rollups carry counts rather than
@@ -35,7 +62,14 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from django.conf import settings
-from django.db.models import Exists, OuterRef, Subquery
+from django.db.models import (
+    DateTimeField,
+    Exists,
+    ExpressionWrapper,
+    F,
+    OuterRef,
+    Subquery,
+)
 from django.utils import timezone as dj_timezone
 
 from .models import MessageSource, NotificationMessage, PropagationGap
@@ -61,13 +95,20 @@ class PropagationCounts:
     resolved: int = 0
     nodes_evaluated: int = 0
     nodes_suppressed: int = 0
+    unheard: int = 0
 
     @property
     def summary(self):
-        """What the run came to, in one line, for a log."""
+        """What the run came to, in one line, for a log.
+
+        The unjudged are said as well as the found, because a run that found
+        nothing and a run that could judge nothing read identically otherwise,
+        and only one of them is good news.
+        """
         return (
             f"detected={self.detected} resolved={self.resolved} "
-            f"evaluated={self.nodes_evaluated} suppressed={self.nodes_suppressed}"
+            f"evaluated={self.nodes_evaluated} suppressed={self.nodes_suppressed} "
+            f"unheard={self.unheard}"
         )
 
 
@@ -110,7 +151,9 @@ def evaluate_propagation(*, now=None, grace_minutes=None, window_hours=None):
 
     Only nodes whose own broker is currently reachable are judged; the rest
     are counted as suppressed, because the tool cannot tell what it did not
-    see from what was never published.
+    see from what was never published. Of what those brokers delivered, only
+    the notifications the tool can show it was hearing the world through are
+    judged; the rest are counted as unheard.
 
     The window is recomputed rather than advanced, so a run is safe to repeat:
     a gap already recorded is left as it was found, including the moment it
@@ -127,16 +170,14 @@ def evaluate_propagation(*, now=None, grace_minutes=None, window_hours=None):
     # same question of the same brokers: the two answering differently would
     # put a centre's gaps on a page the evaluation had decided it could not
     # judge.
-    sources = (
-        list(MessageSource.objects.watched_origins())
-        if _the_world_is_watched()
-        else []
-    )
+    sources = list(MessageSource.objects.watched_origins())
     counts = PropagationCounts(
         nodes_evaluated=len(sources),
-        # Whatever was not judged was suppressed, for whichever of the two
-        # reasons. A node has at most one broker of its own, so counting the
-        # sources not evaluated counts the centres not judged.
+        # A node has at most one broker of its own, so counting the sources
+        # not evaluated counts the centres passed over entirely. What is
+        # passed over one notification at a time, for hours the world was not
+        # being heard through, is counted separately: it is a bound on what
+        # this run could judge, not on which centres it looked at.
         nodes_suppressed=MessageSource.objects.origin_brokers().count() - len(sources),
     )
 
@@ -146,8 +187,8 @@ def evaluate_propagation(*, now=None, grace_minutes=None, window_hours=None):
     counts.resolved = _close_arrivals(since=since)
 
     if sources:
-        counts.detected = _record_gaps(
-            sources, since=since, seen_by=now - grace, now=now
+        counts.detected, counts.unheard = _record_gaps(
+            sources, since=since, grace=grace, seen_by=now - grace, now=now
         )
 
     logger.info("Propagation evaluated back to %s: %s", since, counts.summary)
@@ -155,21 +196,37 @@ def evaluate_propagation(*, now=None, grace_minutes=None, window_hours=None):
     return counts
 
 
-def _the_world_is_watched():
-    """Whether there is a current view of what the world actually received.
+def _the_world_was_heard():
+    """Whether anything at all arrived from the world while the outer row waited.
 
-    The other half of the same blind spot. A Global Broker connection that is
-    down does not stop the origin brokers delivering, so every notification
-    seen at origin while it is down looks unpropagated -- and, because a
-    broker does not redeliver what it sent while nobody was listening, those
-    would be phantom gaps nothing could ever close. Judging nothing until the
-    world's view is back is the only honest answer.
+    The other half of the same blind spot, asked of the hours being judged
+    rather than of the instant the run started. Correlated on the outer row's
+    arrival and on its ``overdue_at``, which the query it is used in has to
+    carry: the window is the notification's own grace period, and what is
+    looked for in it is some Global Broker message stored between the moment
+    this tool saw the notification at origin and the moment it fell due.
+
+    Any Global Broker message will do, from any centre. What it is evidence of
+    is not that the notification propagated -- that is the UUID's question --
+    but that the connection this tool would have seen it on was delivering,
+    and so that absence from the Global Broker is a fact about the message
+    rather than about the listener.
+
+    Matched on ``received_datetime`` alone, and deliberately not bounded by
+    publication time: an arrival is when this tool stored the row, while
+    ``time`` is the publisher's own claim, and a message from a centre whose
+    clock runs behind is still proof the connection was up when it landed.
+    That costs what the UUID match gets for free -- ``time`` partitions the
+    hypertable, so this one cannot be narrowed to a few chunks the way that
+    one is. Buying the pruning back would mean discarding exactly the arrivals
+    a skewed clock stamped outside the window, which is evidence of a live
+    connection thrown away to read fewer chunks.
     """
-    return MessageSource.objects.filter(
-        source_type=MessageSource.GLOBAL_BROKER,
-        is_active=True,
-        is_reachable=True,
-    ).exists()
+    return NotificationMessage.objects.filter(
+        source__source_type=MessageSource.GLOBAL_BROKER,
+        received_datetime__gte=OuterRef("received_datetime"),
+        received_datetime__lte=OuterRef("overdue_at"),
+    )
 
 
 def _seen_on_a_global_broker(since):
@@ -194,8 +251,12 @@ def _seen_on_a_global_broker(since):
     )
 
 
-def _record_gaps(sources, *, since, seen_by, now):
-    """Write down the notifications the world has not carried in time."""
+def _record_gaps(sources, *, since, grace, seen_by, now):
+    """Write down the notifications the world has not carried in time.
+
+    Returns what was found, and what was passed over because the hours it fell
+    in cannot be shown to have been heard.
+    """
     node_of = {source.pk: source.node_id for source in sources}
 
     unseen = (
@@ -204,10 +265,22 @@ def _record_gaps(sources, *, since, seen_by, now):
             time__gte=since,
             received_datetime__lte=seen_by,
         )
+        .annotate(
+            # When this notification stopped being merely in flight, which is
+            # the far end of the window both questions below are asked over.
+            overdue_at=ExpressionWrapper(
+                F("received_datetime") + grace, output_field=DateTimeField()
+            )
+        )
         .filter(~Exists(_seen_on_a_global_broker(since)))
+        # Asked of every candidate rather than filtered on, so that the ones
+        # passed over can be counted. A run that judged nothing because it was
+        # blind must not report the same nought as a run that found nothing
+        # wrong.
+        .annotate(world_was_heard=Exists(_the_world_was_heard()))
         .values(
             "source_id", "notification_id", "topic", "dataset_id", "time",
-            "received_datetime",
+            "received_datetime", "world_was_heard",
         )
     )
 
@@ -224,8 +297,13 @@ def _record_gaps(sources, *, since, seen_by, now):
     )
 
     gaps = []
+    unheard = 0
 
     for row in unseen:
+        if not row["world_was_heard"]:
+            unheard += 1
+            continue
+
         node_id = node_of[row["source_id"]]
 
         if (node_id, row["notification_id"]) in recorded:
@@ -248,7 +326,7 @@ def _record_gaps(sources, *, since, seen_by, now):
     if gaps:
         PropagationGap.objects.bulk_create(gaps, batch_size=1000, ignore_conflicts=True)
 
-    return len(gaps)
+    return len(gaps), unheard
 
 
 def _close_arrivals(*, since):
