@@ -39,7 +39,7 @@ class Migration(migrations.Migration):
             field=models.BooleanField(
                 blank=True,
                 default=None,
-                help_text="Null until a connection to this broker has been attempted",
+                help_text="Empty until this vantage point has actually been asked",
                 null=True,
             ),
         ),

@@ -382,7 +382,7 @@ class MessageSource(TimeStampedModel):
         null=True,
         blank=True,
         default=None,
-        help_text=_("Null until a connection to this broker has been attempted"),
+        help_text=_("Empty until this vantage point has actually been asked"),
     )
     last_connected_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True)
@@ -482,6 +482,21 @@ class MessageSource(TimeStampedModel):
                 )
         elif not self.host:
             raise ValidationError({"host": _("A broker needs a host to dial.")})
+
+    @property
+    def address(self):
+        """Where this vantage point is reached, however it is reached.
+
+        A listing that showed the host and port of every row would print a
+        blank host and a port of 1883 against a centre's archive -- a broker
+        address for something that is not a broker, and an invitation to
+        correct a field that means nothing here. One column that says where
+        the row actually points is the honest form of the same information.
+        """
+        if self.source_type == self.ORIGIN_API:
+            return self.api_url
+
+        return f"{self.host}:{self.port}"
 
     @property
     def owning_centre_id(self):

@@ -171,7 +171,7 @@ def evaluate_propagation(*, now=None, grace_minutes=None, window_hours=None):
     # differently would put a centre's gaps on a page the evaluation had
     # decided it could not judge.
     sources = list(MessageSource.objects.watched_origins())
-    evaluated = {source.node_id for source in sources}
+    evaluated_nodes = {source.node_id for source in sources}
     counts = PropagationCounts(
         # Counted by centre rather than by row. A centre may offer more than
         # one vantage point on itself -- its broker and its own archive -- and
@@ -180,10 +180,10 @@ def evaluate_propagation(*, now=None, grace_minutes=None, window_hours=None):
         # passed over one notification at a time, for hours the world was not
         # being heard through, is counted separately: it is a bound on what
         # this run could judge, not on which centres it looked at.
-        nodes_evaluated=len(evaluated),
+        nodes_evaluated=len(evaluated_nodes),
         nodes_suppressed=(
             MessageSource.objects.origin_vantages()
-            .exclude(node_id__in=evaluated)
+            .exclude(node_id__in=evaluated_nodes)
             .values("node_id")
             .distinct()
             .count()

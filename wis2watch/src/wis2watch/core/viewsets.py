@@ -78,14 +78,21 @@ class MessageSourceIndexView(generic.IndexView):
 
 
 class MessageSourceViewSet(ModelViewSet):
+    """Where every vantage point's address is set, brokers and archives alike.
+
+    Listed by address rather than by host and port, because the two kinds are
+    not reached the same way and a column of ports would be inventing one for
+    the kind that has none.
+    """
+
     model = MessageSource
     index_view_class = MessageSourceIndexView
     base_url_path = "message-sources"
     icon = "site"
-    menu_label = "Brokers"
+    menu_label = "Message sources"
     add_to_admin_menu = True
     menu_order = 110
-    list_display = ["name", "source_type", "host", "port", "is_active"]
+    list_display = ["name", "source_type", "address", "is_active"]
 
 
 class GlobalDiscoveryCatalogueViewSet(ModelViewSet):
