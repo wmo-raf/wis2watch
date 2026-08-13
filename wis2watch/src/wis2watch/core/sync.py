@@ -32,6 +32,11 @@ UPDATED = "updated"
 ERRORED = "errored"
 
 #: A ceiling on paging, so a collection whose ``next`` links cycle cannot spin.
+#: Sized for the collections a schedule reads, which are registries of a few
+#: hundred records. A caller reading something that is legitimately longer --
+#: a centre's archive of months of notifications -- says so rather than having
+#: this raised for everybody, since the ceiling is only useful while it is
+#: lower than anything a healthy source would return.
 MAX_PAGES = 50
 
 FETCH_TIMEOUT = 60
@@ -47,17 +52,29 @@ class PagingDidNotTerminate(Exception):
     """
 
 
-def fetch_pages(url, params=None, verify=True, timeout=FETCH_TIMEOUT, read_from=""):
+def fetch_pages(
+    url,
+    params=None,
+    verify=True,
+    timeout=FETCH_TIMEOUT,
+    read_from="",
+    max_pages=MAX_PAGES,
+):
     """Every page of an OGC API Features collection, exactly as returned.
 
     Paging follows the server's own ``next`` link rather than an offset we
     compute, since that link already carries whatever query it needs to resume.
-    Only the first request supplies parameters.
+    Only the first request supplies parameters -- which is also why the link
+    has to carry the query forward: a filtered read that resumed without its
+    filter would page on through the whole collection believing it was still
+    reading the window it asked for.
 
     ``read_from`` names what is being read, for the failure raised when the
-    collection never stops offering another page.
+    collection never stops offering another page. ``max_pages`` is how many it
+    is given to stop, and is worth raising only where the collection really is
+    longer than a registry.
     """
-    for _ in range(MAX_PAGES):
+    for _ in range(max_pages):
         response = requests.get(
             url,
             params=params,
@@ -77,7 +94,7 @@ def fetch_pages(url, params=None, verify=True, timeout=FETCH_TIMEOUT, read_from=
         params = None
 
     raise PagingDidNotTerminate(
-        f"stopped paging {read_from} after {MAX_PAGES} pages; "
+        f"stopped paging {read_from} after {max_pages} pages; "
         "its next links do not terminate"
     )
 

@@ -18,6 +18,7 @@ from ..countries import (
     is_monitored_centre_id,
     monitored_country_code_for_centre_id,
 )
+from .archive import archived_notifications
 from .brokers import DEFAULT_PORTS, BrokerConnection, parse_broker_url
 from .discovery import (
     DiscoveredDataset,
@@ -64,6 +65,7 @@ __all__ = [
     "OscarStation",
     "ParsedNotification",
     "ParsedTopic",
+    "archived_notifications",
     "canonical_link",
     "centre_id_from_identifier",
     "centre_id_prefix",

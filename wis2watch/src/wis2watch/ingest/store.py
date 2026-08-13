@@ -217,13 +217,19 @@ class RegistryLookup:
         return self._stations[wigos_id]
 
 
-def prepare_notification(source, topic, payload, lookup=None):
+def prepare_notification(source, topic, payload, lookup=None, node=None):
     """A received message as an unsaved ``NotificationMessage``, or None.
 
     ``source`` is the connection the message arrived on; which vantage point
     the row is stored against is read off the topic, since one connection
     carries both a centre's own publication and the caches' republication of
     it.
+
+    ``node`` is the centre whose traffic this is, for a vantage point that
+    knows without being told: a poller reading a centre's own archive chose the
+    address, so the answer the broker path reads off a topic is one the request
+    already settled. It is only ever consulted where there is no topic to read
+    -- a message that names its centre says so, and what it says stands.
 
     None means the message cannot be identified in time -- no UUID, or no
     usable publication time -- and so could not be de-duplicated or matched
@@ -248,7 +254,7 @@ def prepare_notification(source, topic, payload, lookup=None):
 
     return NotificationMessage(
         source=lookup.vantage(source, parsed),
-        node=lookup.node(parsed.centre_id) if parsed else None,
+        node=lookup.node(parsed.centre_id) if parsed else node,
         dataset=lookup.dataset(
             parsed.as_origin().raw if parsed else "", notification.metadata_id
         ),
@@ -380,7 +386,7 @@ def _record_observed_stations(records):
             )
 
 
-def store_notifications(source, received):
+def store_notifications(source, received, node=None):
     """Store a flush of received ``(topic, payload)`` pairs.
 
     A message the flush cannot prepare is counted and stepped over: one
@@ -392,6 +398,13 @@ def store_notifications(source, received):
     A registered node is kept whatever its centre ID begins with, since a node
     added by hand under a prefix that names no country is still one somebody
     asked to watch.
+
+    ``node`` is whose traffic the caller already knows this to be, and is what
+    a poll of a centre's own archive brings that a broker flush cannot: those
+    messages carry no topic, so without it every one of them would be stored
+    attributed to nobody. Passing it is not a licence to store another
+    region's traffic -- a message that names its own centre is still judged on
+    that -- it is the answer for messages that name none.
     """
     counts = StoreCounts()
     lookup = RegistryLookup()
@@ -399,7 +412,9 @@ def store_notifications(source, received):
 
     for topic, payload in received:
         try:
-            record = prepare_notification(source, topic, payload, lookup=lookup)
+            record = prepare_notification(
+                source, topic, payload, lookup=lookup, node=node
+            )
         except Exception as exc:
             logger.warning("Could not prepare a message on %s: %s", topic, exc)
             counts.discarded += 1

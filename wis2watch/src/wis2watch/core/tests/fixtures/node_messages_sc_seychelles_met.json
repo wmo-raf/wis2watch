@@ -1,0 +1,683 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "id": "d11c819f-9dd7-463c-b2f3-8c1fecde76ed",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       46.203567505,
+       -3.714232206
+      ],
+      [
+       56.294338226,
+       -3.714232206
+      ],
+      [
+       56.294338226,
+       -10.206198692
+      ],
+      [
+       46.203567505,
+       -10.206198692
+      ],
+      [
+       46.203567505,
+       -3.714232206
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met/metadata/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "datetime": "2024-09-20T14:16:16Z",
+    "pubtime": "2026-08-12T15:00:00Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "krxd/HF0CihFGR6swsVKne437FtPaAjfjrwGANWfrgiemUgjV8zP4rg8yknBdRaVv2kWwsccXisJf/Xa/LoCrw=="
+    },
+    "content": {
+     "encoding": "base64",
+     "value": "eyJpZCI6ICJ1cm46d21vOm1kOnNjLXNleWNoZWxsZXMtbWV0OmNvcmUuc3VyZmFjZS1iYXNlZC1vYnNlcnZhdGlvbnMuc3lub3AiLCAiY29uZm9ybXNUbyI6IFsiaHR0cDovL3dpcy53bW8uaW50L3NwZWMvd2NtcC8yL2NvbmYvY29yZSJdLCAidHlwZSI6ICJGZWF0dXJlIiwgInRpbWUiOiB7ImludGVydmFsIjogWyIyMDI0LTA5LTIwIiwgIi4uIl0sICJyZXNvbHV0aW9uIjogIlBUMUgifSwgImdlb21ldHJ5IjogeyJ0eXBlIjogIlBvbHlnb24iLCAiY29vcmRpbmF0ZXMiOiBbW1s0Ni4yMDM1Njc1MDUsIC0zLjcxNDIzMjIwNl0sIFs1Ni4yOTQzMzgyMjYsIC0zLjcxNDIzMjIwNl0sIFs1Ni4yOTQzMzgyMjYsIC0xMC4yMDYxOTg2OTJdLCBbNDYuMjAzNTY3NTA1LCAtMTAuMjA2MTk4NjkyXSwgWzQ2LjIwMzU2NzUwNSwgLTMuNzE0MjMyMjA2XV1dfSwgInByb3BlcnRpZXMiOiB7InR5cGUiOiAiZGF0YXNldCIsICJpZGVudGlmaWVyIjogInVybjp3bW86bWQ6c2Mtc2V5Y2hlbGxlcy1tZXQ6Y29yZS5zdXJmYWNlLWJhc2VkLW9ic2VydmF0aW9ucy5zeW5vcCIsICJ0aXRsZSI6ICJIb3VybHkgc3lub3B0aWMgb2JzZXJ2YXRpb25zIGZyb20gZml4ZWQtbGFuZCBzdGF0aW9ucyAoU1lOT1ApIChzYy1zZXljaGVsbGVzLW1ldCkiLCAiZGVzY3JpcHRpb24iOiAiT2JzZXJ2YXRpb24gZGF0YSBmcm9tIFNleWNoZWxsZXMgbWV0ZW9yb2xvZ2ljYWwgYXV0aG9yaXR5IiwgImtleXdvcmRzIjogWyJvYnNlcnZhdGlvbnMiLCAidGVtcGVyYXR1cmUiLCAidmlzaWJpbGl0eSIsICJwcmVjaXBpdGF0aW9uIiwgInByZXNzdXJlIiwgImNsb3VkcyIsICJzbm93IGRlcHRoIiwgImV2YXBvcmF0aW9uIiwgInJhZGlhdGlvbiIsICJ3aW5kIiwgInRvdGFsIHN1bnNoaW5lIiwgImh1bWlkaXR5Il0sICJ0aGVtZXMiOiBbeyJjb25jZXB0cyI6IFt7ImlkIjogIndlYXRoZXIiLCAidGl0bGUiOiAiV2VhdGhlciJ9XSwgInNjaGVtZSI6ICJodHRwOi8vY29kZXMud21vLmludC93aXMvdG9waWMtaGllcmFyY2h5L2VhcnRoLXN5c3RlbS1kaXNjaXBsaW5lIn1dLCAiY29udGFjdHMiOiBbeyJvcmdhbml6YXRpb24iOiAiU2V5Y2hlbGxlcyBNZXRlb3JvbG9naWNhbCBBdXRob3JpdHkiLCAiZW1haWxzIjogW3sidmFsdWUiOiAiaW5mb0BtZXRlby5zYyJ9XSwgImFkZHJlc3NlcyI6IFt7ImNvdW50cnkiOiAiU1lDIn1dLCAibGlua3MiOiBbeyJyZWwiOiAiYWJvdXQiLCAiaHJlZiI6ICJodHRwczovL3d3dy5tZXRlby5zYy8iLCAidHlwZSI6ICJ0ZXh0L2h0bWwifV0sICJyb2xlcyI6IFsiaG9zdCJdLCAicGhvbmVzIjogW3sidmFsdWUiOiAiKzI0ODQ5NzA3MDAifV19XSwgImNyZWF0ZWQiOiAiMjAyNC0wOS0yMFQxNDoxNjoxNloiLCAidXBkYXRlZCI6ICIyMDI0LTA5LTIwVDE0OjE2OjE2WiIsICJ3bW86ZGF0YVBvbGljeSI6ICJjb3JlIiwgImlkIjogInVybjp3bW86bWQ6c2Mtc2V5Y2hlbGxlcy1tZXQ6Y29yZS5zdXJmYWNlLWJhc2VkLW9ic2VydmF0aW9ucy5zeW5vcCJ9LCAibGlua3MiOiBbeyJocmVmIjogIm1xdHRzOi8vZXZlcnlvbmU6ZXZlcnlvbmVAd2lzMi5tZXRlby5zYzo4ODgzIiwgInR5cGUiOiAiYXBwbGljYXRpb24vanNvbiIsICJuYW1lIjogIm9yaWdpbi9hL3dpczIvc2Mtc2V5Y2hlbGxlcy1tZXQvZGF0YS9jb3JlL3dlYXRoZXIvc3VyZmFjZS1iYXNlZC1vYnNlcnZhdGlvbnMvc3lub3AiLCAicmVsIjogIml0ZW1zIiwgImNoYW5uZWwiOiAib3JpZ2luL2Evd2lzMi9zYy1zZXljaGVsbGVzLW1ldC9kYXRhL2NvcmUvd2VhdGhlci9zdXJmYWNlLWJhc2VkLW9ic2VydmF0aW9ucy9zeW5vcCIsICJmaWx0ZXJzIjogeyJ3aWdvc19zdGF0aW9uX2lkZW50aWZpZXIiOiB7InR5cGUiOiAic3RyaW5nIiwgInRpdGxlIjogIldJR09TIFN0YXRpb24gSWRlbnRpZmllciIsICJkZXNjcmlwdGlvbiI6ICJGaWx0ZXIgYnkgV0lHT1MgU3RhdGlvbiBJZGVudGlmaWVyIn19LCAidGl0bGUiOiAiTm90aWZpY2F0aW9ucyJ9LCB7ImhyZWYiOiAiaHR0cHM6Ly93aXMyLm1ldGVvLnNjL2RhdGEvbWV0YWRhdGEvdXJuOndtbzptZDpzYy1zZXljaGVsbGVzLW1ldDpjb3JlLnN1cmZhY2UtYmFzZWQtb2JzZXJ2YXRpb25zLnN5bm9wLmpzb24iLCAidHlwZSI6ICJhcHBsaWNhdGlvbi9nZW8ranNvbiIsICJuYW1lIjogInVybjp3bW86bWQ6c2Mtc2V5Y2hlbGxlcy1tZXQ6Y29yZS5zdXJmYWNlLWJhc2VkLW9ic2VydmF0aW9ucy5zeW5vcCIsICJyZWwiOiAiY2Fub25pY2FsIiwgInRpdGxlIjogInVybjp3bW86bWQ6c2Mtc2V5Y2hlbGxlcy1tZXQ6Y29yZS5zdXJmYWNlLWJhc2VkLW9ic2VydmF0aW9ucy5zeW5vcCJ9XX0=",
+     "size": 2306
+    },
+    "id": "d11c819f-9dd7-463c-b2f3-8c1fecde76ed"
+   },
+   "links": [
+    {
+     "rel": "update",
+     "type": "application/geo+json",
+     "href": "https://wis2.meteo.sc/data/metadata/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop.json",
+     "length": 2306
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "579401fe-4a11-4ea7-9369-34cb79c48964",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     53.31338,
+     -5.11496
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63056RI_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:02:13Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "DQbKfSKqmsN8ANoV4B67T6Dwd0JWASt4YL1Qv2ae9zMXVJaP5E/qL9CMpFQg28bieUrvCSkVDaJgJToOv0SbRQ=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwNTZSSQAAAAAAAAAAAP////////////////////////////+P1QY4BAwxwsgEFBEl//////////////////////////////+er////////////////3eK//9v////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/93AO/f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63056RI",
+    "id": "579401fe-4a11-4ea7-9369-34cb79c48964"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63056RI_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63056RI"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "98521604-38ff-44ea-baf5-8bd81175c7b6",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     46.4988,
+     -9.7351
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63057AI_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:02:13Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "7TR5NmmpamNt3/Ls8Myap01p4aaevy5TXTzOtUY3nmWbMMtWmcKFgoa2VAC0AA8M0htqCobNFabw2pXSBRE8Zw=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwNTdBSQAAAAAAAAAAAP////////////////////////////+P1QY4A9PL0rM4MBvN//////////////////////////////+fV////////////////3Zl//9v////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/9XARff2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63057AI",
+    "id": "98521604-38ff-44ea-baf5-8bd81175c7b6"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63057AI_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63057AI"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "aa14c1de-b6f7-44ff-b8d3-c0ead4ccc397",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     53.309,
+     -5.7472
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63058PI_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:02:13Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "KrLpTh3OQ4XAoCjLSmwGIAvm76gNsQq82e9kKo/8njXNc/8yS6V/b2GVmYjegnCW/obIt/gIA98Wg71rJMNvvw=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwNThQSQAAAAAAAAAAAP////////////////////////////+P1QY4BAR6AsgAqBEb//////////////////////////////+ex////////////////3QT//9Z////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/9OAnff2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63058PI",
+    "id": "aa14c1de-b6f7-44ff-b8d3-c0ead4ccc397"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63058PI_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63058PI"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "33e50be8-1429-4c81-98f8-d5542e48a91a",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     55.4821,
+     -4.7152
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63001AB_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:03:44Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "57Hp7m0rfrruB33eNISHkU7D3+gwYnog13QreTzO43tSgtCbCKq/nZ3pNgu12GBmQntHNIwYCA6URqCG7i1sZg=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwMDFBQgAAAAAAAAAAAP////////////////////////////+P1QY4BBETAs6iZA/I//////////////////////////////+ec////////////////3VS//+1////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/96ACff2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63001AB",
+    "id": "33e50be8-1429-4c81-98f8-d5542e48a91a"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63001AB_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63001AB"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "6cb7c9bf-8f29-4a11-b75c-89f26fec44e8",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     55.4808,
+     -4.7516
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63009BL_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:03:44Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "+KJgH3f1Cvyz/EijiAAigX9qM3KjGRuOGOvuGKzZ/CUJ/af0UY70oqu7EP29Q+Q4m06r4JK4iW6aJQL3tPAu9g=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwMDlCTAAAAAAAAAAAAP////////////////////////////+P1QY4BBChQs6hYf////////////////////////////////+dZ////////////////3VS//+j////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/8AAAff2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63009BL",
+    "id": "6cb7c9bf-8f29-4a11-b75c-89f26fec44e8"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63009BL_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63009BL"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "d6b4681c-b953-495d-bc77-4debb1973211",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     55.4094,
+     -4.6173
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63003BO_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:03:45Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "FtO5yzpNxPrtPByz6YzGiaOMsTbP+tloCn0jP7gLn1w9ZbL+rv4tr2U7LJVSyOKp6hahB3/J/E6mCMTA6RGF8w=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwMDNCTwAAAAAAAAAAAP////////////////////////////+P1QY4BBJE8s5pmf////////////////////////////////+eI////////////////3VH//+n////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/9LAR/f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63003BO",
+    "id": "d6b4681c-b953-495d-bc77-4debb1973211"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63003BO_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63003BO"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "d1f867ba-43f1-4da2-8805-e6312526fe2a",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     55.5199,
+     -4.7067
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63002AC_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:03:45Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "Dd9YBHP5CmUIXRGD22Y/Pz4f3LIXMjIZ0o6ZdzIkZdcn82O/o1OZpjEh1DcqEbCHT226zDzBe4SLBIPyQNJVJQ=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwMDJBQwAAAAAAAAAAAP////////////////////////////+P1QY4BBEtks6/7f////////////////////////////////+ea////////////////3VR//+b////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/97gIff2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63002AC",
+    "id": "d1f867ba-43f1-4da2-8805-e6312526fe2a"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63002AC_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63002AC"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "95664add-3373-4286-987d-3578f9cec310",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     55.5225,
+     -4.7813
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63008AF_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:03:45Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "uJzAsN3raUMJWX3P5FIKyUTwLDVI50+oHZiSB2JIu0beWssmQVZE3PDsSHosuyRef6tdOb93ZBwEGv9hVs07iw=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwMDhBRgAAAAAAAAAAAP////////////////////////////+P1QY4BBBEcs7B9f////////////////////////////////+eg////////////////3VA//+j////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/8vgE/f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63008AF",
+    "id": "95664add-3373-4286-987d-3578f9cec310"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63008AF_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63008AF"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "6e8f0766-5614-4493-bea1-60482d5f5799",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     55.3834,
+     -4.6443
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63010CT_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:03:45Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "mtgyC1Eg+mieZRToHpWkLr5IP6FE9G6LIb3fFKurcnpBNJ1FuajT+BR8CJJrkdhNtuqADu/ABZuTKfiPsi1pAw=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwMTBDVAAAAAAAAAAAAP////////////////////////////+P1QY4BBHwks5VSf////////////////////////////////+eS////////////////3Un//+x////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/+LgD/f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63010CT",
+    "id": "6e8f0766-5614-4493-bea1-60482d5f5799"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63010CT_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63010CT"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "24ba4a7b-0ce4-4648-95c0-310e77b7cfdc",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     55.4709,
+     -4.6665
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63011LM_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:03:45Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "r7GfwIcdQkHA/3RYC8XAUnmU843BOJnC36xCN3dGYAtK0q2A6xeXgeSAjCyeHb9xjZrZdr4szc6IDmUUixB8yg=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwMTFMTQAAAAAAAAAAAP////////////////////////////+P1QY4BBGrMs6Zpf////////////////////////////////+Wb////////////////3OD//+/////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/9ZgB/f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63011LM",
+    "id": "24ba4a7b-0ce4-4648-95c0-310e77b7cfdc"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63011LM_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63011LM"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "46bc7109-e266-478c-9440-4f460483b3d7",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     55.4224,
+     -4.6209
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63005LN_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:03:45Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "zFESM/ATfJzCoYftx1mUoU+FztNpDeKCxXTFw2t7QPdsV+p9jVDwCfMq6tIavm8V8wSqf79+BRIwz7Wbia5y/g=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwMDVMTgAAAAAAAAAAAP////////////////////////////+P1QY4BBI5ss5zwf////////////////////////////////+a1////////////////3SP//+v////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/8AAAff2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63005LN",
+    "id": "46bc7109-e266-478c-9440-4f460483b3d7"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63005LN_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63005LN"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "b36fe309-6bc2-42e0-baa9-b14152d6b331",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     55.4698,
+     -4.6546
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63006MJ_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:03:46Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "eMLdwxequD8RN3jXcHjBobCIeocD7Y2+BKQ1iiyPclWaYu0CHbS0evicaU49kGN2qq/v/D4NAV7NudRX4SAbuw=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwMDZNSgAAAAAAAAAAAP////////////////////////////+P1QY4BBHQYs6Yyf////////////////////////////////+X/////////////////3Pe//+3////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/9lgKff2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63006MJ",
+    "id": "b36fe309-6bc2-42e0-baa9-b14152d6b331"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63006MJ_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63006MJ"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  },
+  {
+   "id": "283f0919-ed9b-457c-a1be-dd48f0d91fe4",
+   "type": "Feature",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wnm/1/conf/core"
+   ],
+   "geometry": {
+    "coordinates": [
+     55.4691,
+     -4.6094
+    ],
+    "type": "Point"
+   },
+   "properties": {
+    "data_id": "sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63015PD_20260812T140000",
+    "datetime": "2026-08-12T14:00:00Z",
+    "pubtime": "2026-08-12T15:03:46Z",
+    "integrity": {
+     "method": "sha512",
+     "value": "F8+i0AU2pllF48Qi92LxEZBu0F3va9jqOVNXKEhIdIS7RpnR/+2nWmVydttfO8OGyen6zYkOeoyHnOeVrQkZfg=="
+    },
+    "metadata_id": "urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop",
+    "content": {
+     "encoding": "base64",
+     "value": "QlVGUgABgAQAABYA/////wAAAAJuHgAH6ggMDgAAAAALAAABgMGWx2AAAVMAACsgAANjMwMTVQRAAAAAAAAAAAAP////////////////////////////+P1QY4BBJdos6YPf////////////////////////////////+eF////////////////3VX//+r////////////////////////////////////////////////////////////////Af////gP//////////////////////////////////////////////////////////////////+L/9DgP/f2///74n///dM//////////////////////////////////////////////////f/AAX/f/9/r//f0//36P//////////////////////////////////////////////////////////////////////////////////////8A3Nzc3",
+     "size": 384
+    },
+    "wigos_station_identifier": "0-690-0-63015PD",
+    "id": "283f0919-ed9b-457c-a1be-dd48f0d91fe4"
+   },
+   "links": [
+    {
+     "rel": "canonical",
+     "type": "application/bufr",
+     "href": "https://wis2.meteo.sc/data/2026-08-12/wis/urn:wmo:md:sc-seychelles-met:core.surface-based-observations.synop/WIGOS_0-690-0-63015PD_20260812T140000.bufr4",
+     "length": 384
+    },
+    {
+     "rel": "via",
+     "type": "text/html",
+     "href": "https://oscar.wmo.int/surface/#/search/station/stationReportDetails/0-690-0-63015PD"
+    }
+   ],
+   "generated_by": "wis2box 1.3.0"
+  }
+ ],
+ "numberMatched": 14,
+ "numberReturned": 14,
+ "links": [
+  {
+   "type": "application/geo+json",
+   "rel": "self",
+   "title": "This document as GeoJSON",
+   "href": "https://wis2.meteo.sc/oapi/collections/messages/items?f=json&limit=500&datetime=2026-08-12T14%3A30%3A00Z%2F2026-08-12T16%3A00%3A00Z"
+  },
+  {
+   "rel": "alternate",
+   "type": "application/ld+json",
+   "title": "This document as RDF (JSON-LD)",
+   "href": "https://wis2.meteo.sc/oapi/collections/messages/items?f=jsonld&limit=500&datetime=2026-08-12T14%3A30%3A00Z%2F2026-08-12T16%3A00%3A00Z"
+  },
+  {
+   "type": "text/html",
+   "rel": "alternate",
+   "title": "This document as HTML",
+   "href": "https://wis2.meteo.sc/oapi/collections/messages/items?f=html&limit=500&datetime=2026-08-12T14%3A30%3A00Z%2F2026-08-12T16%3A00%3A00Z"
+  },
+  {
+   "type": "text/csv; charset=utf-8",
+   "rel": "alternate",
+   "title": "This document as CSV",
+   "href": "https://wis2.meteo.sc/oapi/collections/messages/items?f=csv&limit=500&datetime=2026-08-12T14%3A30%3A00Z%2F2026-08-12T16%3A00%3A00Z"
+  },
+  {
+   "type": "application/json",
+   "title": "Data notifications",
+   "rel": "collection",
+   "href": "https://wis2.meteo.sc/oapi/collections/messages"
+  }
+ ],
+ "timeStamp": "2026-08-13T10:44:47.059681Z"
+}

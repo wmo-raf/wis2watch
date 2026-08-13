@@ -1442,6 +1442,7 @@ class SyncLog(models.Model):
     CATALOGUE = "catalogue"
     DISCOVERY_METADATA = "discovery_metadata"
     LINK_PROBES = "link_probes"
+    MESSAGE_ARCHIVE = "message_archive"
     NODE_STATIONS = "node_stations"
     OSCAR_STATIONS = "oscar_stations"
     WILDCARD_SWEEP = "wildcard_sweep"
@@ -1450,6 +1451,7 @@ class SyncLog(models.Model):
         (CATALOGUE, _("Global Discovery Catalogue")),
         (DISCOVERY_METADATA, _("Discovery Metadata")),
         (LINK_PROBES, _("Canonical Link Probes")),
+        (MESSAGE_ARCHIVE, _("Centre Message Archive")),
         (NODE_STATIONS, _("Node Stations")),
         (OSCAR_STATIONS, _("OSCAR Stations")),
         (WILDCARD_SWEEP, _("Wildcard Sweep")),

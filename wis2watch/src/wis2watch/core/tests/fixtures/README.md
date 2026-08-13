@@ -6,7 +6,7 @@ what these sources actually return, which is repeatedly not what their schemas
 suggest.
 
 The first three were captured on **2026-08-11**, the node station registry on
-**2026-08-12**.
+**2026-08-12**, and the two node message archives on **2026-08-13**.
 
 ## `global_broker_notifications.jsonl`
 
@@ -102,6 +102,65 @@ A registry longer than the page size links to its next page under `rel: next`,
 the same as a Global Discovery Catalogue does; this capture fits on one page
 and so carries no such link. The default page size of a station endpoint is
 routinely ten, which is why the fetch asks for more.
+
+## `node_messages_sc_seychelles_met.json` and `node_messages_gh_gmet.json`
+
+Two centres' own archives of the notifications they published, which a wis2box
+serves at `/oapi/collections/messages/items`. Both are unedited pages, exactly
+as the node returned them — envelope, links and all.
+
+**What makes these different from the captured broker traffic: there is no
+topic.** Not omitted from the property the parser reads, but absent from the
+payload entirely — nothing in a feature, at any level, says what topic the
+message went out on. Everything the ingest reads off a topic therefore has to
+come from somewhere else here: the centre from the address that was polled, the
+vantage point because the archive is one, and the dataset from the
+`metadata_id` the message carries. What is stored carries an empty topic,
+because none was observed. Synthesising the dataset's declared topic would read
+better and would destroy the evidence for a centre transmitting data no dataset
+of its own claims — a message no topic would ever have named.
+
+**Both carry a metadata notification mixed in with the data ones**, which is
+what a centre publishing its own discovery metadata looks like from the
+archive. It carries the WCMP2 record inline as base64, names **no**
+`metadata_id` (the record it announces is the one that would be named), carries
+no `wigos_station_identifier`, and advertises only a `rel: update` link — no
+canonical link at all. So it resolves to no dataset and no station, and is
+stored for all that, as the MQTT path stores one.
+
+| Capture | Retention at capture | The window asked for | Match count |
+| --- | --- | --- | --- |
+| `node_messages_sc_seychelles_met.json` | 451 messages, about 36 hours | `2026-08-12T14:30:00Z/2026-08-12T16:00:00Z` | 14 matched, 14 returned |
+| `node_messages_gh_gmet.json` | 57,170 messages, back to 2026-05-06 | `2026-08-09T00:00:00Z/2026-08-11T23:59:59Z` | 1,757 matched, 10 returned |
+
+Retention depth is a per-node property and it drifts, which is why both the
+match count and the capture date are recorded here: Seychelles
+(`https://wis2.meteo.sc`) holds barely a day and its whole archive fits on one
+page at the page size the poll asks for, while Ghana
+(`https://wis2.meteo.gov.gh`) holds three months and pages genuinely.
+
+What each covers:
+
+- **The shallow one** is a single page: no `rel: next` link, and
+  `numberMatched` equal to `numberReturned`. Thirteen data notifications, one
+  per station, and the metadata notification.
+- **The deep one** is a page from the *middle* of a paging run —
+  `offset=386&limit=10` of 1,757 — captured that way so that one page could
+  carry both a metadata notification and a real `next` link. Its `next` link
+  carries the `datetime` interval forward, which is why paging follows the
+  server's own link rather than an offset we compute: a resumed page that
+  dropped the interval would read on through the whole archive believing it was
+  still inside the window.
+- **Neither page is in publication order.** The deep capture's ten
+  notifications run 17:09, 15:00, 17:09, … as returned. Anything reading the
+  first or last row of a page as the edge of the window would be wrong on this
+  very capture.
+
+The `datetime` parameter matches on **`pubtime`**, not on the observation time
+in `properties.datetime`: at capture, a window of `10:00Z/11:00Z` returned
+notifications published between 10:09 and 10:24 whose observation times were
+all 09:00. That is what makes the reply comparable with what the Global Broker
+carried — the same claim, by the same publisher, about the same moment.
 
 ## Refreshing a fixture
 

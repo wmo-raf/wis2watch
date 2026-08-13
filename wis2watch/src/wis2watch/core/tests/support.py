@@ -55,9 +55,12 @@ def pages(*payloads):
     Every sync takes its page fetch as an argument for exactly this reason, so
     the writing rules can be asserted against payloads the source really
     returned without anything opening a socket.
+
+    Whatever the fetch is asked for is ignored, so that one stand-in serves the
+    syncs that fetch a source whole and the poll that fetches a window of one.
     """
 
-    def fetch(_source):
+    def fetch(*_args, **_kwargs):
         yield from payloads
 
     return fetch
@@ -66,7 +69,7 @@ def pages(*payloads):
 def failing_fetch(message):
     """A page fetch that fails the way an unreachable source would."""
 
-    def fetch(_source):
+    def fetch(*_args, **_kwargs):
         raise OSError(message)
         yield  # pragma: no cover - never reached, keeps this a generator
 
