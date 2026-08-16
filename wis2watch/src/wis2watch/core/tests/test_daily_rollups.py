@@ -15,9 +15,8 @@ shifts every bucket in the region and nothing raises.
 
 from datetime import timedelta
 
-from django.conf import settings
 from django.db import IntegrityError
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import TestCase, override_settings
 
 from wis2watch.core.daily_rollups import (
     backfill_daily_rollups,
@@ -35,7 +34,6 @@ from wis2watch.core.models import (
     WIS2Node,
 )
 from wis2watch.core.rollups import rollup_hours
-from wis2watch.core.tasks import run_update_daily_rollups
 from wis2watch.core.tests.support import at
 
 
@@ -78,29 +76,6 @@ class DailyRollupTestCase(TestCase):
             (row.day.isoformat(), row.message_count)
             for row in DailyStationRollup.objects.order_by("day")
         ]
-
-
-class ScheduleTests(SimpleTestCase):
-    """That the beat actually reaches the summary.
-
-    A schedule naming a task that does not exist announces itself nowhere:
-    nothing runs, nothing is logged, and the statistics surfaces go on reading
-    a table that stopped being brought up to date. Worse here than most,
-    because the numbers would not be missing -- they would be old.
-    """
-
-    def setUp(self):
-        self.entry = settings.CELERY_BEAT_SCHEDULE["update-daily-rollups"]
-
-    def test_the_scheduled_task_is_the_one_that_answers_to_that_name(self):
-        self.assertEqual(self.entry["task"], run_update_daily_rollups.name)
-
-    def test_it_runs_on_the_same_beat_as_the_hours_it_summarises(self):
-        """A day the surfaces are reading should not lag the hours under it."""
-        self.assertEqual(
-            self.entry["schedule"],
-            settings.CELERY_BEAT_SCHEDULE["update-rollups"]["schedule"],
-        )
 
 
 class DayBucketTests(DailyRollupTestCase):
@@ -344,6 +319,28 @@ class TrailingWindowTests(DailyRollupTestCase):
 
         with override_settings(WIS2WATCH_ROLLUP_WINDOW_HOURS=24 * 7):
             self.assertEqual(default_window_days(), 8)
+
+    def test_widening_the_hourly_window_widens_this_one_with_it(self):
+        """There is no setting of its own, on purpose: one that could be set
+        narrower than the hourly window would be a switch for turning the
+        guarantee off, and nothing would say it had been."""
+        now = at("2026-08-13T00:30:00")
+        self.counted("2026-08-05T10:00:00")
+
+        with override_settings(WIS2WATCH_ROLLUP_WINDOW_HOURS=24 * 10):
+            update_daily_rollups(now=now)
+
+        self.assertEqual(self.days(), [("2026-08-05T00:00:00+00:00", 1)])
+
+    def test_a_narrower_window_can_be_asked_for_explicitly(self):
+        """The argument is the testing seam; the schedule never passes it."""
+        now = at("2026-08-13T00:30:00")
+        self.counted("2026-08-11T10:00:00")
+        self.counted("2026-08-13T00:00:00")
+
+        update_daily_rollups(now=now, window_days=1)
+
+        self.assertEqual(self.days(), [("2026-08-13T00:00:00+00:00", 1)])
 
     def test_nothing_in_the_window_writes_nothing(self):
         self.counted("2026-08-01T10:00:00")

@@ -43,12 +43,19 @@ logger = logging.getLogger(__name__)
 #: is still corrected after a run is missed, narrow enough to stay cheap.
 DEFAULT_WINDOW_HOURS = 48
 
-#: The grain, as the columns a message carries it in. Derived from the rollup's
-#: own grain rather than restated, so the group the query counts by and the key
-#: the row is written under cannot drift apart.
-GROUP_BY = tuple(
-    field if field == "hour" else f"{field}_id" for field in ROLLUP_GRAIN
-)
+def grain_columns(grain, bucket):
+    """A grain, as the columns the table it is derived from carries it in.
+
+    Derived from the grain rather than restated beside it, so the group a query
+    counts by and the key its row is written under cannot drift apart. Every
+    part of a grain but the time bucket is a relation, and so is read and
+    written under its ``_id``.
+    """
+    return tuple(field if field == bucket else f"{field}_id" for field in grain)
+
+
+#: The grain, as the columns a message carries it in.
+GROUP_BY = grain_columns(ROLLUP_GRAIN, "hour")
 
 
 @dataclass

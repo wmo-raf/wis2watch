@@ -1049,23 +1049,25 @@ class HourlyRollup(TimeStampedModel):
         indexes = [
             # The station rides along on the node's index rather than earning
             # one of its own. Everything asked of a node over a range of hours
-            # -- what it published, and which of its stations were heard --
-            # filters on the node and the hour first, so those stay the leading
-            # columns; carrying the station as well turns "every station of this
-            # node over the last 24 hours" into a scan of the index alone,
-            # without a heap fetch per row to find out which station it was.
-            # A strict extension of the plain ``(node, -hour)`` this replaced,
-            # so nothing that used to walk that walks anything longer now.
+            # -- what it published, which of its stations were heard, and one
+            # named station's own hours -- filters on the node and the hour
+            # first, so those stay the leading columns; carrying the station as
+            # well means those answers are read off the index rather than
+            # fetching every row to find out which station it was. A strict
+            # extension of the plain ``(node, -hour)`` this replaced, so nothing
+            # that used to walk that walks anything longer now.
+            #
+            # Nothing leads on the station. Reading one station across every
+            # centre would want that, and a station transmitting under two
+            # centres is a real finding -- but it is not a surface anything
+            # asks for yet, and this table is never expired, so an index it
+            # does not need is a cost it pays on every write for ever.
             models.Index(fields=["node", "-hour", "station"]),
             # "When did this dataset last publish" is asked of every dataset in
             # the region at once, every time the overview is opened. Leading on
             # the dataset makes each of those answers one backwards walk of
             # this index rather than a scan of the node's whole history.
             models.Index(fields=["dataset", "-hour"]),
-            # One station's own history, which is what a drilldown asks for and
-            # what nothing here could answer without reading a whole node's
-            # hours and discarding all but one station's worth.
-            models.Index(fields=["station", "-hour"]),
         ]
         verbose_name = _("Hourly Rollup")
         verbose_name_plural = _("Hourly Rollups")
@@ -1114,6 +1116,15 @@ class DailyStationRollup(TimeStampedModel):
     in the hourly rollups. Whether the statistics surfaces say anything about
     them is undecided; dropping them at this layer would decide it by making
     the question unanswerable.
+
+    Unpartitioned and never expired, like the hourly rollups it summarises,
+    and so growing for ever on the same terms -- but an order of magnitude
+    slower. A row is earned per station per day per vantage point, where the
+    hourly table earns one per station per dataset per hour per vantage point,
+    so a centre publishing a handful of datasets writes tens of hourly rows for
+    every one here. Whether either table eventually wants partitioning or a
+    horizon is a question about both of them together, and is not settled by
+    adding this one.
     """
 
     day = models.DateTimeField(
@@ -1141,6 +1152,11 @@ class DailyStationRollup(TimeStampedModel):
     )
 
     message_count = models.PositiveIntegerField(default=0)
+    # How much of the day, as against how loudly. A cell saying only "reported"
+    # cannot tell a station sending once from one sending every hour, and which
+    # of those a day was is most of what an availability matrix is read for.
+    # Carried here because it costs nothing to derive -- the hours are already
+    # the group -- and cannot be recovered from a message count afterwards.
     active_hours = models.PositiveSmallIntegerField(
         default=0,
         help_text=_("How many of the day's 24 UTC hours this station was heard in"),
@@ -1162,8 +1178,11 @@ class DailyStationRollup(TimeStampedModel):
             # A node's whole station population over a range of days: the
             # availability matrix, and the count of distinct stations behind
             # every headline figure. Leading on the node and the day makes the
-            # window a contiguous range, and carrying the station means the
-            # answer never leaves the index.
+            # window a contiguous range, and carrying the station means settled
+            # history is read off the index alone. The last few days are rebuilt
+            # every quarter of an hour, so those pages are rarely all-visible
+            # and are read from the table until a vacuum catches up -- which is
+            # the smallest part of any window this exists to serve.
             models.Index(fields=["node", "-day", "station"]),
         ]
         verbose_name = _("Daily Station Rollup")

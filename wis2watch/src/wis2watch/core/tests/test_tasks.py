@@ -6,13 +6,19 @@ advertises no registry must not be asked hourly for one, and a centre that
 published nothing must not be queued for a probe that would find nothing. What
 each run then does is asserted elsewhere -- against captured payloads for the
 syncs, and against a seeded database for the probes.
+
+With one exception: that the beat reaches a run at all. A schedule naming a
+task that does not exist announces itself nowhere, and the runs whose absence
+would be silent rather than obvious are asserted here beside the tasks they
+name.
 """
 
 from datetime import timedelta
 from unittest import mock
 
+from django.conf import settings
 from django.core import mail
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.utils import timezone as dj_timezone
 
 from wis2watch.core.models import (
@@ -31,7 +37,31 @@ from wis2watch.core.tasks import (
     run_sync_all_node_stations,
     run_sync_node_stations,
     run_sync_oscar_stations,
+    run_update_daily_rollups,
 )
+
+
+class DailyRollupScheduleTests(SimpleTestCase):
+    """That the beat actually reaches the station-day summary.
+
+    Nothing would raise if it did not. The table would go on holding whatever
+    the last run left, the surfaces reading it would go on drawing numbers, and
+    the numbers would not be missing -- they would be old, which is the one
+    failure a dashboard cannot show you.
+    """
+
+    def setUp(self):
+        self.entry = settings.CELERY_BEAT_SCHEDULE["update-daily-rollups"]
+
+    def test_the_scheduled_task_is_the_one_that_answers_to_that_name(self):
+        self.assertEqual(self.entry["task"], run_update_daily_rollups.name)
+
+    def test_it_runs_on_the_same_beat_as_the_hours_it_summarises(self):
+        """A day the surfaces are reading should not lag the hours under it."""
+        self.assertEqual(
+            self.entry["schedule"],
+            settings.CELERY_BEAT_SCHEDULE["update-rollups"]["schedule"],
+        )
 
 
 class NodeStationTaskTests(TestCase):

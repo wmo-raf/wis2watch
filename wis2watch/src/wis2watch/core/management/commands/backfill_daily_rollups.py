@@ -2,9 +2,10 @@
 
 The scheduled run only rebuilds a trailing window, which is right for keeping
 up and useless for catching up: an installation that already has a history has
-none of it summarised until something walks the whole of it once. This is that
-walk -- after the migration, and any time the summary has to be rebuilt from
-scratch, which it always can be.
+none of it summarised until something walks the whole of it once. The migration
+does that walk on the way in; this is for doing it again -- if the migration was
+interrupted, or the summary has to be rebuilt from scratch, which it always can
+be, because it is derived from a table that is never expired.
 """
 
 from django.core.management.base import BaseCommand

@@ -34,17 +34,15 @@ nothing would ever raise.
 """
 
 import logging
-from dataclasses import dataclass
 from datetime import timedelta, timezone
 from math import ceil
 
-from django.conf import settings
 from django.db.models import Count, Min, Sum
 from django.db.models.functions import TruncDay
 from django.utils import timezone as dj_timezone
 
 from .models import DAILY_STATION_GRAIN, DailyStationRollup, HourlyRollup
-from .rollups import default_window_hours
+from .rollups import RollupCounts, default_window_hours, grain_columns
 
 logger = logging.getLogger(__name__)
 
@@ -52,25 +50,8 @@ logger = logging.getLogger(__name__)
 #: because a day is the unit that has to be rebuilt whole.
 DEFAULT_CHUNK_DAYS = 30
 
-#: The grain, as the columns an hourly rollup carries it in. Derived from the
-#: daily grain rather than restated, so the group the query counts by and the
-#: key the row is written under cannot drift apart.
-GROUP_BY = tuple(
-    field if field == "day" else f"{field}_id" for field in DAILY_STATION_GRAIN
-)
-
-
-@dataclass
-class DailyCounts:
-    """What a daily rollup run came to."""
-
-    rows: int = 0
-    messages: int = 0
-
-    @property
-    def summary(self):
-        """What the run came to, in one line, for a log."""
-        return f"rows={self.rows} messages={self.messages}"
+#: The grain, as the columns an hourly rollup carries it in.
+DAILY_GROUP_BY = grain_columns(DAILY_STATION_GRAIN, "day")
 
 
 def floor_to_day(moment):
@@ -81,27 +62,26 @@ def floor_to_day(moment):
 
 
 def default_window_days():
-    """How far back a scheduled run recomputes, unless told otherwise.
+    """How far back a scheduled run recomputes.
 
-    Taken from the hourly window rather than set beside it. Any hour the hourly
-    run can still revise has to fall inside a day this run still visits, or the
-    daily table goes on holding a number the hourly table has already corrected
-    -- and holds it for ever, because nothing would ever come back to that day.
+    Taken from the hourly window rather than set beside it, and deliberately
+    not settable on its own. Any hour the hourly run can still revise has to
+    fall inside a day this run still visits, or the daily table goes on holding
+    a number the hourly table has already corrected -- and holds it for ever,
+    because nothing would ever come back to that day. A knob of its own would
+    be a knob for turning that guarantee off, with nothing to say it had been:
+    the numbers would not be missing, they would be old. Widening the hourly
+    window widens this one with it, which is the only change that makes sense.
 
     One day wider than the hourly window converts to, because the window starts
     part-way through a day: forty-eight hours back from half past midnight
     reaches into the day before last.
     """
-    configured = getattr(settings, "WIS2WATCH_DAILY_ROLLUP_WINDOW_DAYS", None)
-
-    if configured is not None:
-        return configured
-
     return ceil(default_window_hours() / 24) + 1
 
 
 def rollup_days(*, since, until):
-    """Rebuild the daily rollups for every hour in ``[since, until)``.
+    """Rebuild the daily rollups from the hours counted in ``[since, until)``.
 
     ``since`` is taken down to the day it falls in, because a day is only ever
     rebuilt whole. Summarising from part-way through one would overwrite a
@@ -123,7 +103,7 @@ def rollup_days(*, since, until):
     counted = (
         HourlyRollup.objects.filter(hour__gte=since, hour__lt=until)
         .annotate(day=TruncDay("hour", tzinfo=timezone.utc))
-        .values(*GROUP_BY)
+        .values(*DAILY_GROUP_BY)
         .annotate(
             message_count=Sum("message_count"),
             # Distinct hours rather than rows: a node publishing many datasets
@@ -136,7 +116,7 @@ def rollup_days(*, since, until):
 
     # Each counted group already names its grain in the columns a daily rollup
     # is written with, so it becomes a row as it stands.
-    rollups = [DailyStationRollup(**row) for row in counted.iterator()]
+    rollups = [DailyStationRollup(**row) for row in counted]
 
     if rollups:
         DailyStationRollup.objects.bulk_create(
@@ -147,7 +127,7 @@ def rollup_days(*, since, until):
             update_fields=["message_count", "active_hours"],
         )
 
-    return DailyCounts(
+    return RollupCounts(
         rows=len(rollups),
         messages=sum(rollup.message_count for rollup in rollups),
     )
@@ -184,10 +164,10 @@ def backfill_daily_rollups(*, now=None, chunk_days=DEFAULT_CHUNK_DAYS):
     oldest = HourlyRollup.objects.aggregate(oldest=Min("hour"))["oldest"]
 
     if oldest is None:
-        return DailyCounts()
+        return RollupCounts()
 
     now = now or dj_timezone.now()
-    counts = DailyCounts()
+    counts = RollupCounts()
 
     start = floor_to_day(oldest)
     end = floor_to_day(now) + timedelta(days=1)

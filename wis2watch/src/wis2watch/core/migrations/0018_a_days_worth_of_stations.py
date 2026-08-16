@@ -10,9 +10,13 @@ rather than from the raw messages.
 The hourly table's ``(node, -hour)`` index is replaced by ``(node, -hour,
 station)`` rather than joined by it. The new one leads on the same two columns,
 so everything that walked the old one walks this instead, and carrying the
-station means a node's stations over a window are read without a heap fetch per
-row. On a table with real history behind it this is an index build, not a
-metadata change.
+station means a node's stations over a window are read off the index. On a
+table with real history behind it this is an index build, not a metadata
+change.
+
+The summary itself is filled by the migration after this one, which is separate
+so that the schema change can be applied and inspected without waiting on a
+walk of the region's whole history.
 """
 
 import django.db.models.deletion
@@ -50,10 +54,6 @@ class Migration(migrations.Migration):
         migrations.AddIndex(
             model_name='hourlyrollup',
             index=models.Index(fields=['node', '-hour', 'station'], name='wis2watchco_node_id_cef16d_idx'),
-        ),
-        migrations.AddIndex(
-            model_name='hourlyrollup',
-            index=models.Index(fields=['station', '-hour'], name='wis2watchco_station_293705_idx'),
         ),
         migrations.AddField(
             model_name='dailystationrollup',
