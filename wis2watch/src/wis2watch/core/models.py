@@ -1047,18 +1047,130 @@ class HourlyRollup(TimeStampedModel):
             ),
         ]
         indexes = [
-            models.Index(fields=["node", "-hour"]),
+            # The station rides along on the node's index rather than earning
+            # one of its own. Everything asked of a node over a range of hours
+            # -- what it published, and which of its stations were heard --
+            # filters on the node and the hour first, so those stay the leading
+            # columns; carrying the station as well turns "every station of this
+            # node over the last 24 hours" into a scan of the index alone,
+            # without a heap fetch per row to find out which station it was.
+            # A strict extension of the plain ``(node, -hour)`` this replaced,
+            # so nothing that used to walk that walks anything longer now.
+            models.Index(fields=["node", "-hour", "station"]),
             # "When did this dataset last publish" is asked of every dataset in
             # the region at once, every time the overview is opened. Leading on
             # the dataset makes each of those answers one backwards walk of
             # this index rather than a scan of the node's whole history.
             models.Index(fields=["dataset", "-hour"]),
+            # One station's own history, which is what a drilldown asks for and
+            # what nothing here could answer without reading a whole node's
+            # hours and discarding all but one station's worth.
+            models.Index(fields=["station", "-hour"]),
         ]
         verbose_name = _("Hourly Rollup")
         verbose_name_plural = _("Hourly Rollups")
 
     def __str__(self):
         return f"{self.node_id} @ {self.hour}: {self.message_count}"
+
+
+#: What a daily station rollup counts separately. Named here for the same
+#: reason ``ROLLUP_GRAIN`` is: the constraint that keeps a bucket unique and the
+#: query that derives it live in different modules and have to agree.
+DAILY_STATION_GRAIN = ("day", "source", "node", "station")
+
+
+class DailyStationRollup(TimeStampedModel):
+    """Which stations of a node were heard on one UTC day, and how much.
+
+    A summary of :class:`HourlyRollup`, kept because the questions the
+    statistics surfaces ask are station questions over long windows, and the
+    hourly table is not shaped for them. Counting the distinct stations a node
+    was heard from over ninety days means reading every hour of those days for
+    every dataset the node publishes -- the dataset multiplies the rows and
+    contributes nothing to the answer. Collapsing the day and dropping the
+    dataset removes both multipliers at once.
+
+    The dataset is dropped rather than kept because no station question is
+    asked per dataset. The one place the breakdown is wanted -- a single
+    station's drilldown -- is narrow enough to go back to the hourly rows,
+    which now carry an index for exactly that.
+
+    The source is kept, for the same reason the hourly grain keeps it: the same
+    notification seen at a centre's own broker and at the Global Broker is two
+    rows on purpose, and summing them would double every number. Reading is
+    where a vantage point gets chosen -- distinct-station counts take all of
+    them and let ``DISTINCT`` absorb the overlap, message volumes filter to the
+    Global Broker.
+
+    Derived from the hourly rollups rather than from the raw messages, which is
+    what makes the history reachable at all: raw notifications expire after a
+    fortnight, so a day older than that could never be computed a second time.
+    Every day here is a pure function of hourly rows that are never expired, so
+    any day can be rebuilt at any time and a run that was missed costs nothing
+    but the delay.
+
+    Messages carrying no known station keep their own bucket here, as they do
+    in the hourly rollups. Whether the statistics surfaces say anything about
+    them is undecided; dropping them at this layer would decide it by making
+    the question unanswerable.
+    """
+
+    day = models.DateTimeField(
+        db_index=True,
+        help_text=_("Start of the UTC day this count covers"),
+    )
+    source = models.ForeignKey(
+        MessageSource,
+        on_delete=models.CASCADE,
+        related_name="daily_rollups",
+        help_text=_("The vantage point these messages were observed from"),
+    )
+    node = models.ForeignKey(
+        WIS2Node,
+        on_delete=models.CASCADE,
+        related_name="daily_rollups",
+    )
+    station = models.ForeignKey(
+        Station,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="daily_rollups",
+        help_text=_("Null for messages carrying no known station"),
+    )
+
+    message_count = models.PositiveIntegerField(default=0)
+    active_hours = models.PositiveSmallIntegerField(
+        default=0,
+        help_text=_("How many of the day's 24 UTC hours this station was heard in"),
+    )
+
+    class Meta:
+        ordering = ["-day"]
+        constraints = [
+            # ``nulls_distinct=False`` for the same reason the hourly grain
+            # needs it: a station of None is a real bucket, and Postgres's
+            # default would let it be inserted twice over.
+            models.UniqueConstraint(
+                fields=DAILY_STATION_GRAIN,
+                name="unique_daily_station_rollup",
+                nulls_distinct=False,
+            ),
+        ]
+        indexes = [
+            # A node's whole station population over a range of days: the
+            # availability matrix, and the count of distinct stations behind
+            # every headline figure. Leading on the node and the day makes the
+            # window a contiguous range, and carrying the station means the
+            # answer never leaves the index.
+            models.Index(fields=["node", "-day", "station"]),
+        ]
+        verbose_name = _("Daily Station Rollup")
+        verbose_name_plural = _("Daily Station Rollups")
+
+    def __str__(self):
+        return f"{self.node_id}/{self.station_id} @ {self.day}: {self.message_count}"
 
 
 class CadenceBaseline(models.Model):

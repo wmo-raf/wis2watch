@@ -498,6 +498,14 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'wis2watch.core.tasks.run_update_rollups',
         'schedule': 900.0,  # Every 15 minutes
     },
+    # On the same beat as the hourly rollups it summarises, because a day the
+    # statistics surfaces are reading should not be a quarter of an hour behind
+    # the hours under it. Rebuilding a three-day window is a thirtieth of the
+    # ninety days it saves those surfaces from reading.
+    'update-daily-rollups': {
+        'task': 'wis2watch.core.tasks.run_update_daily_rollups',
+        'schedule': 900.0,  # Every 15 minutes
+    },
     # A publishing rhythm is learned from months of buckets and moves in weeks,
     # so a daily run arrives at the same number a frequent one would.
     'learn-cadence-baselines': {
