@@ -10,6 +10,7 @@ from wis2watch.config.celery import app
 from .alerts import check_hard_failures
 from .cadence import learn_cadence_baselines
 from .catalogue import sync_catalogues
+from .daily_rollups import update_daily_rollups
 from .digest import send_digest
 from .node_stations import sync_node_stations
 from .oscar import sync_oscar_stations
@@ -127,6 +128,23 @@ def run_update_rollups():
     counts = update_rollups()
 
     logger.info("[ROLLUPS] %s", counts.summary)
+
+    return counts.summary
+
+
+@shared_task
+def run_update_daily_rollups():
+    """Summarise the recent hourly rollups into station-days.
+
+    Not chained to the hourly run, and not required to follow it. Both rebuild
+    a trailing window rather than adding to one, and this window is taken from
+    the hourly window's length, so a run that goes first reads slightly older
+    hours and the next run corrects the day it wrote. Coupling them would only
+    mean one failure took out both.
+    """
+    counts = update_daily_rollups()
+
+    logger.info("[DAILY ROLLUPS] %s", counts.summary)
 
     return counts.summary
 
