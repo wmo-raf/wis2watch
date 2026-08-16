@@ -6,7 +6,7 @@ DEBUG = False
 # outdated JavaScript / CSS assets being served from cache
 # (e.g. after a Wagtail upgrade).
 # See https://docs.djangoproject.com/en/5.2/ref/contrib/staticfiles/#manifeststaticfilesstorage
-STORAGES["staticfiles"]["BACKEND"] = "django.contrib.staticfiles.storage.ManifestStaticFilesStorage"
+STORAGES["staticfiles"]["BACKEND"] = "wis2watch.utils.staticfiles.ModuleAwareManifestStaticFilesStorage"
 
 try:
     from .local import *

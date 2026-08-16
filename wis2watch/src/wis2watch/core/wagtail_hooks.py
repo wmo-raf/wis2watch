@@ -10,6 +10,7 @@ from .views import (
     get_node_stations_as_csv,
     node_details,
     node_overview_table,
+    node_statistics,
     preview_node_stations_csv,
 )
 
@@ -21,6 +22,7 @@ def urlconf_wis2watch():
         path("gap-reports/", gap_report_index, name="gap_reports"),
         path("gap-reports/<slug:slug>/", gap_report_table, name="gap_report"),
         path("node-detail/<int:node_id>/", node_details, name="node_details"),
+        path("node-detail/<int:node_id>/statistics/", node_statistics, name="node_statistics"),
         path('node/<int:node_id>/stations/preview/', preview_node_stations_csv,
              name='preview_node_stations_csv'),
         path('node/<int:node_id>/stations/csv/', get_node_stations_as_csv, name='get_node_stations_csv'),
