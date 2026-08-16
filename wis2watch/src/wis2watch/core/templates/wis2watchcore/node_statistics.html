@@ -1,0 +1,39 @@
+{% extends "wis2watchcore/node_shell.html" %}
+
+{% load vue_utils %}
+
+{% comment %}
+    The mount point for the statistics island, and nothing else.
+
+    Everything the island needs to know before it can ask a question of its
+    own arrives as a data attribute: `vue-plugin-django-utils` reads the
+    dataset and hands it to the component as props, coerced to the types the
+    component declares. Anything reversible -- a URL, above all -- is
+    reversed here rather than assembled in JavaScript, because the bundle is
+    built ahead of time and a path composed inside it is a path nobody can
+    rename from the Python side.
+{% endcomment %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        /* Held open so the page does not jump between the server's render
+           and the island's first paint. */
+        #node-statistics {
+            min-height: 20rem;
+        }
+    </style>
+{% endblock %}
+
+{% block tab_content %}
+    <div id="node-statistics"
+         data-node-id="{{ node.id }}"
+         data-node-name="{{ node.name }}"
+         data-centre-id="{{ node.centre_id }}">
+    </div>
+{% endblock %}
+
+{% block extra_js %}
+    {{ block.super }}
+    <script type="module" crossorigin src="{% vue_bundle_url 'node-statistics' %}"></script>
+{% endblock %}

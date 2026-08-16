@@ -26,6 +26,17 @@ const WagtailThemePreset = definePreset(Aura, {
     }
 });
 
+// Wagtail carries the reader's choice as a class on <html>, and its default
+// is `w-theme-system` -- the OS decides. Naming only `.w-theme-dark` left the
+// island light on a dark admin for everybody who never opened the setting,
+// which is most people. `[CSS]` is PrimeVue's escape hatch for placing the
+// dark tokens inside a rule of our own, and it is the only way to say "dark,
+// but only where Wagtail is also following the system".
+const WAGTAIL_DARK_MODE_SELECTORS = [
+    '.w-theme-dark',
+    '@media (prefers-color-scheme: dark) { .w-theme-system { [CSS] } }',
+];
+
 export const createWis2WatchApp = (rootElementId, RootComponent) => {
     const el = document.getElementById(rootElementId)
 
@@ -49,7 +60,7 @@ export const createWis2WatchApp = (rootElementId, RootComponent) => {
             theme: {
                 preset: WagtailThemePreset,
                 options: {
-                    darkModeSelector: '.w-theme-dark',
+                    darkModeSelector: WAGTAIL_DARK_MODE_SELECTORS,
                 }
             }
         });

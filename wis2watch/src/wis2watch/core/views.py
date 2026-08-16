@@ -173,11 +173,7 @@ def preview_node_stations_csv(request, node_id):
         'header': header,
         'data_rows': data_rows,
         'page_title': f"CSV Preview - {node.name}",
-        'breadcrumbs_items': [
-            {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-            {"url": reverse_lazy("node_details", kwargs={'node_id': node.id}), "label": node.name},
-            {"url": "", "label": _("CSV Preview")},
-        ],
+        'breadcrumbs_items': node_breadcrumbs(node, leaf=_("CSV Preview")),
     }
 
     return render(request, 'wis2watchcore/node_stations_csv_preview.html', context)
@@ -204,6 +200,39 @@ def get_node_stations_as_csv(request, node_id):
     node_stations_as_csv(node, response)
 
     return response
+
+
+def node_breadcrumbs(node, leaf=None):
+    """The trail down to one of a node's views.
+
+    Every view of a node is reached the same way, and the node's own page is
+    where the others hang from: a reader who followed a flag to a centre and
+    then opened its statistics can still get back to what flagged it.
+
+    Args:
+        node (WIS2Node): the centre the trail leads to.
+        leaf (str): what the open view is called, where it is not the node's
+            own page.
+
+    Returns:
+        list: breadcrumb items, the last of them carrying no URL.
+    """
+    # The last crumb carries no URL at all rather than an empty one, which the
+    # breadcrumbs component renders as a link to the page you are already on.
+    node_url = None if leaf is None else reverse_lazy(
+        "node_details", kwargs={"node_id": node.id}
+    )
+
+    trail = [
+        {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
+        {"url": reverse_lazy(WIS2NodeViewSet().get_url_name("index")), "label": _("Nodes")},
+        {"url": node_url, "label": node.name},
+    ]
+
+    if leaf is not None:
+        trail.append({"url": None, "label": leaf})
+
+    return trail
 
 
 def node_details(request, node_id):
@@ -247,21 +276,41 @@ def node_details(request, node_id):
         else:
             messages.error(request, _("Invalid form submission."))
 
-    nodes_index_url_name = WIS2NodeViewSet().get_url_name("index")
-    nodes_index_url = reverse_lazy(nodes_index_url_name)
-
-    breadcrumbs_items = [
-        {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
-        {"url": nodes_index_url, "label": _("Nodes")},
-        {"url": "", "label": node.name},
-    ]
+    nodes_index_url = reverse_lazy(WIS2NodeViewSet().get_url_name("index"))
 
     context = {
-        "breadcrumbs_items": breadcrumbs_items,
+        "breadcrumbs_items": node_breadcrumbs(node),
         "node": node,
         "nodes_index_url": nodes_index_url,
         "overview_url": reverse_lazy("node_overview"),
         "detail": node_detail(node),
+        "active_tab": "details",
     }
 
     return render(request, 'wis2watchcore/node_details.html', context)
+
+
+def node_statistics(request, node_id):
+    """How one centre's activity has moved, drawn rather than tabulated.
+
+    The view is a frame. It settles which node is being read and hands that
+    over; the island asks for the numbers itself, over a window the reader
+    moves. Computing anything here would mean computing it for a window
+    nobody chose, and re-rendering the page every time they chose another.
+
+    Args:
+        request: HTTP request object.
+        node_id (int): ID of the WIS2 Node.
+
+    Returns:
+        HttpResponse: The page the statistics island mounts into.
+    """
+    node = get_object_or_404(WIS2Node, pk=node_id)
+
+    context = {
+        "breadcrumbs_items": node_breadcrumbs(node, leaf=_("Statistics")),
+        "node": node,
+        "active_tab": "statistics",
+    }
+
+    return render(request, 'wis2watchcore/node_statistics.html', context)

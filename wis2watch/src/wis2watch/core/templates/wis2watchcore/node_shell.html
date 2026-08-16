@@ -1,0 +1,28 @@
+{% extends "wagtailadmin/generic/base.html" %}
+
+{% comment %}
+    The shell a node's views are rendered in: the trail, the strip of tabs,
+    and the view's own body under `tab_content`.
+
+    The node's header grid is deliberately not here. Filling it costs a whole
+    `node_detail()` run, and the statistics view reads rollups rather than
+    that analysis; a shell that made every view pay for the diagnostic one
+    would be the cheapest possible way to make this page slow. What every
+    view does share -- which node this is -- the breadcrumb trail already
+    says.
+{% endcomment %}
+
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        .node-tabs {
+            margin-top: 1rem;
+        }
+    </style>
+{% endblock %}
+
+{% block main_content %}
+    {% include "wis2watchcore/includes/node_tabs.html" %}
+
+    {% block tab_content %}{% endblock %}
+{% endblock %}

@@ -800,3 +800,99 @@ class NodeDetailViewTests(TestCase):
         )
 
         self.assertContains(response, "advertises no station registry")
+
+    def test_the_statistics_view_is_one_click_away(self):
+        self.assertContains(
+            self.page(), reverse("node_statistics", args=[self.node.id])
+        )
+
+    def test_the_trail_ends_at_the_node_rather_than_linking_to_itself(self):
+        crumbs = self.page().context["breadcrumbs_items"]
+
+        self.assertEqual(crumbs[-1]["label"], self.node.name)
+        self.assertIsNone(crumbs[-1]["url"])
+
+    def test_syncing_by_hand_comes_back_to_the_view_it_was_asked_from(self):
+        """The sync button belongs to this view, and returns to it.
+
+        Each view is its own URL, so a POST lands back where it was made
+        rather than on whichever view a fragment happened to name.
+        """
+        with mock.patch("wis2watch.core.views.sync_node_stations"):
+            response = self.client.post(
+                reverse("node_details", args=[self.node.id]), {"node_id": self.node.id}
+            )
+
+        self.assertEqual(response.context["active_tab"], "details")
+        self.assertContains(response, 'aria-selected="true"', count=1)
+
+
+class NodeStatisticsViewTests(TestCase):
+    """The node's statistics dashboard: a Vue island in an admin page.
+
+    What is asserted here is the frame -- that the island is reachable, that
+    it is scoped to one node, and that it is handed what it needs to ask for
+    the rest. What it draws once it has the numbers is the dashboard's own.
+    """
+
+    def setUp(self):
+        self.client.force_login(
+            get_user_model().objects.create_superuser("diagnostician", password="s3cret")
+        )
+        self.node = WIS2Node.objects.create(
+            centre_id="ke-kmd",
+            name="Kenya Meteorological Department",
+            base_url="https://wis2.kmd.test",
+        )
+
+    def page(self):
+        return self.client.get(reverse("node_statistics", args=[self.node.id]))
+
+    def test_the_statistics_view_loads(self):
+        response = self.page()
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Kenya Meteorological Department")
+
+    def test_a_node_that_does_not_exist_has_no_statistics(self):
+        response = self.client.get(reverse("node_statistics", args=[self.node.id + 1]))
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_the_island_is_told_which_node_it_is_reading(self):
+        """The mount point carries its props as data attributes.
+
+        The island is node-scoped like everything else on this page: a
+        station transmits under a centre's topics, and the centre's own
+        observation is what this page is about.
+        """
+        response = self.page()
+
+        self.assertContains(response, 'id="node-statistics"')
+        self.assertContains(response, f'data-node-id="{self.node.id}"')
+        self.assertContains(response, 'data-node-name="Kenya Meteorological Department"')
+
+    def test_the_statistics_bundle_is_the_only_one_this_view_loads(self):
+        response = self.page()
+
+        self.assertContains(response, "node-statistics.js")
+        self.assertNotContains(response, "mqtt-monitor-map.js")
+
+    def test_the_open_view_is_the_one_the_tab_strip_marks(self):
+        response = self.page()
+
+        self.assertEqual(response.context["active_tab"], "statistics")
+        self.assertContains(response, 'aria-selected="true"', count=1)
+
+    def test_the_other_view_is_one_click_away(self):
+        self.assertContains(self.page(), reverse("node_details", args=[self.node.id]))
+
+    def test_the_trail_leads_back_through_the_node(self):
+        """The leaf names the view; the crumb above it is the node's own page."""
+        crumbs = self.page().context["breadcrumbs_items"]
+
+        self.assertEqual(crumbs[-1]["label"], "Statistics")
+        self.assertIsNone(crumbs[-1]["url"])
+        self.assertEqual(
+            str(crumbs[-2]["url"]), reverse("node_details", args=[self.node.id])
+        )

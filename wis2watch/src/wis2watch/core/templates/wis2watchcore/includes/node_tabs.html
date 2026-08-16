@@ -1,0 +1,33 @@
+{% load i18n %}
+
+{% comment %}
+    A node's views as a strip of plain links, one URL each.
+
+    Wagtail's own tabs are panels in a single document, switched by a
+    Stimulus controller that writes the open tab into the fragment. These are
+    pages instead: the statistics view owns its query string, so any view of
+    it is a link somebody can send, and the sync button on the details view
+    posts back to the view it was pressed on rather than to whichever tab a
+    fragment happened to name. The classes are Wagtail's, so the strip looks
+    like a Wagtail one; the underline follows `aria-selected`, which is CSS
+    and needs no controller.
+{% endcomment %}
+
+<div class="w-tabs node-tabs">
+    <div class="w-tabs__wrapper">
+        <div role="tablist" class="w-tabs__list">
+            <a class="w-tabs__tab"
+               role="tab"
+               href="{% url 'node_details' node.id %}"
+               aria-selected="{% if active_tab == 'details' %}true{% else %}false{% endif %}">
+                {% translate "Details" %}
+            </a>
+            <a class="w-tabs__tab"
+               role="tab"
+               href="{% url 'node_statistics' node.id %}"
+               aria-selected="{% if active_tab == 'statistics' %}true{% else %}false{% endif %}">
+                {% translate "Statistics" %}
+            </a>
+        </div>
+    </div>
+</div>
