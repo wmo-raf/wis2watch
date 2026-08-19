@@ -460,7 +460,11 @@ LOGGING = {
 }
 
 VUE_FRONTEND_USE_TYPESCRIPT = False
-VUE_FRONTEND_USE_DEV_SERVER = DEBUG
+# Where the Vue islands are loaded from: the Vite dev server on the developer's
+# machine, or the bundles committed under monitoring/static/vue. Follows DEBUG,
+# because in production there is no dev server to point at -- but overridable,
+# so that working on the backend does not oblige you to run node.
+VUE_FRONTEND_USE_DEV_SERVER = env.bool('VUE_FRONTEND_USE_DEV_SERVER', DEBUG)
 VUE_FRONTEND_DEV_SERVER_URL = 'http://localhost:5173'
 VUE_FRONTEND_DEV_SERVER_PATH = '/static/vue/src'
 VUE_FRONTEND_STATIC_PATH = 'vue'

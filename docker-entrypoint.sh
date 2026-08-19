@@ -34,8 +34,12 @@ ingest              : Start the WIS2 ingestion supervisor, which owns every
                       single ownership is what removes the need for locking.
 
 DEV COMMANDS:
-django-dev      : Start a normal WIS2Watch backend django development server, performs
-                  the same checks and setup as the gunicorn command above.
+django-dev          : Start a normal WIS2Watch backend django development server,
+                      performs the same checks and setup as the gunicorn command above.
+celery-worker-dev   : The celery worker, restarted whenever a Python file changes.
+celery-beat-dev     : The celery beat service, restarted whenever a Python file changes.
+ingest-dev          : The ingestion supervisor, restarted whenever a Python file changes.
+                      Still exactly one of these -- see the ingest command above.
 """
 }
 
@@ -61,14 +65,54 @@ run_setup_commands_if_configured(){
   fi
 }
 
-start_celery_worker() {
+# Where the source tree is mounted from the host by docker-compose.dev.yml.
+# Nothing outside it can change without a rebuild, so nothing outside it is
+# worth watching.
+WIS2WATCH_SRC=/wis2watch/app/src
 
-    EXTRA_CELERY_ARGS=()
+# The one directory under the source tree that is not source. It holds ~8000
+# files; a poll that walks them is a poll spent on nothing.
+WIS2WATCH_AUTORELOAD_IGNORE="$WIS2WATCH_SRC/wis2watch/monitoring/wis2watch-monitoring/node_modules"
+
+# Run the given command under a watcher that restarts it when a Python file
+# under the mounted source changes. Only the dev commands use this; the
+# production commands exec their process directly.
+#
+# Polling rather than filesystem events: host changes reach a bind-mounted
+# container through the Docker VM, which does not forward inotify reliably,
+# and watchfiles' own auto-detection only covers WSL. A missed restart is
+# silent -- you debug code that is no longer running -- which is worth more
+# than the CPU a stat sweep of a few hundred files costs.
+autoreload_exec(){
+    export WATCHFILES_FORCE_POLLING="${WATCHFILES_FORCE_POLLING:-true}"
+    echo "watching $WIS2WATCH_SRC: $*"
+    exec watchfiles --filter python \
+        --ignore-paths "$WIS2WATCH_AUTORELOAD_IGNORE" \
+        "$*" \
+        "$WIS2WATCH_SRC"
+}
+
+# The worker's argv, built in one place. The production command and its
+# auto-reloading twin start the same worker with the same arguments; the only
+# difference between them is what wraps it.
+build_celery_worker_argv() {
+    CELERY_WORKER_ARGV=(celery -A wis2watch worker)
 
     if [[ -n "$WIS2WATCH_GUNICORN_NUM_OF_WORKERS" ]]; then
-        EXTRA_CELERY_ARGS+=(--concurrency "$WIS2WATCH_GUNICORN_NUM_OF_WORKERS")
+        CELERY_WORKER_ARGV+=(--concurrency "$WIS2WATCH_GUNICORN_NUM_OF_WORKERS")
     fi
-    exec celery -A wis2watch worker "${EXTRA_CELERY_ARGS[@]}" -l "${WIS2WATCH_CELERY_WORKER_LOG_LEVEL}" "$@"
+
+    CELERY_WORKER_ARGV+=(-l "${WIS2WATCH_CELERY_WORKER_LOG_LEVEL}" "$@")
+}
+
+start_celery_worker() {
+    build_celery_worker_argv "$@"
+    exec "${CELERY_WORKER_ARGV[@]}"
+}
+
+start_celery_worker_dev() {
+    build_celery_worker_argv "$@"
+    autoreload_exec "${CELERY_WORKER_ARGV[@]}"
 }
 
 # Lets devs attach to this container running the passed command, press ctrl-c and only
@@ -151,11 +195,20 @@ shell)
 celery-worker)
     start_celery_worker -Q celery -n default-worker@%h "${@:2}"
     ;;
+celery-worker-dev)
+    start_celery_worker_dev -Q celery -n default-worker@%h "${@:2}"
+    ;;
 celery-beat)
     exec celery -A wis2watch beat -l "${WIS2WATCH_CELERY_BEAT_DEBUG_LEVEL}" -S django_celery_beat.schedulers:DatabaseScheduler "${@:2}"
     ;;
+celery-beat-dev)
+    autoreload_exec celery -A wis2watch beat -l "${WIS2WATCH_CELERY_BEAT_DEBUG_LEVEL}" -S django_celery_beat.schedulers:DatabaseScheduler "${@:2}"
+    ;;
 ingest)
     exec python3 /wis2watch/app/src/wis2watch/manage.py run_ingest "${@:2}"
+    ;;
+ingest-dev)
+    autoreload_exec python3 /wis2watch/app/src/wis2watch/manage.py run_ingest "${@:2}"
     ;;
 *)
     echo "Command given was $*"

@@ -14,6 +14,13 @@ The five canonical triage roles, each label string equal to its name. See `docs/
 
 Single-context: `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
+### Development stack
+
+Changes reflect on save once `COMPOSE_FILE` is set in `.env`. Rebuilding the
+image for every edit is not necessary. `make` lists the shortcuts -- `make up`,
+`make test`, `make logs-ingest`, `make frontend`. See
+`docs/development.md`.
+
 ## Adding new features or fixing bugs
 
 **IMPORTANT**: When you work on a new feature or bug fix, create a git branch first. Then work on changes in that
