@@ -85,6 +85,68 @@ export function roundHourTicks(starts, plotWidth, minLabelPx = 40) {
     }, [])
 }
 
+/**
+ * Which buckets of a daily axis get a label, counted back from the newest.
+ *
+ * Anchored at the newest bucket rather than the oldest, because that one is
+ * today and is the label a reader looks for first -- and because a window is
+ * a rolling one, so the oldest bucket is an arbitrary date and the newest is
+ * never one.
+ *
+ * No clock arithmetic, unlike the hourly axis: there is nothing about a day
+ * of the month a reader is hunting for the way they hunt for 06Z, so an even
+ * spacing that always includes today is the whole of what is wanted.
+ *
+ * @param {number} count - how many buckets the axis holds.
+ * @param {number} plotWidth - the measured width of the plot, in pixels.
+ * @param {number} minLabelPx - how much room one label needs.
+ * @returns {number[]} the indices to label, oldest first.
+ */
+export function spacedTicks(count, plotWidth, minLabelPx = 44) {
+    if (count <= 0) {
+        return []
+    }
+
+    const room = Math.max(1, Math.floor(plotWidth / minLabelPx))
+    const step = Math.max(1, Math.ceil(count / room))
+
+    const indices = []
+    for (let index = count - 1; index >= 0; index -= step) {
+        indices.unshift(index)
+    }
+
+    return indices
+}
+
+//: Half of the widest label a bucket axis puts under a tick. Enough for a
+//: date or the word "today", which are what the daily axis carries.
+const LABEL_HALF_PX = 18
+
+/**
+ * Where a tick label sits and which way it runs, kept inside the plot.
+ *
+ * The newest bucket of a rolling window is always worth labelling and always
+ * sits against the right edge, so a centred label there is half outside the
+ * plot -- which is how "today" comes out reading "toda". Turning the end
+ * labels inwards costs nothing and is the only alternative to dropping them.
+ *
+ * @param {number} centre - the bucket's centre, in plot coordinates.
+ * @param {number} padLeft - where the plot starts.
+ * @param {number} width - the full measured width of the chart.
+ * @returns {{x: number, anchor: string}} the label's position and anchor.
+ */
+export function tickPlacement(centre, padLeft, width) {
+    if (centre + LABEL_HALF_PX > width) {
+        return {x: width, anchor: 'end'}
+    }
+
+    if (centre - LABEL_HALF_PX < padLeft) {
+        return {x: padLeft, anchor: 'start'}
+    }
+
+    return {x: centre, anchor: 'middle'}
+}
+
 /** Pixel to bucket index, or null outside the plot. Hover, focus and select share it. */
 export function bucketAtX(px, count, plotWidth) {
     if (plotWidth <= 0 || count <= 0) {
@@ -110,6 +172,26 @@ export function formatHourLong(start) {
     })
 
     return `${day}, ${formatHour(start)}`
+}
+
+/** An axis label for one UTC day, on a chart that is all UTC. */
+export function formatDay(start) {
+    return start.toLocaleDateString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        timeZone: 'UTC',
+    })
+}
+
+/** One day named in full, for a readout that has room to say the weekday too. */
+export function formatDayLong(start) {
+    return start.toLocaleDateString('en-GB', {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        timeZone: 'UTC',
+    })
 }
 
 /**

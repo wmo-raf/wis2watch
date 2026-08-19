@@ -248,3 +248,119 @@ class MountPointTests(TestCase):
         summary_url = reverse("node_statistics_summary", args=[self.kenya.pk])
 
         self.assertContains(response, f'data-summary-url="{summary_url}"')
+
+
+class WindowParameterTests(StatisticsEndpointTestCase):
+    """The one input this endpoint takes, and the only spellings of it."""
+
+    def test_the_default_window_is_the_last_day(self):
+        self.assertEqual(self.summary()["window"]["key"], "24h")
+
+    def test_every_offered_window_can_be_asked_for(self):
+        for key, grain in (("24h", "hour"), ("7d", "day"), ("30d", "day"), ("90d", "day")):
+            with self.subTest(window=key):
+                response = self.client.get(self.url(), {"window": key})
+
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.json()["window"]["key"], key)
+                self.assertEqual(response.json()["window"]["grain"], grain)
+
+    def test_a_window_nobody_offers_is_refused_with_the_ones_that_exist(self):
+        """A refusal a client cannot act on sends a reader into the source."""
+        response = self.client.get(self.url(), {"window": "6h"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["valid_windows"], ["24h", "7d", "30d", "90d"])
+
+    def test_a_free_range_is_not_a_window(self):
+        """The unbounded question is refused by there being no way to ask it."""
+        response = self.client.get(
+            self.url(), {"since": "2024-01-01", "until": "2026-01-01"}
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["window"]["key"], "24h")
+
+    def test_an_empty_window_parameter_is_the_default_rather_than_a_refusal(self):
+        """A client that built a querystring is not a reader asking for '6h'."""
+        response = self.client.get(self.url(), {"window": ""})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["window"]["key"], "24h")
+
+    def test_the_endpoint_logs_the_window_it_was_asked_for(self):
+        with self.assertLogs("wis2watch.api.views", level="DEBUG") as logged:
+            self.client.get(self.url(), {"window": "30d"})
+
+        self.assertTrue(any("30d" in line for line in logged.output), logged.output)
+
+
+class WindowStatsResponseTests(StatisticsEndpointTestCase):
+    """The moving block the control binds to."""
+
+    def summary_over(self, window):
+        response = self.client.get(self.url(), {"window": window})
+
+        self.assertEqual(response.status_code, 200)
+
+        return response.json()
+
+    def test_the_moving_figures_cross_the_wire_in_their_own_block(self):
+        stats = self.summary()["window_stats"]
+
+        self.assertEqual(
+            set(stats),
+            {
+                "reported_station_count",
+                "declared_station_count",
+                "messages_total",
+                "unattributed_messages_total",
+                "daily",
+            },
+        )
+
+    def test_the_window_coverage_is_reported_against_the_declared_population(self):
+        self.declare("0-20000-0-63708")
+        self.declare("0-20000-0-63709")
+
+        stats = self.summary()["window_stats"]
+
+        self.assertEqual(stats["declared_station_count"], 2)
+        self.assertEqual(stats["reported_station_count"], 0)
+
+    def test_there_is_no_daily_series_at_the_default_window(self):
+        self.assertIsNone(self.summary()["window_stats"]["daily"])
+
+    def test_a_daily_window_carries_a_dense_series_against_its_own_axis(self):
+        summary = self.summary_over("7d")
+        daily = summary["window_stats"]["daily"]
+
+        self.assertEqual(len(daily), 7)
+        self.assertEqual(len(daily), len(summary["buckets"]))
+        self.assertEqual(
+            set(daily[0]),
+            {
+                "messages",
+                "unattributed_messages",
+                "stations",
+                "messages_per_active_station",
+            },
+        )
+
+    def test_the_newest_daily_bucket_is_the_day_in_progress(self):
+        buckets = self.summary_over("7d")["buckets"]
+
+        self.assertTrue(buckets[-1]["partial"])
+        self.assertFalse(any(bucket["partial"] for bucket in buckets[:-1]))
+
+    def test_a_day_nothing_reported_in_carries_no_ratio(self):
+        daily = self.summary_over("7d")["window_stats"]["daily"]
+
+        self.assertIsNone(daily[0]["messages_per_active_station"])
+
+    def test_the_standing_block_does_not_move_with_the_window(self):
+        """The control moves everything on the tab except these figures."""
+        self.declare("0-20000-0-63708")
+        self.transmitted("0-20000-0-63708")
+
+        self.assertEqual(self.summary()["now"], self.summary_over("90d")["now"])

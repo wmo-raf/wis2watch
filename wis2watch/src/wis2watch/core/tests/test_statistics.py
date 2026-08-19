@@ -23,6 +23,7 @@ from wis2watch.core.analysis import (
     Window,
     node_statistics_summary,
 )
+from wis2watch.core.daily_rollups import backfill_daily_rollups
 from wis2watch.core.models import MessageSource, WIS2Node
 
 from .support import (
@@ -449,3 +450,220 @@ class HourlySeriesTests(SeriesTestCase):
         self.assertEqual(sum(hour.messages for hour in series), 0)
         self.assertEqual(sum(hour.stations for hour in series), 0)
         self.assertEqual(sum(hour.unattributed_messages for hour in series), 0)
+
+
+class WindowSeriesTestCase(SeriesTestCase):
+    """A node whose days can be seeded an hour at a time.
+
+    The daily rows are derived by the summariser rather than written by hand,
+    for the reason the summariser exists: a test that inserts its own
+    ``DailyStationRollup`` is a test that agrees with itself about how a day
+    is counted, and the mistake worth catching is the two layers disagreeing.
+    """
+
+    def summarise(self):
+        """Roll the seeded hours up into days, as the scheduled run does."""
+        backfill_daily_rollups(now=NOW)
+
+    def week(self, **kwargs):
+        return self.summary(window=Window.resolve("7d"), **kwargs)
+
+
+class WindowCoverageTests(WindowSeriesTestCase):
+    """The moving figure, and the gap between it and the standing one."""
+
+    def test_a_station_heard_once_in_the_window_is_covered_by_it(self):
+        """The finding the tab exists for: reported, then stopped."""
+        stopped = self.declare("0-20000-0-63708")
+        self.declare("0-20000-0-63709")
+        self.rollup(hours_ago=5 * 24, station=stopped, messages=3)
+        self.summarise()
+
+        stats = self.week().window_stats
+
+        self.assertEqual(stats.reported_station_count, 1)
+        self.assertEqual(stats.declared_station_count, 2)
+
+    def test_the_window_coverage_can_exceed_what_is_transmitting_now(self):
+        """The 66 stations that reported this month and have since stopped."""
+        stopped = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=5 * 24, station=stopped, messages=3)
+        self.summarise()
+
+        summary = self.week()
+
+        self.assertEqual(summary.window_stats.reported_station_count, 1)
+        self.assertEqual(summary.now.transmitting, 0)
+
+    def test_a_station_heard_twice_in_the_window_is_one_station(self):
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=5 * 24, station=station, messages=3)
+        self.rollup(hours_ago=2 * 24, station=station, messages=3)
+        self.summarise()
+
+        self.assertEqual(self.week().window_stats.reported_station_count, 1)
+
+    def test_a_station_heard_only_before_the_window_is_not_covered_by_it(self):
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=20 * 24, station=station, messages=3)
+        self.summarise()
+
+        self.assertEqual(self.week().window_stats.reported_station_count, 0)
+
+    def test_the_default_window_counts_coverage_from_the_hourly_rollups(self):
+        """No daily rows exist at all, and the 24h figure still answers."""
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=3, station=station, messages=3)
+
+        self.assertEqual(self.summary().window_stats.reported_station_count, 1)
+
+    def test_message_volume_over_the_window_is_global_broker_only(self):
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=2 * 24, station=station, messages=4)
+        self.rollup(
+            hours_ago=2 * 24,
+            station=station,
+            messages=4,
+            source=origin_broker(self.kenya),
+        )
+        self.rollup(hours_ago=2 * 24, station=None, messages=2)
+        self.summarise()
+
+        stats = self.week().window_stats
+
+        self.assertEqual(stats.messages_total, 6)
+        self.assertEqual(stats.unattributed_messages_total, 2)
+
+    def test_a_node_with_no_history_reports_zero_coverage(self):
+        stats = self.week().window_stats
+
+        self.assertEqual(stats.reported_station_count, 0)
+        self.assertEqual(stats.messages_total, 0)
+        self.assertEqual(stats.unattributed_messages_total, 0)
+
+
+class DailySeriesTests(WindowSeriesTestCase):
+    """The dense daily series, which carries the node-wide-outage signal."""
+
+    def daily(self, **kwargs):
+        return self.week(**kwargs).window_stats.daily
+
+    def test_the_default_window_has_no_daily_series_at_all(self):
+        """A one-cell chart is not a series; the panel says so instead."""
+        self.assertIsNone(self.summary().window_stats.daily)
+
+    def test_the_series_is_dense_over_the_whole_window(self):
+        self.assertEqual(len(self.daily()), 7)
+
+    def test_the_series_is_positional_against_the_window_axis(self):
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=2 * 24, station=station, messages=5)
+        self.summarise()
+
+        series = self.daily()
+
+        self.assertEqual(series[-3].messages, 5)
+        self.assertEqual(series[-2].messages, 0)
+        self.assertEqual(len(series), len(self.week().buckets))
+
+    def test_a_day_counts_the_distinct_stations_heard_in_it(self):
+        first = self.declare("0-20000-0-63708")
+        second = self.declare("0-20000-0-63709")
+        self.rollup(hours_ago=2 * 24, station=first, messages=3)
+        self.rollup(hours_ago=2 * 24 + 3, station=second, messages=3)
+        self.summarise()
+
+        self.assertEqual(self.daily()[-3].stations, 2)
+
+    def test_a_station_heard_at_two_vantage_points_is_one_station(self):
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=2 * 24, station=station, messages=3)
+        self.rollup(
+            hours_ago=2 * 24, station=station, messages=3, source=origin_broker(self.kenya)
+        )
+        self.summarise()
+
+        self.assertEqual(self.daily()[-3].stations, 1)
+
+    def test_messages_naming_no_station_are_counted_apart_and_included(self):
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=2 * 24, station=station, messages=3)
+        self.rollup(hours_ago=2 * 24, station=None, messages=2)
+        self.summarise()
+
+        day = self.daily()[-3]
+
+        self.assertEqual(day.messages, 5)
+        self.assertEqual(day.unattributed_messages, 2)
+        self.assertEqual(day.stations, 1)
+
+    def test_the_ratio_is_computed_on_the_server(self):
+        first = self.declare("0-20000-0-63708")
+        second = self.declare("0-20000-0-63709")
+        self.rollup(hours_ago=2 * 24, station=first, messages=7)
+        self.rollup(hours_ago=2 * 24, station=second, messages=3)
+        self.summarise()
+
+        self.assertEqual(self.daily()[-3].messages_per_active_station, 5)
+
+    def test_a_day_with_no_stations_has_no_ratio_rather_than_a_zero(self):
+        """Dividing by nothing is not zero messages per station."""
+        self.rollup(hours_ago=2 * 24, station=None, messages=9)
+        self.summarise()
+
+        day = self.daily()[-3]
+
+        self.assertEqual(day.stations, 0)
+        self.assertIsNone(day.messages_per_active_station)
+
+    def test_another_centres_traffic_is_not_counted_here(self):
+        djibouti = WIS2Node.objects.create(centre_id="dj-anm", name="Djibouti")
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=2 * 24, station=station, messages=9, node=djibouti)
+        self.summarise()
+
+        self.assertEqual(sum(day.messages for day in self.daily()), 0)
+
+    def test_a_node_that_published_nothing_gets_a_real_zero_series(self):
+        series = self.daily()
+
+        self.assertEqual(len(series), 7)
+        self.assertEqual(sum(day.messages for day in series), 0)
+        self.assertEqual(sum(day.stations for day in series), 0)
+
+    def test_the_newest_bucket_is_the_day_in_progress(self):
+        """A series whose newest bucket is yesterday hides today's outage."""
+        buckets = self.week().buckets
+
+        self.assertEqual(buckets[-1].start, at("2026-08-11T00:00:00"))
+        self.assertTrue(buckets[-1].partial)
+
+    def test_the_day_in_progress_bites_the_station_count(self):
+        """The mark has nothing to mark unless today's bar is really short.
+
+        At 12:34 UTC the stations that report in the afternoon have not
+        reported yet, so today is short in *stations* and not only in message
+        hours -- which is the thing the daily series plots.
+        """
+        morning = self.declare("0-20000-0-63708")
+        afternoon = self.declare("0-20000-0-63709")
+        self.rollup(hours_ago=24 + 4, station=morning, messages=3)
+        self.rollup(hours_ago=24, station=afternoon, messages=3)
+        self.rollup(hours_ago=4, station=morning, messages=3)
+        self.summarise()
+
+        series = self.daily()
+
+        self.assertEqual(series[-2].stations, 2)
+        self.assertEqual(series[-1].stations, 1)
+
+    def test_the_series_reads_the_daily_rollups_and_not_the_hours(self):
+        """7d and longer are served by the table built for station questions."""
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=2 * 24, station=station, messages=5)
+
+        self.assertEqual(sum(day.messages for day in self.daily()), 0)
+
+        self.summarise()
+
+        self.assertEqual(sum(day.messages for day in self.daily()), 5)
