@@ -30,37 +30,17 @@ from ..staleness import default_stale_after_hours
 from ..stations import StationStanding, node_stations
 from ..windows import Grain, Window
 from .series import (
+    FIXED_WINDOW_KEY,
     Bucket,
     DailyActivity,
     HourlyActivity,
+    WindowBounds,
     bucket_axis,
     daily_activity,
     hour_of_day_profile,
     hourly_activity,
     window_totals,
 )
-
-#: The window the fixed block is always read over, whatever the reader has
-#: chosen. Named here rather than spelled as "24 hours" so that the block, the
-#: staleness threshold and the shortest window on offer stay one number.
-FIXED_WINDOW_KEY = "24h"
-
-
-@dataclass(frozen=True)
-class WindowBounds:
-    """The window a response was computed over, as absolute UTC instants.
-
-    Echoed rather than assumed so that the client labels its axes from server
-    truth. ``until`` is exclusive, and where it falls differs by grain for the
-    reasons ``analysis.windows`` gives.
-    """
-
-    key: str
-    label: str
-    since: datetime
-    until: datetime
-    grain: str
-
 
 @dataclass(frozen=True)
 class WindowOption:

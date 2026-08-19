@@ -275,6 +275,56 @@ export function formatDayLong(start) {
 }
 
 /**
+ * One instant named in full, in UTC, for a table cell rather than an axis.
+ *
+ * The year is in it, unlike every axis label on the tab: a station that
+ * stopped is the row a reader is hunting for, and "14 Aug" on a station last
+ * heard from in 2024 is the one formatting mistake that would matter here.
+ *
+ * @param {string} iso - the instant, as the server sent it.
+ * @returns {string} the instant in UTC, or an em dash where there is none.
+ */
+export function formatInstant(iso) {
+    if (!iso) {
+        return '\u2014'
+    }
+
+    const named = new Date(iso).toLocaleString('en-GB', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'UTC',
+    })
+
+    return `${named}Z`
+}
+
+/**
+ * How long something has been quiet, in the largest unit that is still exact
+ * enough to act on.
+ *
+ * Hours up to two days, because "quiet 31 hours" is the sentence that decides
+ * whether a station has crossed the staleness threshold. Days after that,
+ * because nobody reads 2,184 hours as three months.
+ *
+ * @param {number|null} hours - how long, or null where nothing was ever heard.
+ * @returns {string} the span, or "never" where there is nothing to measure.
+ */
+export function formatQuiet(hours) {
+    if (hours === null || hours === undefined) {
+        return 'never heard'
+    }
+
+    if (hours < 48) {
+        return `${Math.round(hours)}h`
+    }
+
+    return `${Math.round(hours / 24)}d`
+}
+
+/**
  * The measured width of an element, live, in real pixels.
  *
  * Panelled charts measure rather than scale a viewBox, so that a 10px label

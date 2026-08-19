@@ -212,10 +212,53 @@
         </p>
       </section>
 
-      <Message severity="secondary" :closable="false">
-        The station table, the matrix and the map are not drawn yet.
-      </Message>
     </template>
+
+    <!-- Outside the block above, and that is the whole point of it being a
+         second request: the rows arrive on their own and are drawn whether or
+         not the figures did. Everything this panel needs to label itself --
+         the window it was read over, the threshold quiet is judged by -- is
+         echoed on the rows' own payload, so it never reaches into the
+         summary and cannot be taken down with it. -->
+    <section v-if="rows || stationsError" class="node-statistics__panel">
+      <h3 class="node-statistics__panel-heading">
+        Stations, what is broken first
+      </h3>
+      <p class="node-statistics__panel-note">
+        Every station this centre declares or has been heard transmitting for,
+        sorted so that what has stopped is at the top &mdash; the default sort
+        is a filter that hides nothing. Everything here is this centre's own
+        observation: a station may transmit under more than one centre's
+        topics, and what another centre heard is not on this page.
+      </p>
+
+      <StationTable
+          v-if="rows"
+          :stations="rows.stations"
+          :search="table.search"
+          :standing="table.standing"
+          :sort="table.sort"
+          :direction="table.direction"
+          :window-label="rows.window.label"
+          :stale-after-hours="rows.stale_after_hours"
+          @choose="refine"
+      />
+
+      <Message v-else severity="error" :closable="false">
+        {{ stationsError }}
+      </Message>
+    </section>
+
+    <!-- Only once the figures are up: before that the line at the top of the
+         page is already saying the tab is being read, and two of them is one
+         page reporting the same wait twice. -->
+    <p v-else-if="loading && summary" class="node-statistics__state">
+      Reading {{ nodeName }}'s stations one row at a time&hellip;
+    </p>
+
+    <Message v-if="summary" severity="secondary" :closable="false">
+      The availability matrix and the map are not drawn yet.
+    </Message>
   </div>
 </template>
 
@@ -244,9 +287,17 @@
  * vocabulary to keep in step with the first. Loading a URL cold reads the
  * window off it before the first request is made.
  *
- * The summary URL is handed in as a prop rather than assembled here. The
- * bundle is built ahead of time, so a path composed inside it is a path
- * nobody can rename from the Django side.
+ * The table below the charts answers the other half of the question. The
+ * aggregate says *whether* something is wrong; the rows say *which stations*,
+ * all of them at every node size. They arrive on their own request, because
+ * the two payloads are differently shaped -- a handful of numbers against a
+ * matrix's worth of per-station vectors -- and the figures should not wait for
+ * the rows. Sorting, filtering and searching them is done here rather than by
+ * the server, and lands in the same querystring the window does.
+ *
+ * Both URLs are handed in as props rather than assembled here. The bundle is
+ * built ahead of time, so a path composed inside it is a path nobody can
+ * rename from the Django side.
  */
 import {computed, onMounted, ref} from 'vue'
 import Message from 'primevue/message'
@@ -255,7 +306,10 @@ import DailyChart from './DailyChart.vue'
 import HourlyChart from './HourlyChart.vue'
 import HourOfDayChart from './HourOfDayChart.vue'
 import RatioChart from './RatioChart.vue'
+import StationTable from './StationTable.vue'
 import WindowControl from './WindowControl.vue'
+import {readParam, writeParams} from './querystring.js'
+import {STANDING_LABEL} from './standings.js'
 // The tab's colour vocabulary, loaded once for the island. Unscoped on
 // purpose: a role is not one component's styling, and every surface added
 // after this one is bound by the same names.
@@ -279,21 +333,51 @@ const props = defineProps({
     type: String,
     required: true
   },
+  stationsUrl: {
+    type: String,
+    required: true
+  },
 })
 
 //: The querystring key, which is also the API's parameter name and the
 //: server's own vocabulary for the values. One string, three places.
 const WINDOW_PARAM = 'window'
 
+//: Both endpoints answer JSON and nothing else, and asking for it by name is
+//: what keeps DRF's browsable HTML out of a fetch that would then fail to
+//: parse.
+const JSON_ONLY = {headers: {'Accept': 'application/json'}}
+
 const summary = ref(null)
+// The rows' whole payload rather than just its list, because the panel labels
+// itself from the frame around them -- the window they were read over, the
+// threshold quiet is judged by. Kept apart from the summary because the two
+// arrive separately and on purpose: the headline figures are read long before
+// a thousand rows and their vectors have crossed the wire, and a page that
+// waits for the rows before drawing the numbers is a page that shows nothing
+// while the numbers are already known. Reading the labels off the summary
+// instead would put that independence back: one failure, both panels gone.
+const rows = ref(null)
 const loading = ref(true)
 const error = ref('')
+const stationsError = ref('')
 
 // Empty until the URL or the reader says otherwise. There is no default
 // spelled here: the server owns the list of windows and which of them a
 // reader who has chosen nothing is shown, and a second copy of that on this
 // side is a page that can offer a window the API would refuse.
-const windowKey = ref(new URLSearchParams(window.location.search).get(WINDOW_PARAM) || '')
+const windowKey = ref(readParam(WINDOW_PARAM))
+
+//: What the table is showing, under the same rule the window is: in the
+//: address bar, so the link a reader copies reproduces the rows they were
+//: looking at and not merely the node they were on. Read off the URL cold,
+//: before any request is made.
+const table = ref({
+  search: readParam('q'),
+  standing: readParam('standing'),
+  sort: readParam('sort'),
+  direction: readParam('dir') || 'asc',
+})
 
 // The windows on offer, kept beside the summary rather than read out of it,
 // so that a refusal can seed them too: a reader who arrives on a stale link
@@ -315,16 +399,24 @@ function count(value) {
 // wrong number rather than a terse one. The population line above says which
 // population these cover, and the headline ratio says which one it counts.
 const figures = computed(() => [
-  {key: 'transmitting', label: 'Transmitting', value: counts.value.transmitting},
-  {key: 'gone_quiet', label: 'Gone quiet', value: counts.value.gone_quiet},
+  {
+    key: 'transmitting',
+    label: STANDING_LABEL.transmitting,
+    value: counts.value.transmitting,
+  },
+  {
+    key: 'gone_quiet',
+    label: STANDING_LABEL.gone_quiet,
+    value: counts.value.gone_quiet,
+  },
   {
     key: 'never_transmitted',
-    label: 'Never heard from',
+    label: STANDING_LABEL.never_transmitted,
     value: counts.value.never_transmitted,
   },
   {
     key: 'undeclared_transmitting',
-    label: 'Transmitting, undeclared',
+    label: STANDING_LABEL.undeclared,
     value: counts.value.undeclared_transmitting,
   },
 ])
@@ -353,39 +445,57 @@ const stoppedSince = computed(() =>
 /** Read the tab over a window, and say so in the address bar. */
 async function choose(key) {
   windowKey.value = key
-  syncQuerystring(key)
+  writeParams({[WINDOW_PARAM]: key})
 
   await load()
 }
 
 /**
- * Put the chosen window in the page's URL.
+ * Narrow the table, and say so in the address bar.
  *
- * Replaced rather than pushed: a reader flipping through four windows to find
- * the one they want has not made four navigations, and a back button that
- * walks back through them is a back button that never leaves the tab. What
- * matters is that the address bar always shows the view on screen, so the
- * link is copyable at any moment.
+ * No request goes out. Every row is already here -- they arrived for the
+ * matrix -- so sorting, searching and filtering are a re-render, and asking
+ * the server to do any of it would be a round trip to reorder a list in
+ * memory. What is worth persisting is the *view*, which is why it goes in the
+ * querystring under the same rule the window does.
  */
-function syncQuerystring(key) {
-  const url = new URL(window.location.href)
+function refine(chosen) {
+  table.value = {...table.value, ...chosen}
 
-  url.searchParams.set(WINDOW_PARAM, key)
-  window.history.replaceState(null, '', url)
+  writeParams({
+    q: table.value.search,
+    standing: table.value.standing,
+    sort: table.value.sort,
+    // Never on its own: a direction with nothing sorted by it is a link that
+    // says something about a sort that is not happening.
+    dir: table.value.sort ? table.value.direction : '',
+  })
 }
 
+/**
+ * Read the tab, both requests at once.
+ *
+ * Two requests rather than one, split by the shape of what comes back: the
+ * headline figures are a handful of numbers and the rows are a matrix's worth
+ * of vectors. Started together and drawn as each arrives, so the numbers are
+ * on the page while the rows are still crossing the wire -- and a failure of
+ * one leaves the other standing, which matters most for the rows: a centre
+ * with a thousand stations is where the slow request is, and losing the whole
+ * tab to it would be the worst trade on the page.
+ */
 async function load() {
   loading.value = true
+
+  await Promise.all([loadSummary(), loadStations()])
+
+  loading.value = false
+}
+
+async function loadSummary() {
   error.value = ''
 
   try {
-    const url = new URL(props.summaryUrl, window.location.origin)
-
-    if (windowKey.value) {
-      url.searchParams.set(WINDOW_PARAM, windowKey.value)
-    }
-
-    const response = await fetch(url, {headers: {'Accept': 'application/json'}})
+    const response = await fetch(windowed(props.summaryUrl), JSON_ONLY)
 
     if (!response.ok) {
       throw new Error(await refusal(response))
@@ -402,9 +512,37 @@ async function load() {
     // nothing at all is indistinguishable from a centre with no stations,
     // which is a real state this dashboard is meant to report.
     error.value = failure.message || 'The statistics could not be read.'
-  } finally {
-    loading.value = false
   }
+}
+
+async function loadStations() {
+  stationsError.value = ''
+
+  try {
+    const response = await fetch(windowed(props.stationsUrl), JSON_ONLY)
+
+    if (!response.ok) {
+      throw new Error(`The stations could not be read (${response.status}).`)
+    }
+
+    // All of them, and never merged into what is already on screen: a window
+    // change re-reads every row, and rows left over from the last window
+    // would carry its message counts under this window's label.
+    rows.value = await response.json()
+  } catch (failure) {
+    stationsError.value = failure.message || 'The stations could not be read.'
+  }
+}
+
+/** One of the tab's endpoints, asked over the window the reader chose. */
+function windowed(endpoint) {
+  const url = new URL(endpoint, window.location.origin)
+
+  if (windowKey.value) {
+    url.searchParams.set(WINDOW_PARAM, windowKey.value)
+  }
+
+  return url
 }
 
 /**

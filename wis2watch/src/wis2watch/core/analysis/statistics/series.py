@@ -40,6 +40,34 @@ from ...models import DailyStationRollup, HourlyRollup, MessageSource
 from ..windows import Grain
 
 
+#: The window the fixed figures on the tab are always read over, whatever the
+#: reader has chosen -- the standing counts, and the sparkline beside every
+#: station row. Named here rather than spelled "24 hours" in each of them so
+#: that the block, the column, the staleness threshold and the shortest window
+#: on offer stay one number.
+FIXED_WINDOW_KEY = "24h"
+
+
+@dataclass(frozen=True)
+class WindowBounds:
+    """The window a response was computed over, as absolute UTC instants.
+
+    Echoed rather than assumed so that the client labels its axes from server
+    truth. ``until`` is exclusive, and where it falls differs by grain for the
+    reasons ``analysis.windows`` gives.
+
+    Beside ``Bucket`` because the two are one answer: the bounds say what the
+    window was, the buckets say where its columns fell inside it, and every
+    endpoint on the tab echoes both.
+    """
+
+    key: str
+    label: str
+    since: datetime
+    until: datetime
+    grain: str
+
+
 @dataclass(frozen=True)
 class Bucket:
     """One column of a series, and whether it has finished.

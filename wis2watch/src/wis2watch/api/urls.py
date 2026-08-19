@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    node_statistics_stations_api,
     node_statistics_summary_api,
     nodes_api,
 )
@@ -19,5 +20,10 @@ urlpatterns = [
         "nodes/<int:node_id>/statistics/summary/",
         node_statistics_summary_api,
         name="node_statistics_summary",
+    ),
+    path(
+        "nodes/<int:node_id>/statistics/stations/",
+        node_statistics_stations_api,
+        name="node_statistics_stations",
     ),
 ]
