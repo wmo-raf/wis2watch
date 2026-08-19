@@ -8,7 +8,12 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.status import HTTP_400_BAD_REQUEST
 
-from wis2watch.core.analysis import UnknownWindow, Window, node_statistics_summary
+from wis2watch.core.analysis import (
+    UnknownWindow,
+    Window,
+    node_station_statistics,
+    node_statistics_summary,
+)
 from wis2watch.core.models import WIS2Node
 
 from .permissions import HasAdminAccess
@@ -53,8 +58,54 @@ def nodes_api(request):
 def node_statistics_summary_api(request, node_id):
     """One centre's headline statistics: everything series-shaped about it.
 
-    The finding is a frozen dataclass and this hands it over whole. There are
-    no serializers because there is nothing to serialize against: the one
+    Split from the station rows by the shape of what comes back rather than by
+    the widget that draws it, so the headline numbers do not wait for a
+    matrix's worth of vectors. What the two endpoints share -- the window, the
+    refusal, the timings -- is in ``_statistics`` below.
+
+    Args:
+        request: HTTP request object.
+        node_id (int): ID of the WIS2 Node.
+
+    Returns:
+        Response: the summary, 400 for a window nothing offers, or 404 for a
+        centre nothing knows about.
+    """
+    return _statistics(request, node_id, node_statistics_summary, "summary")
+
+
+@api_view()
+@permission_classes(ADMIN_READER)
+def node_statistics_stations_api(request, node_id):
+    """One centre's stations, one row each, and all of them.
+
+    Every row this centre declares or has been heard transmitting for, in the
+    order what is broken comes first, with no way to ask for fewer. Sorting,
+    filtering, searching and paging are the client's -- there is deliberately
+    no parameter for any of them, because the availability matrix that lands
+    on these same rows needs the whole population, and a vertical stripe that
+    only shows on the page you happen to be looking at is not a finding.
+
+    The window is the same enum the summary takes, and moves the same things:
+    the messages counted, the buckets a presence vector is indexed by. It does
+    not move the sparkline, which is the fixed last 24 whole hours.
+
+    Args:
+        request: HTTP request object.
+        node_id (int): ID of the WIS2 Node.
+
+    Returns:
+        Response: the rows, 400 for a window nothing offers, or 404 for a
+        centre nothing knows about.
+    """
+    return _statistics(request, node_id, node_station_statistics, "stations")
+
+
+def _statistics(request, node_id, finding, name):
+    """One statistics endpoint: resolve the window, answer, and say what it cost.
+
+    The findings are frozen dataclasses and this hands them over whole. There
+    are no serializers because there is nothing to serialize against: the one
     input is the window, which the ``Window`` class validates, and the
     dataclass is the contract -- readable in one place rather than spread over
     a serializer that has to be kept in step with it.
@@ -64,12 +115,18 @@ def node_statistics_summary_api(request, node_id):
     ninety days at hourly grain is the query the daily rollups were built to
     avoid, and an open range against a table nothing expires is unbounded.
 
+    Written once for every endpoint on the tab. Two copies of this is how one
+    of them comes to accept a window the other refuses, or stops logging what
+    it costs.
+
     Args:
         request: HTTP request object.
         node_id (int): ID of the WIS2 Node.
+        finding: the analysis function to answer with.
+        name: what to call this endpoint in the timings.
 
     Returns:
-        Response: the summary, 400 for a window nothing offers, or 404 for a
+        Response: the finding, 400 for a window nothing offers, or 404 for a
         centre nothing knows about.
     """
     node = get_object_or_404(WIS2Node, pk=node_id)
@@ -90,7 +147,7 @@ def node_statistics_summary_api(request, node_id):
         )
 
     started = perf_counter()
-    summary = node_statistics_summary(node, window=window)
+    answered = finding(node, window=window)
     elapsed = perf_counter() - started
 
     # Nothing has been measured against a production-sized region yet, and
@@ -99,10 +156,11 @@ def node_statistics_summary_api(request, node_id):
     # So the timings are logged from the first day, and exist the moment
     # somebody with real data goes looking for them.
     logger.debug(
-        "statistics summary node=%s window=%s took=%.3fs",
+        "statistics %s node=%s window=%s took=%.3fs",
+        name,
         node.centre_id,
         window.key,
         elapsed,
     )
 
-    return Response(asdict(summary))
+    return Response(asdict(answered))

@@ -249,6 +249,13 @@ class MountPointTests(TestCase):
 
         self.assertContains(response, f'data-summary-url="{summary_url}"')
 
+    def test_the_statistics_tab_reverses_the_stations_url_for_the_island(self):
+        """The rows are a second request, so they are a second reversed path."""
+        response = self.client.get(reverse("node_statistics", args=[self.kenya.pk]))
+        stations_url = reverse("node_statistics_stations", args=[self.kenya.pk])
+
+        self.assertContains(response, f'data-stations-url="{stations_url}"')
+
 
 class WindowParameterTests(StatisticsEndpointTestCase):
     """The one input this endpoint takes, and the only spellings of it."""
@@ -398,3 +405,192 @@ class WindowStatsResponseTests(StatisticsEndpointTestCase):
         self.transmitted("0-20000-0-63708")
 
         self.assertEqual(self.summary()["now"], self.summary_over("90d")["now"])
+
+
+class StationRowsEndpointTestCase(StatisticsEndpointTestCase):
+    """The rows the table and, later, the matrix are drawn from."""
+
+    def stations_url(self, node=None):
+        return reverse("node_statistics_stations", args=[(node or self.kenya).pk])
+
+    def payload(self, node=None, **params):
+        response = self.client.get(self.stations_url(node), params)
+
+        self.assertEqual(response.status_code, 200)
+
+        return response.json()
+
+    def rows(self, **params):
+        return self.payload(**params)["stations"]
+
+
+class StationRowsAccessTests(StationRowsEndpointTestCase):
+    """The same door as everything else on this tab."""
+
+    def test_a_reader_who_is_not_signed_in_is_refused(self):
+        self.client.logout()
+
+        self.assertEqual(self.client.get(self.stations_url()).status_code, 403)
+
+    def test_a_signed_in_account_with_no_admin_access_is_refused(self):
+        self.client.force_login(
+            get_user_model().objects.create_user("outsider", password="s3cret")
+        )
+
+        self.assertEqual(self.client.get(self.stations_url()).status_code, 403)
+
+
+class StationRowsResponseTests(StationRowsEndpointTestCase):
+    """The shape the table binds to."""
+
+    def test_a_row_carries_exactly_what_the_contract_says_it_does(self):
+        """A field renamed here is a column that silently stops drawing."""
+        self.declare("0-20000-0-63708")
+
+        self.assertEqual(
+            set(self.rows()[0]),
+            {
+                "station_id",
+                "wigos_id",
+                "name",
+                "local_name",
+                "standing",
+                "last_heard",
+                "hours_quiet",
+                "latitude",
+                "longitude",
+                "sparkline",
+                "messages_in_window",
+                "active_buckets",
+                "presence",
+            },
+        )
+
+    def test_the_row_leaves_out_what_the_table_does_not_show(self):
+        self.declare("0-20000-0-63708")
+
+        absent_by_design = (
+            "facility_type",
+            "local_id",
+            "declared_by_registry",
+            "elevation",
+        )
+
+        for absent in absent_by_design:
+            with self.subTest(field=absent):
+                self.assertNotIn(absent, self.rows()[0])
+
+    def test_a_declared_station_never_heard_from_carries_zeros_not_nulls(self):
+        """The commonest row on a centre in trouble, and it has to draw."""
+        self.declare("0-20000-0-63708")
+
+        row = self.rows()[0]
+
+        self.assertEqual(row["standing"], "never_transmitted")
+        self.assertIsNone(row["last_heard"])
+        self.assertIsNone(row["hours_quiet"])
+        self.assertEqual(row["sparkline"], [0] * 24)
+        self.assertEqual(row["presence"], [0] * 24)
+        self.assertEqual(row["messages_in_window"], 0)
+        self.assertEqual(row["active_buckets"], 0)
+
+    def test_a_row_says_when_this_centre_last_heard_the_station(self):
+        self.declare("0-20000-0-63708")
+        self.transmitted("0-20000-0-63708", hours_ago=2)
+
+        row = self.rows()[0]
+
+        self.assertEqual(row["standing"], "transmitting")
+        self.assertTrue(row["last_heard"].endswith("Z"), row["last_heard"])
+
+    def test_the_rows_arrive_with_what_is_broken_at_the_top(self):
+        self.declare("0-20000-0-63708")
+        self.declare("0-20000-0-63709")
+        self.transmitted("0-20000-0-63709")
+
+        self.assertEqual(
+            [row["standing"] for row in self.rows()],
+            ["never_transmitted", "transmitting"],
+        )
+
+    def test_every_row_travels_with_no_way_to_ask_for_fewer(self):
+        """Server paging is the trap: a stripe only shows on the page you are on."""
+        for number in range(5):
+            self.declare(f"0-20000-0-6370{number}")
+
+        self.assertEqual(len(self.rows()), 5)
+        self.assertEqual(len(self.rows(page=1, page_size=2)), 5)
+        self.assertNotIn("next", self.payload())
+
+    def test_a_centre_with_no_stations_is_answered_with_an_empty_list(self):
+        """Not a 404 and not a null: the empty table is the finding."""
+        self.assertEqual(self.payload()["stations"], [])
+
+    def test_a_centre_that_does_not_exist_is_not_found(self):
+        missing = reverse("node_statistics_stations", args=[9999])
+
+        self.assertEqual(self.client.get(missing).status_code, 404)
+
+    def test_the_bucket_axis_travels_once_rather_than_on_every_row(self):
+        payload = self.payload()
+
+        self.assertEqual(len(payload["buckets"]), 24)
+        self.assertEqual(set(payload["buckets"][0]), {"start", "partial"})
+
+    def test_the_response_echoes_the_window_it_was_read_over(self):
+        window = self.payload()["window"]
+
+        self.assertEqual(window["key"], "24h")
+        self.assertTrue(window["since"].endswith("Z"), window["since"])
+
+    def test_the_standings_here_are_the_ones_the_headline_counts(self):
+        """The table and the figures above it are one derivation or neither."""
+        self.declare("0-20000-0-63708")
+        self.transmitted("0-20000-0-63708")
+        self.transmitted("0-20000-0-63999")
+
+        standing = [row["standing"] for row in self.rows()]
+        counts = self.summary()["now"]
+
+        self.assertEqual(standing.count("transmitting"), counts["transmitting"])
+        self.assertEqual(
+            standing.count("undeclared"), counts["undeclared_transmitting"]
+        )
+
+    def test_the_endpoint_logs_what_it_cost(self):
+        """90d over a whole population is the request to watch."""
+        with self.assertLogs("wis2watch.api.views", level="DEBUG") as logged:
+            self.payload(window="90d")
+
+        self.assertTrue(
+            any("90d" in line and "took=" in line for line in logged.output),
+            logged.output,
+        )
+
+
+class StationRowsWindowTests(StationRowsEndpointTestCase):
+    """The one input, spelled the same way as everywhere else on the tab."""
+
+    def test_the_window_moves_the_axis_the_presence_vector_is_read_against(self):
+        self.declare("0-20000-0-63708")
+
+        payload = self.payload(window="7d")
+
+        self.assertEqual(payload["window"]["grain"], "day")
+        self.assertEqual(len(payload["buckets"]), 7)
+        self.assertEqual(payload["stations"][0]["presence"], [0] * 7)
+
+    def test_the_sparkline_does_not_move_with_the_window(self):
+        """It is the fixed 24 hours, which is what makes the column comparable."""
+        self.declare("0-20000-0-63708")
+
+        self.assertEqual(len(self.rows(window="90d")[0]["sparkline"]), 24)
+
+    def test_a_window_nobody_offers_is_refused_with_the_ones_that_exist(self):
+        response = self.client.get(self.stations_url(), {"window": "6h"})
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["valid_windows"], ["24h", "7d", "30d", "90d"])
+
+    def test_an_empty_window_parameter_is_the_default_rather_than_a_refusal(self):
+        self.assertEqual(self.payload(window="")["window"]["key"], "24h")
