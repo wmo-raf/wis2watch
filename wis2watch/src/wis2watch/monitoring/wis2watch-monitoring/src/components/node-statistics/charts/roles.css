@@ -22,7 +22,10 @@
  * fills and strokes, so a theme flip repaints everything with no JavaScript
  * and no reload. Nothing may resolve a role to a colour string in JS unless
  * the surface genuinely cannot take a custom property -- a canvas or
- * MapLibre's paint properties -- and those arrive with their own tickets.
+ * MapLibre's paint properties. The navigator wall is the first of those, and
+ * it resolves them through `useRoles.js` and nowhere else: one place that
+ * knows both how to read a role back and what has to happen for a canvas to
+ * follow a theme flip.
  *
  * Wagtail carries the reader's choice on <html>, and its default is
  * `w-theme-system`, which means the OS decides. Naming only `.w-theme-dark`

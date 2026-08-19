@@ -148,6 +148,44 @@ export function presenceState(value, ceiling) {
 }
 
 /**
+ * One station's whole vector, said as states, against the axis it is drawn on.
+ *
+ * Two surfaces draw this vector -- the matrix cell strip on the row itself and
+ * the navigator wall above the table -- and they are two renderings of one
+ * finding rather than two findings. A band on the wall and a band in the
+ * matrix are the same band only if the *states* come from here: a wall that
+ * re-derived "thin" from `active_hours` would eventually be a wall drawn to a
+ * threshold the cells beneath it no longer use.
+ *
+ * The per-row ceiling lives here for the same reason. Where the window has no
+ * ceiling of its own -- an hourly axis, there being no number of messages an
+ * hour is full at -- every surface has to fall back to the *row's own busiest
+ * bucket*, and two copies of that fallback is how one surface comes to call a
+ * station thin while the other calls it full.
+ *
+ * Read against the axis rather than against the vector, because the two can
+ * disagree for a moment mid-swap between windows: a vector shorter than the
+ * axis carries nothing at the columns it does not reach, which is what a
+ * missing bucket means anyway.
+ *
+ * @param {number[]} values - what the station was heard doing per bucket.
+ * @param {number[]|null} ceilings - the axis's own ceilings, or null for the
+ *     row's own busiest bucket.
+ * @param {number} count - how many buckets the axis carries.
+ * @returns {string[]} `silent`, `thin` or `full`, one per bucket.
+ */
+export function presenceStates(values, ceilings, count = values.length) {
+    // Never zero: a row that was heard nothing from divides by one and draws
+    // silent all the way across, which is the truth about it.
+    const peak = ceilings ? 0 : Math.max(1, ...values)
+
+    return Array.from(
+        {length: count},
+        (_, at) => presenceState(values[at] || 0, ceilings ? ceilings[at] : peak)
+    )
+}
+
+/**
  * The ceiling each bucket of a window is judged against, or null at hourly grain.
  *
  * A daily bucket's ceiling is a fact about the clock, so it is the same for
@@ -193,6 +231,33 @@ const NARROW_CELL = 5
  */
 export function cellWidthFor(count) {
     return (CELL_WIDTHS.find(({upTo}) => count <= upTo) || {width: NARROW_CELL}).width
+}
+
+/**
+ * Where one of `count` lines falls on a surface `total` pixels across.
+ *
+ * The navigator wall's arithmetic, and it is here beside `cellWidthFor` for
+ * the same reason that one is: how big a mark is drawn is a decision about
+ * what can be read, and it belongs with the rest of them rather than inside a
+ * paint function.
+ *
+ * Whole pixels, and never fewer than one. A thousand stations in five hundred
+ * pixels is half a pixel each, and a station drawn 0.4 pixels tall is an
+ * antialiased smudge that reads as "thin" whatever state it is in -- which
+ * would have the wall inventing a fourth colour out of rounding. So the bands
+ * overlap where they must, and the caller decides who wins the shared pixel:
+ * the wall paints the worse news last, so an outage cannot be covered by a
+ * healthy neighbour it happens to be squeezed against.
+ *
+ * @param {number} index - which line, from zero.
+ * @param {number} count - how many there are in all.
+ * @param {number} total - how many pixels they share.
+ * @returns {number[]} the first pixel of the line, and one past its last.
+ */
+export function pixelBand(index, count, total) {
+    const start = Math.floor((index * total) / count)
+
+    return [start, Math.max(start + 1, Math.floor(((index + 1) * total) / count))]
 }
 
 /**

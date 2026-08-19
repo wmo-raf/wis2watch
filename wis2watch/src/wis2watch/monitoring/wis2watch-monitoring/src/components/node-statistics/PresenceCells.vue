@@ -57,7 +57,7 @@
  */
 import {computed} from 'vue'
 
-import {grainOf, presenceState, presenceTitle} from './presence.js'
+import {grainOf, presenceStates, presenceTitle} from './presence.js'
 
 const props = defineProps({
   /** What the station was heard doing in each bucket, positional and dense. */
@@ -116,18 +116,22 @@ function ceilingAt(index) {
   return props.ceilings ? props.ceilings[index] : peak.value
 }
 
-const cells = computed(() =>
-    props.buckets.map((bucket, index) => {
-      const value = props.values[index] || 0
-      const ceiling = ceilingAt(index)
+// The states from the one place that decides them, so that this row and the
+// same row's stripe on the navigator wall above the table cannot come to
+// disagree about which buckets were thin.
+const states = computed(
+    () => presenceStates(props.values, props.ceilings, props.buckets.length)
+)
 
-      return {
-        index,
-        x: index * props.cellWidth,
-        state: presenceState(value, ceiling),
-        title: presenceTitle(bucket, value, ceiling, props.grain),
-      }
-    })
+const cells = computed(() =>
+    props.buckets.map((bucket, index) => ({
+      index,
+      x: index * props.cellWidth,
+      state: states.value[index],
+      // The sentence keeps the ceiling, because it says the figures out loud
+      // -- "heard in 4 of 24 hours" -- and a state alone cannot.
+      title: presenceTitle(bucket, props.values[index] || 0, ceilingAt(index), props.grain),
+    }))
 )
 
 // Where the finished part of the window ends. An hourly axis never carries
