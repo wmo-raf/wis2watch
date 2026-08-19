@@ -59,9 +59,15 @@
       </template>
     </p>
 
-    <div v-if="stations.length" class="stations__scroll">
+    <div v-if="stations.length" ref="viewport" class="stations__scroll" @scroll="onScroll">
       <table class="stations__table">
-        <thead>
+        <colgroup>
+          <col v-for="column in COLUMNS" :key="column.key" :style="{width: column.width}">
+          <col :style="{width: SPARK_WIDTH}">
+          <col :style="{width: `${matrixWidth + CELL_PADDING}px`}">
+        </colgroup>
+
+        <thead ref="header">
           <tr>
             <th
                 v-for="column in COLUMNS"
@@ -84,13 +90,32 @@
               24h activity
               <span class="stations__column-note">shape, flat 24h</span>
             </th>
+            <!-- The matrix's own heading, and the only axis it has. Both ends
+                 are placed off the same cell width the cells are drawn at, so
+                 the labels cannot come to sit over the wrong column. -->
+            <th scope="col" class="stations__cell--matrix">
+              {{ windowLabel }} &mdash; heard, thinly, or silent
+              <span class="stations__column-note stations__axis" :style="{width: `${matrixWidth}px`}">
+                <span>{{ axisStart }}</span>
+                <span>{{ axisEnd }}</span>
+              </span>
+            </th>
           </tr>
         </thead>
 
         <tbody>
-          <tr v-for="row in shown" :key="row.station_id">
+          <!-- The rows above the ones drawn, as height and nothing else. The
+               scrollbar measures the whole population this way, so a reader
+               is never told a thousand stations are a screenful. -->
+          <tr v-if="topPad" class="stations__spacer" :style="{height: `${topPad}px`}">
+            <td :colspan="COLUMN_COUNT"/>
+          </tr>
+
+          <tr v-for="row in drawn" :key="row.station_id">
             <td class="stations__cell--text stations__id">{{ row.wigos_id }}</td>
-            <td class="stations__cell--text stations__name">{{ displayName(row) }}</td>
+            <td class="stations__cell--text" :title="displayName(row)">
+              {{ displayName(row) }}
+            </td>
             <td class="stations__cell--text">
               <span class="stations__standing" :class="`stations__standing--${row.standing}`">
                 {{ label(row.standing) }}
@@ -101,13 +126,29 @@
             <td class="stations__cell--number">
               {{ formatCount(row.messages_in_window) }}
             </td>
-            <td class="stations__cell--spark">
+            <td>
               <Sparkline
                   :values="row.sparkline"
                   :name="displayName(row)"
                   :standing="row.standing"
+                  :height="SPARK_HEIGHT"
               />
             </td>
+            <td>
+              <PresenceCells
+                  :values="row.presence"
+                  :buckets="buckets"
+                  :grain="grain"
+                  :ceilings="ceilings"
+                  :cell-width="cellWidth"
+                  :height="ROW_HEIGHT"
+                  :name="displayName(row)"
+              />
+            </td>
+          </tr>
+
+          <tr v-if="bottomPad" class="stations__spacer" :style="{height: `${bottomPad}px`}">
+            <td :colspan="COLUMN_COUNT"/>
           </tr>
         </tbody>
       </table>
@@ -118,6 +159,15 @@
       </p>
     </div>
 
+    <!-- Words beside every colour, because the three cell states are the one
+         thing on this page that cannot be read off a number. -->
+    <ul v-if="buckets.length" class="stations__legend">
+      <li v-for="state in legend" :key="state.key" class="stations__key">
+        <span class="stations__swatch" :class="`stations__swatch--${state.key}`"/>
+        {{ state.label }}
+      </li>
+    </ul>
+
     <p class="stations__caveats">
       Quiet is judged against a flat {{ staleAfterHours }} hours, the same
       threshold the figures above use. The message column counts
@@ -126,20 +176,42 @@
       than volume &mdash; a row's trace is scaled to its own busiest hour, so
       the comparable number is the message column beside it. A flat line on the
       baseline is a station the world heard nothing from.
+      <template v-if="buckets.length">
+        The cells on the right are one {{ grain }} each, oldest at the left, and
+        are read across a row for when a station stopped and down the column for
+        whether the same stations stop together.
+        <template v-if="openBucket">
+          The newest column is the UTC day still being counted, marked with the
+          same open edge the charts above use, and it is judged against the
+          hours of it that have passed rather than against a whole day.
+        </template>
+      </template>
     </p>
   </div>
 </template>
 
 <script setup>
 /**
- * Every station of one centre, one row each.
+ * Every station of one centre, one row each, and every row's availability.
  *
  * The aggregate above answers *whether* something is wrong. This answers
  * *which stations*, and it does it for the whole population at every node
  * size: **all rows, always**. There is no server paging behind this and no
- * client paging in it, because the availability matrix that lands on these
- * same rows next needs all of them, and a finding that only shows on the page
- * you happen to be looking at is not a finding.
+ * client paging in it, because the availability matrix on the right of these
+ * rows needs all of them, and a finding that only shows on the page you
+ * happen to be looking at is not a finding. What makes that affordable is the
+ * row height being a constant: only the rows in view are drawn, and the rest
+ * of the population is held open as height.
+ *
+ * **The matrix is this table.** It is not a second view with its own axis, its
+ * own sort or its own idea of which row is which -- it is the `presence`
+ * vector each row already carries, drawn as the trailing cells of that row.
+ * Two components with two orderings is how a stripe comes to be read against
+ * the wrong station, and there is no toggle here that could put them out of
+ * step. What the matrix says that nothing else on the tab can: a horizontal
+ * stripe is one station stopping and when, and a contiguous band of them with
+ * aligned stripes is a subset failing together -- a sub-network, a path, a
+ * dataset -- rather than a scatter of unrelated hiccups.
  *
  * **Sort, filter and search are the reader's, and they are in the address
  * bar.** The rows are already here -- they arrived for the matrix -- so
@@ -147,7 +219,7 @@
  * memory. What the server does own is the *starting* order: RANK, then longest
  * quiet, then WIGOS id, which puts what is broken at the top. This component
  * never re-derives that; leaving the sort unchosen leaves the rows exactly as
- * they arrived.
+ * they arrived, which is also the order the matrix is worth reading in.
  *
  * Any filter has to state what it hid. A count of rows on screen with nothing
  * saying how many there were is the number a reader mistakes for the
@@ -155,17 +227,35 @@
  * matching everything has hidden nothing, and looks identical to no filter at
  * all unless the page says so.
  */
-import {computed} from 'vue'
+import {computed, watch} from 'vue'
 
+import PresenceCells from './PresenceCells.vue'
 import Sparkline from './Sparkline.vue'
-import {formatCount, formatInstant, formatQuiet} from './charts/plot.js'
+import {formatCount, formatDay, formatHour, formatInstant, formatQuiet} from './charts/plot.js'
+import {bucketCeilings, cellWidth as widthOfCell} from './presence.js'
 import {STANDINGS, STANDING_LABEL, STANDING_RANK} from './standings.js'
+import {useVirtualRows} from './useVirtualRows.js'
 
 const props = defineProps({
   /** The rows, as the server ordered them. */
   stations: {
     type: Array,
     required: true
+  },
+  /** The window's axis, which every row's presence vector is indexed by. */
+  buckets: {
+    type: Array,
+    default: () => []
+  },
+  /** The size of one bucket: `day` or `hour`, the server's own spelling. */
+  grain: {
+    type: String,
+    default: 'day'
+  },
+  /** When the rows were read, which is what makes today a part-day. */
+  asOf: {
+    type: String,
+    default: ''
   },
   /** What the reader chose to search for. */
   search: {
@@ -201,14 +291,37 @@ const props = defineProps({
 
 const emit = defineEmits(['choose'])
 
+//: How tall every row is, in pixels, and it is fixed rather than measured.
+//: #48 drew the alternative: labels are legible to about 12px and dead below
+//: 10, and at 4px a matrix has a wide empty gutter beside it where the names
+//: used to be. So the row does not shrink to fit a bigger population -- the
+//: answer to scale is a second view, not a shorter row -- and holding it
+//: constant is also what makes the list virtualisable at all.
+const ROW_HEIGHT = 14
+
+//: The sparkline, one pixel inside the row top and bottom so a trace at full
+//: height does not touch the row above it.
+const SPARK_HEIGHT = ROW_HEIGHT - 2
+const SPARK_WIDTH = '5rem'
+
+//: The horizontal padding of a cell, which the matrix column has to carry on
+//: top of its grid -- the columns are laid out fixed, so a width that forgets
+//: the padding clips the newest bucket.
+const CELL_PADDING = 16
+
 //: The sortable columns, in the order they are drawn. `value` is what a row
 //: sorts by rather than what it shows, which is the whole of the difference
 //: between sorting a standing alphabetically and sorting it by how broken it
-//: is. The sparkline is not among them: it is a shape, and there is no order
-//: to put shapes in.
+//: is. Neither the sparkline nor the matrix is among them: both are shapes,
+//: and there is no order to put shapes in.
 const COLUMNS = [
-  {key: 'wigos_id', label: 'WIGOS id', value: (row) => row.wigos_id},
-  {key: 'name', label: 'Name', value: (row) => displayName(row).toLowerCase()},
+  {key: 'wigos_id', label: 'WIGOS id', value: (row) => row.wigos_id, width: '9.5rem'},
+  {
+    key: 'name',
+    label: 'Name',
+    value: (row) => displayName(row).toLowerCase(),
+    width: '13rem',
+  },
   {
     key: 'standing',
     label: 'Standing',
@@ -216,6 +329,7 @@ const COLUMNS = [
     // rows arrive in rather than into alphabetical order, which would put
     // "Gone quiet" above "Never heard from" for no reason a reader can see.
     value: (row) => STANDING_RANK[row.standing] ?? STANDINGS.length,
+    width: '9rem',
   },
   {
     key: 'last_heard',
@@ -225,6 +339,7 @@ const COLUMNS = [
     // time ago", not a missing value to be swept to the end.
     value: (row) => (row.last_heard ? Date.parse(row.last_heard) : -Infinity),
     align: 'text',
+    width: '10.5rem',
   },
   {
     key: 'hours_quiet',
@@ -233,16 +348,22 @@ const COLUMNS = [
     // station nothing ever heard has been quiet for ever.
     value: (row) => (row.hours_quiet === null ? Infinity : row.hours_quiet),
     align: 'number',
+    width: '5rem',
   },
   {
     key: 'messages_in_window',
     label: 'Messages',
     value: (row) => row.messages_in_window,
     align: 'number',
+    width: '6rem',
   },
 ]
 
 const COLUMN_BY_KEY = Object.fromEntries(COLUMNS.map((column) => [column.key, column]))
+
+//: Every column including the two shapes, for the spacers that stand in for
+//: the rows not drawn.
+const COLUMN_COUNT = COLUMNS.length + 2
 
 const filtering = computed(() => Boolean(props.search.trim() || props.standing))
 
@@ -294,6 +415,64 @@ const shown = computed(() => {
 })
 
 const hidden = computed(() => props.stations.length - shown.value.length)
+
+const {viewport, header, first, last, onScroll, reset, topPad, bottomPad} =
+    useVirtualRows(computed(() => shown.value.length), ROW_HEIGHT)
+
+//: The rows on screen. Keyed by station id in the template, so scrolling
+//: moves the rows that stayed rather than repainting a screenful of matrix
+//: cells that have not changed.
+const drawn = computed(() => shown.value.slice(first.value, last.value))
+
+// Back to the top whenever the list underneath changes shape. Staying at
+// pixel 4,000 of a list that just became forty rows long is a panel that
+// looks empty, and the reader who narrowed it has not moved.
+watch(
+    () => [props.search, props.standing, props.sort, props.direction],
+    () => reset()
+)
+
+//: How wide one cell is drawn, decided once here rather than by each row, so
+//: that a thousand rows cannot disagree about where a column is.
+const cellWidth = computed(() => widthOfCell(props.buckets.length))
+
+const matrixWidth = computed(() => cellWidth.value * props.buckets.length)
+
+//: What each bucket could have carried, worked out once for the whole table.
+//: Null at hourly grain, where the scale is each row's own busiest hour.
+const ceilings = computed(() => bucketCeilings(props.buckets, props.grain, props.asOf))
+
+const openBucket = computed(() => props.buckets.some((bucket) => bucket.partial))
+
+function axisLabel(bucket) {
+  if (!bucket) {
+    return ''
+  }
+
+  const start = new Date(bucket.start)
+
+  if (props.grain !== 'day') {
+    return formatHour(start)
+  }
+
+  return bucket.partial ? 'today' : formatDay(start)
+}
+
+const axisStart = computed(() => axisLabel(props.buckets[0]))
+const axisEnd = computed(() => axisLabel(props.buckets[props.buckets.length - 1]))
+
+//: The three states in words. The middle one names the unit rather than the
+//: threshold, because "under 30%" is a number a reader would then have to
+//: convert; the tooltip on each cell carries the figures.
+const legend = computed(() => {
+  const of = props.grain === 'day' ? 'the day' : 'the hour'
+
+  return [
+    {key: 'full', label: `Heard for most of ${of}`},
+    {key: 'thin', label: `Heard, but for a small part of ${of}`},
+    {key: 'silent', label: 'Silent — nothing heard at all'},
+  ]
+})
 
 function label(standing) {
   return STANDING_LABEL[standing] || standing
@@ -405,8 +584,9 @@ function arrow(key) {
 
 /* The table scrolls inside its own panel rather than down the page. Every row
    is still here -- this is not paging, and nothing is hidden from a search or
-   a sort -- but a thousand of them are not a thing to put between a reader and
-   the bottom of the page.
+   a sort -- but a thousand of them at a legible row height are sixteen
+   thousand pixels, and that is not a thing to put between a reader and the
+   bottom of the page.
 
    It is also the only place the column headings can stay put. A sticky header
    sticks to its nearest scrolling ancestor, and Wagtail's own chrome is
@@ -414,7 +594,8 @@ function arrow(key) {
    header that scrolls away or hides behind the admin's slim bar. Bounded
    here, it sticks where a reader needs it.
 
-   Sideways for the same container, so a WIGOS id never has to wrap to fit. */
+   Sideways for the same container: a WIGOS id never has to wrap to fit, and
+   the matrix is as wide as its window needs. */
 .stations__scroll {
   max-height: 34rem;
   overflow: auto;
@@ -423,24 +604,44 @@ function arrow(key) {
 /* Separated rather than collapsed, which is not a cosmetic choice: a
    collapsed border belongs to the table rather than to the cell, and a sticky
    header painted over a scrolling row then shows a hairline of that row
-   through the seam. Spacing of zero keeps it looking collapsed. */
+   through the seam. Spacing of zero keeps it looking collapsed.
+
+   Fixed layout, which is what the virtualised rows require rather than
+   prefer: with automatic layout the columns are measured from the rows that
+   happen to be drawn, so every scroll that swaps a long name for a short one
+   would resize the whole table under the reader. */
 .stations__table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 0.8rem;
+  table-layout: fixed;
+  font-size: 0.7rem;
 }
 
 .stations__table th,
 .stations__table td {
-  padding: 0.3rem 0.5rem;
+  padding: 0 0.5rem;
   box-shadow: inset 0 -1px 0 var(--w-color-border-furniture);
   white-space: nowrap;
   vertical-align: middle;
 }
 
-.stations__name {
-  min-width: 12rem;
+/* The fixed row, and every rule here exists to hold it there: the height is
+   what the virtual list counts in, so a cell that grows by a padding or a
+   line-height puts every row on screen at the wrong offset. */
+.stations__table tbody td {
+  height: 14px;
+  line-height: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The rows that are scrolled past, as height and nothing else. No hairline
+   and no padding: a spacer that draws anything is a stripe across the panel
+   wherever the reader happens to be. */
+.stations__spacer td {
+  padding: 0;
+  box-shadow: none;
 }
 
 .stations__table th {
@@ -450,6 +651,8 @@ function arrow(key) {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
   /* The header stays while a thousand rows go past it, which is what makes
      "all rows, always" readable rather than merely honest. It sticks to the
      panel above, which is the scrolling ancestor. */
@@ -457,6 +660,21 @@ function arrow(key) {
   top: 0;
   background: var(--w-color-surface-page);
   z-index: 1;
+}
+
+/* Identity stays put while the reader scrolls sideways to the far end of a
+   ninety-day matrix. A cell nobody can put a name to is the one way this
+   table could still mislead after all the work above it. */
+.stations__table th:first-child,
+.stations__table tbody td:first-child {
+  position: sticky;
+  left: 0;
+  background: var(--w-color-surface-page);
+  z-index: 1;
+}
+
+.stations__table th:first-child {
+  z-index: 2;
 }
 
 .stations__sort {
@@ -487,14 +705,17 @@ function arrow(key) {
   font-size: 0.68rem;
 }
 
+/* The matrix's two end labels, spread over exactly the width the cells are
+   drawn at. Not an axis: two ends of one, which is as much as fits over a
+   5px column and as much as a reader needs to know which way time runs. */
+.stations__axis {
+  display: flex;
+  justify-content: space-between;
+}
+
 .stations__cell--number {
   text-align: right;
   font-variant-numeric: tabular-nums;
-}
-
-.stations__cell--spark {
-  width: 7rem;
-  min-width: 7rem;
 }
 
 .stations__id {
@@ -526,6 +747,45 @@ function arrow(key) {
 .stations__standing--undeclared::before {
   background: transparent;
   box-shadow: inset 0 0 0 2px var(--stat-live);
+}
+
+.stations__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1.25rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.75rem;
+  color: var(--w-color-text-meta);
+}
+
+.stations__key {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.stations__swatch {
+  display: inline-block;
+  width: 0.75rem;
+  height: 0.6rem;
+  border-radius: 1px;
+}
+
+.stations__swatch--full {
+  background: var(--stat-live);
+}
+
+.stations__swatch--thin {
+  background: var(--stat-thin);
+}
+
+/* Outlined, unlike the other two: at this size a near-ground fill on the page
+   ground is an invisible swatch beside its own label. */
+.stations__swatch--silent {
+  background: var(--stat-empty);
+  box-shadow: inset 0 0 0 1px var(--stat-grid);
 }
 
 .stations__empty {

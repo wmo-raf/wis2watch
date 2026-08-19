@@ -1,6 +1,7 @@
 <template>
   <svg
       class="spark"
+      :style="{height: `${height}px`}"
       viewBox="0 0 100 20"
       preserveAspectRatio="none"
       role="img"
@@ -67,6 +68,17 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  /**
+   * How tall to draw it, in real pixels.
+   *
+   * Handed in rather than chosen here, because the row height is the table's
+   * decision and a sparkline that is taller than the row it sits in is what
+   * pushes every other row off the offset a virtualised list counts on.
+   */
+  height: {
+    type: Number,
+    default: 20
+  },
 })
 
 const peak = computed(() => Math.max(0, ...props.values))
@@ -109,7 +121,6 @@ const label = computed(() => {
 .spark {
   display: block;
   width: 100%;
-  height: 20px;
 }
 
 .spark__baseline {

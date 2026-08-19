@@ -43,6 +43,27 @@
     --stat-live: var(--p-teal-600);
     --stat-silent: var(--p-red-500);
 
+    /* The availability matrix's other two cell states, and the one place on
+       the tab where a hand-picked value beats a token.
+
+       "Thin" -- reported, but for a small part of the bucket -- has to sit
+       between live and empty and be mistakable for neither, which is a
+       relationship rather than a palette slot. The rule #66 settled at the
+       real screen: it is a step *toward the ground*. Paler than live on
+       light, and *darker* than live on dark. Inverting the light value would
+       make it collide with live instead of with empty, which is #44's
+       speckle trap in a new costume -- so the dark counterpart below is
+       picked rather than derived from this one.
+
+       "Empty" is known-and-silent: the bucket was read and nothing was heard
+       in it. Neutral rather than red, because a stripe of silence is read as
+       the *absence* of the live colour along a row, and a matrix that painted
+       silence red would be a red page on any centre with a dead cohort. The
+       red the tab calls silence stays on the standing dot beside the row,
+       where it names a station rather than a bucket. */
+    --stat-thin: #a6d7cf;
+    --stat-empty: var(--p-surface-100);
+
     /* What is legible *on* the live colour, for the one surface that fills a
        whole control with it. A role rather than white, because live is a dark
        teal on light and a bright one on dark, and white survives only one of
@@ -73,6 +94,8 @@
     --stat-live: var(--p-teal-400);
     --stat-on-live: var(--p-surface-900);
     --stat-silent: var(--p-red-400);
+    --stat-thin: #1f5f58;
+    --stat-empty: var(--p-surface-800);
     --stat-hatch-ground: var(--p-surface-900);
     --stat-hatch-line: var(--p-surface-500);
 }
@@ -83,6 +106,8 @@
         --stat-live: var(--p-teal-400);
         --stat-on-live: var(--p-surface-900);
         --stat-silent: var(--p-red-400);
+        --stat-thin: #1f5f58;
+        --stat-empty: var(--p-surface-800);
         --stat-hatch-ground: var(--p-surface-900);
         --stat-hatch-line: var(--p-surface-500);
     }

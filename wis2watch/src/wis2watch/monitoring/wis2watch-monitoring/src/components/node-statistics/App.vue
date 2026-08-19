@@ -230,11 +230,18 @@
         is a filter that hides nothing. Everything here is this centre's own
         observation: a station may transmit under more than one centre's
         topics, and what another centre heard is not on this page.
+        The cells trailing each row are that station's availability over the
+        window, and they are the rows themselves rather than a second view:
+        read across one for when a station stopped, and down a column for
+        whether the same stations keep stopping together.
       </p>
 
       <StationTable
           v-if="rows"
           :stations="rows.stations"
+          :buckets="rows.buckets"
+          :grain="rows.window.grain"
+          :as-of="rows.generated_at"
           :search="table.search"
           :standing="table.standing"
           :sort="table.sort"
@@ -257,7 +264,7 @@
     </p>
 
     <Message v-if="summary" severity="secondary" :closable="false">
-      The availability matrix and the map are not drawn yet.
+      The map is not drawn yet.
     </Message>
   </div>
 </template>
