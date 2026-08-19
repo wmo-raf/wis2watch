@@ -294,6 +294,16 @@ class WindowParameterTests(StatisticsEndpointTestCase):
 
         self.assertTrue(any("30d" in line for line in logged.output), logged.output)
 
+    def test_the_longest_window_logs_what_it_cost(self):
+        """90d is where the hour-of-day query is longest, so it is timed too."""
+        with self.assertLogs("wis2watch.api.views", level="DEBUG") as logged:
+            self.client.get(self.url(), {"window": "90d"})
+
+        self.assertTrue(
+            any("90d" in line and "took=" in line for line in logged.output),
+            logged.output,
+        )
+
 
 class WindowStatsResponseTests(StatisticsEndpointTestCase):
     """The moving block the control binds to."""
@@ -316,6 +326,7 @@ class WindowStatsResponseTests(StatisticsEndpointTestCase):
                 "messages_total",
                 "unattributed_messages_total",
                 "daily",
+                "hour_of_day",
             },
         )
 
@@ -357,6 +368,29 @@ class WindowStatsResponseTests(StatisticsEndpointTestCase):
         daily = self.summary_over("7d")["window_stats"]["daily"]
 
         self.assertIsNone(daily[0]["messages_per_active_station"])
+
+    def test_there_is_no_hour_of_day_profile_at_the_default_window(self):
+        """Over one day it would be the hourly chart in another unit."""
+        self.assertIsNone(self.summary()["window_stats"]["hour_of_day"])
+
+    def test_a_daily_window_carries_twenty_four_hour_of_day_counts(self):
+        profile = self.summary_over("7d")["window_stats"]["hour_of_day"]
+
+        self.assertEqual(len(profile), 24)
+        self.assertEqual(profile, [0] * 24)
+
+    def test_the_hour_of_day_profile_is_message_volume_on_the_utc_clock(self):
+        """The one figure on this tab that crosses the wire as raw volume."""
+        # Measured back from the real clock, as everything here is: the view
+        # has no ``now`` seam, so the hour this lands on is read off the same
+        # instant rather than written down.
+        when = dj_timezone.now() - timedelta(days=2)
+        published(self.kenya, source=self.global_broker, hour=when, messages=5)
+
+        profile = self.summary_over("7d")["window_stats"]["hour_of_day"]
+
+        self.assertEqual(profile[when.hour], 5)
+        self.assertEqual(sum(profile), 5)
 
     def test_the_standing_block_does_not_move_with_the_window(self):
         """The control moves everything on the tab except these figures."""

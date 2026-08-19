@@ -153,6 +153,63 @@
         </p>
       </section>
 
+      <section class="node-statistics__panel">
+        <h3 class="node-statistics__panel-heading">
+          Messages per active station
+        </h3>
+
+        <template v-if="windowStats.daily">
+          <p class="node-statistics__panel-note">
+            How much each station that reported was heard saying, per UTC day.
+            Read against the chart above it: a centre whose station count holds
+            steady while this climbs is publishing more from the same network,
+            which is a different thing from a network that has grown. The line
+            <em>breaks</em> where no station reported &mdash; there is no
+            per-station figure for a day like that, and a zero would read as
+            "every station said nothing".
+          </p>
+
+          <RatioChart
+              :buckets="summary.buckets"
+              :daily="windowStats.daily"
+              :as-of="summary.generated_at"
+          />
+        </template>
+
+        <p v-else class="node-statistics__panel-empty">
+          One day is one point, so there is no line to draw over
+          {{ summary.window.label.toLowerCase() }}. Choose a longer window
+          above.
+        </p>
+      </section>
+
+      <section class="node-statistics__panel">
+        <h3 class="node-statistics__panel-heading">
+          Message volume by hour of day, UTC
+        </h3>
+
+        <template v-if="windowStats.hour_of_day">
+          <p class="node-statistics__panel-note">
+            Every 00Z of the window added together, every 01Z, and so on: the
+            centre's daily rhythm, and the one chart here that plots messages
+            rather than stations. Peaks on the synoptic hours are a centre
+            reporting to schedule; a flat profile is one publishing whenever
+            observations happen to arrive.
+          </p>
+
+          <HourOfDayChart
+              :hour-of-day="windowStats.hour_of_day"
+              :window-label="summary.window.label"
+          />
+        </template>
+
+        <p v-else class="node-statistics__panel-empty">
+          Over {{ summary.window.label.toLowerCase() }} this would be the hourly
+          chart above, drawn again in messages rather than stations. Choose a
+          longer window above to see the rhythm across days.
+        </p>
+      </section>
+
       <Message severity="secondary" :closable="false">
         The station table, the matrix and the map are not drawn yet.
       </Message>
@@ -194,6 +251,8 @@ import Message from 'primevue/message'
 
 import DailyChart from './DailyChart.vue'
 import HourlyChart from './HourlyChart.vue'
+import HourOfDayChart from './HourOfDayChart.vue'
+import RatioChart from './RatioChart.vue'
 import WindowControl from './WindowControl.vue'
 // The tab's colour vocabulary, loaded once for the island. Unscoped on
 // purpose: a role is not one component's styling, and every surface added

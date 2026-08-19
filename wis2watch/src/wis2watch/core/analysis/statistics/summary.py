@@ -35,6 +35,7 @@ from .series import (
     HourlyActivity,
     bucket_axis,
     daily_activity,
+    hour_of_day_profile,
     hourly_activity,
     window_totals,
 )
@@ -138,6 +139,12 @@ class WindowStats:
     ``daily`` is ``None`` at the default window rather than a series of one:
     a one-cell chart of the day in progress is not an aggregate of anything,
     and the panel says why it is empty instead of drawing it.
+
+    ``hour_of_day`` is ``None`` at the default window for the same kind of
+    reason and a different one. It is 24 message counts folded onto the UTC
+    clock, and over a window that *is* one day it would be the hourly chart
+    drawn again in another unit -- so the panel says so rather than repeating
+    the chart above it.
     """
 
     reported_station_count: int
@@ -145,6 +152,7 @@ class WindowStats:
     messages_total: int
     unattributed_messages_total: int
     daily: list[DailyActivity] | None
+    hour_of_day: list[int] | None
 
 
 @dataclass(frozen=True)
@@ -258,9 +266,10 @@ def _now_block(node, *, now, stale_after):
 def _window_stats(node, *, window, since, until, buckets, declared_station_count):
     """The moving figures, read over the window and from its own table.
 
-    The daily series is left out at hourly grain rather than served as a
-    single cell. The window control is what fills it, and a panel saying so is
-    a signpost to the control; a one-column chart of the day in progress is a
+    Both series are left out at hourly grain rather than served as
+    something that looks like a series and is not. The window control is what
+    fills them, and a panel saying so is a signpost to the control; a
+    one-column daily chart, or an hour-of-day profile over a single day, is a
     chart that says nothing and looks like it should.
 
     Args:
@@ -273,16 +282,23 @@ def _window_stats(node, *, window, since, until, buckets, declared_station_count
             fixed block and carried here rather than counted again.
 
     Returns:
-        WindowStats: the coverage, the volumes and the daily series.
+        WindowStats: the coverage, the volumes and the two window series.
     """
     totals = window_totals(node, since, until, window.grain)
+    aggregate = window.grain == Grain.DAY
 
     return WindowStats(
         reported_station_count=totals.reported_station_count,
         declared_station_count=declared_station_count,
         messages_total=totals.messages_total,
         unattributed_messages_total=totals.unattributed_messages_total,
-        daily=daily_activity(node, buckets) if window.grain == Grain.DAY else None,
+        daily=daily_activity(node, buckets) if aggregate else None,
+        # The one long-window query on the tab, and the one that reads the
+        # hourly rollups over the whole window rather than the days above
+        # them -- which is affordable because it sums one column rather than
+        # counting distinct stations. If a production-sized region ever says
+        # otherwise, the timings the view logs are where that shows first.
+        hour_of_day=hour_of_day_profile(node, since, until) if aggregate else None,
     )
 
 

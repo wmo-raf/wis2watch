@@ -58,7 +58,7 @@
         <path
             v-else-if="isOpen(bucket)"
             :d="openBucketPath(day)"
-            class="daily-chart__open"
+            class="stat-open"
         />
         <rect
             v-else-if="day.stations > 0"
@@ -80,7 +80,7 @@
             :x2="band.barWidth"
             :y1="plotHeight - 6"
             :y2="plotHeight + 3"
-            class="daily-chart__edge"
+            class="stat-edge"
         />
 
         <rect
@@ -323,19 +323,3 @@ const readout = computed(() => {
 })
 
 </script>
-
-<style scoped>
-/* The unfinished day. Full-strength colour on purpose: the mark is the shape,
-   and anything tonal here would be read as a smaller value. */
-.daily-chart__open {
-  fill: none;
-  stroke: var(--stat-live);
-  stroke-width: 1.2;
-  stroke-dasharray: 2 2;
-}
-
-.daily-chart__edge {
-  stroke: var(--stat-live);
-  stroke-width: 1.4;
-}
-</style>

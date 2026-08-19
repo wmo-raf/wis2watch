@@ -14,7 +14,7 @@ different charts.
 
 from datetime import timedelta
 
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 
 from wis2watch.core.analysis import (
     Grain,
@@ -667,3 +667,95 @@ class DailySeriesTests(WindowSeriesTestCase):
         self.summarise()
 
         self.assertEqual(sum(day.messages for day in self.daily()), 5)
+
+
+class HourOfDayProfileTests(WindowSeriesTestCase):
+    """The synoptic rhythm: message volume folded onto the 24-hour clock.
+
+    The one chart on the tab that plots raw message volume, and the one that
+    reads the hourly rollups over the whole window rather than the days that
+    summarise them -- because distinct-stations-per-hour-of-day over ninety
+    days is exactly the query the daily table was built to avoid, and volume
+    per hour-of-day is not.
+    """
+
+    def profile(self, **kwargs):
+        return self.week(**kwargs).window_stats.hour_of_day
+
+    def at_utc_hour(self, stamp, *, messages=1, station=None, node=None, source=None):
+        """One hour of traffic at a named UTC instant, inside the week."""
+        return published(
+            node or self.kenya,
+            source=source or self.global_broker,
+            hour=at(stamp),
+            messages=messages,
+            station=station,
+        )
+
+    def test_the_default_window_has_no_profile_at_all(self):
+        """At 24h this is the hourly chart in another unit; the panel says so."""
+        self.assertIsNone(self.summary().window_stats.hour_of_day)
+
+    def test_the_profile_is_twenty_four_buckets_one_per_utc_hour(self):
+        self.assertEqual(len(self.profile()), 24)
+
+    def test_an_hour_of_traffic_lands_on_its_own_hour_of_the_clock(self):
+        self.at_utc_hour("2026-08-09T03:00:00", messages=7)
+
+        profile = self.profile()
+
+        self.assertEqual(profile[3], 7)
+        self.assertEqual(sum(profile), 7)
+
+    def test_the_same_hour_on_two_days_is_summed(self):
+        """The whole point: the rhythm is only visible folded onto the clock."""
+        self.at_utc_hour("2026-08-08T06:00:00", messages=4)
+        self.at_utc_hour("2026-08-09T06:00:00", messages=5)
+
+        self.assertEqual(self.profile()[6], 9)
+
+    def test_the_hours_are_utc_whatever_the_server_is_set_to(self):
+        """A local-time fold puts the synoptic peaks on the wrong hours."""
+        self.at_utc_hour("2026-08-09T06:00:00", messages=4)
+
+        with override_settings(TIME_ZONE="Africa/Nairobi"):
+            profile = self.profile()
+
+        self.assertEqual(profile[6], 4)
+
+    def test_volume_is_counted_from_the_global_broker_only(self):
+        """The same publication is observed again at the centre's own broker."""
+        self.at_utc_hour("2026-08-09T06:00:00", messages=4)
+        self.at_utc_hour(
+            "2026-08-09T06:00:00", messages=4, source=origin_broker(self.kenya)
+        )
+
+        self.assertEqual(self.profile()[6], 4)
+
+    def test_messages_naming_no_station_are_volume_like_any_other(self):
+        """This axis is volume, so the station-less traffic belongs on it."""
+        station = self.declare("0-20000-0-63708")
+        self.at_utc_hour("2026-08-09T06:00:00", messages=4, station=station)
+        self.at_utc_hour("2026-08-09T06:00:00", messages=2, station=None)
+
+        self.assertEqual(self.profile()[6], 6)
+
+    def test_traffic_outside_the_window_is_not_folded_in(self):
+        self.at_utc_hour("2026-07-30T06:00:00", messages=4)
+
+        self.assertEqual(sum(self.profile()), 0)
+
+    def test_another_centres_traffic_is_not_counted_here(self):
+        uganda = WIS2Node.objects.create(centre_id="ug-unma", name="Uganda")
+        self.at_utc_hour("2026-08-09T06:00:00", messages=4, node=uganda)
+
+        self.assertEqual(sum(self.profile()), 0)
+
+    def test_the_profile_reads_the_hours_rather_than_a_derived_layer(self):
+        """No daily rollup run has happened, and the profile still answers."""
+        self.at_utc_hour("2026-08-09T06:00:00", messages=4)
+
+        self.assertEqual(self.profile()[6], 4)
+
+    def test_a_node_that_published_nothing_gets_twenty_four_real_zeros(self):
+        self.assertEqual(self.profile(), [0] * 24)

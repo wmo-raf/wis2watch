@@ -133,6 +133,32 @@
     opacity: 0.22;
 }
 
+/* The unfinished bucket, shared by every panel that draws the day in
+   progress. Full-strength colour on purpose, and the mark is the *shape*: up
+   the left, across the top, and no right-hand side at all. Anything tonal
+   here fades toward white on light and toward black on dark, and either way
+   lowers contrast, so a genuinely short bar reads as "today collapsed and it
+   doesn't matter" -- the exact false alarm the mark exists to prevent.
+
+   Shared rather than scoped to one chart because the daily series and the
+   ratio beneath it mark the same day: two spellings of "still being counted"
+   on one page is a second mark to learn. */
+.node-statistics .stat-open {
+    fill: none;
+    stroke: var(--stat-live);
+    stroke-width: 1.2;
+    stroke-dasharray: 2 2;
+}
+
+/* The "so far" tick, crossing the axis at the open bucket's right edge. It is
+   the part of the mark that needs no bar, which is what draws the day that
+   published nothing at all -- the outage a reader came to the page for. */
+.node-statistics .stat-edge {
+    stroke: var(--stat-live);
+    stroke-width: 1.4;
+    fill: none;
+}
+
 /* Anchored under the axis rather than floating over the bars: on a plot this
    short, a card covers a third of what it is describing. Its height is held
    open so that moving along the axis does not move the page. */
