@@ -37,34 +37,12 @@ export function bandScale(count, plotWidth) {
     const step = plotWidth / Math.max(1, count)
 
     return {
-        step,
         x: (index) => index * step,
         centre: (index) => (index + 0.5) * step,
         // Never below a hairline. At 90 buckets in a narrow panel a gap of
         // 0.6px is what turns a bar chart into a grey slab.
         barWidth: Math.max(1, step - (step > 6 ? 2 : step > 3 ? 1 : 0.4)),
     }
-}
-
-/**
- * Which buckets get a label, chosen from measured pixels.
- *
- * This is what the ResizeObserver buys. A ladder keyed off the bucket count
- * cannot know how wide it is, so it either crowds a narrow panel or leaves a
- * wide one nearly unlabelled.
- */
-export function tickIndices(count, plotWidth, minLabelPx = 46) {
-    const perLabel = Math.max(
-        1,
-        Math.ceil(minLabelPx / (plotWidth / Math.max(1, count)))
-    )
-
-    const indices = []
-    for (let index = 0; index < count; index += perLabel) {
-        indices.push(index)
-    }
-
-    return indices
 }
 
 //: The label steps an hourly axis is allowed to use, in hours. Every one of
@@ -75,11 +53,13 @@ const HOUR_LABEL_STEPS = [1, 2, 3, 6, 12]
 /**
  * Which buckets of an hourly axis get a label, anchored to round UTC hours.
  *
- * The plain pixel ladder above would step from wherever the window happens to
- * start, which is any hour at all, and put the labels at 05Z, 08Z, 11Z. The
- * hours a reader of WMO traffic is looking for are 00/06/12/18Z, so the step
- * is chosen to fit the measured width and then the labels are placed on the
- * hours that step lands on rather than on the buckets it counts to.
+ * Two things at once, and both are needed. How many labels fit is measured in
+ * real pixels -- which is what the ResizeObserver buys, since a ladder keyed
+ * off the bucket count cannot know how wide it is. Where they land is then
+ * chosen by the clock rather than by counting buckets: stepping from wherever
+ * the window happens to start, which is any hour at all, puts the labels at
+ * 05Z, 08Z, 11Z, and the hours a reader of WMO traffic is looking for are
+ * 00/06/12/18Z.
  *
  * @param {Date[]} starts - the start of each bucket, oldest first.
  * @param {number} plotWidth - the measured width of the plot, in pixels.

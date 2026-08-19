@@ -16,9 +16,8 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone as dj_timezone
 
-from wis2watch.core.models import HourlyRollup, MessageSource, WIS2Node
-from wis2watch.core.rollups import floor_to_hour
-from wis2watch.core.tests.support import declare_station, observe_station
+from wis2watch.core.models import MessageSource, WIS2Node
+from wis2watch.core.tests.support import declare_station, observe_station, published
 
 
 def admin_reader(username="diagnostician"):
@@ -176,19 +175,19 @@ class SummaryResponseTests(StatisticsEndpointTestCase):
 class HourlySeriesResponseTests(StatisticsEndpointTestCase):
     """The axis and the series the tab's first chart is drawn from."""
 
-    def published(self, *, hours_ago=1, messages=1, station=None):
-        """One hour of Global Broker traffic, as the rollup run derives it.
+    def rollup(self, *, hours_ago=1, messages=1, station=None):
+        """One hour of Global Broker traffic for this centre.
 
         Measured back from the real clock for the same reason the observations
         above are: the view has no ``now`` seam, so a fixed instant here would
         fall out of the window the day after it was written.
         """
-        return HourlyRollup.objects.create(
-            hour=floor_to_hour(dj_timezone.now() - timedelta(hours=hours_ago)),
+        return published(
+            self.kenya,
             source=self.global_broker,
-            node=self.kenya,
+            hour=dj_timezone.now() - timedelta(hours=hours_ago),
+            messages=messages,
             station=station,
-            message_count=messages,
         )
 
     def test_the_bucket_axis_travels_once_at_the_top(self):
@@ -216,7 +215,7 @@ class HourlySeriesResponseTests(StatisticsEndpointTestCase):
 
     def test_an_hour_of_traffic_is_counted_into_its_own_bucket(self):
         station = self.declare("0-20000-0-63708")
-        self.published(hours_ago=1, messages=4, station=station)
+        self.rollup(hours_ago=1, messages=4, station=station)
 
         series = self.summary()["now"]["hourly"]
 
@@ -228,7 +227,7 @@ class HourlySeriesResponseTests(StatisticsEndpointTestCase):
 
     def test_an_hour_that_named_no_station_reaches_the_client_as_such(self):
         """The mark the chart draws instead of a bar depends on this pair."""
-        self.published(hours_ago=1, messages=6, station=None)
+        self.rollup(hours_ago=1, messages=6, station=None)
 
         series = self.summary()["now"]["hourly"]
 

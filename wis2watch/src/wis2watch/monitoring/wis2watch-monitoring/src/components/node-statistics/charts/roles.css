@@ -1,10 +1,16 @@
 /**
  * The tab's colour vocabulary: named roles, never colours at the call site.
  *
- * One vocabulary for every surface. The charts here, and later the station
- * table, the availability matrix, the navigator wall and the map, all
- * reference a role -- so "silent" is one decision in one place rather than a
- * red that four components each chose for themselves and slowly disagreed on.
+ * One vocabulary for everything that carries a *finding*. The charts here,
+ * and later the station table, the availability matrix, the navigator wall
+ * and the map, all reference a role -- so "silent" is one decision in one
+ * place rather than a red that four components each chose for themselves and
+ * slowly disagreed on.
+ *
+ * Panel chrome is deliberately not in here. A panel's border and its heading
+ * are Wagtail's furniture, and the tab keeps the page's own ground rather
+ * than laying a second one over it, so those read `--w-color-*` exactly as
+ * the rest of the admin does. A role is for a mark that means something.
  *
  * Where a PrimeVue token means the right thing it is used, because those
  * already carry the admin's own light and dark values. Where none does -- and
@@ -26,11 +32,8 @@
  */
 
 .node-statistics {
-    /* Ground and ink, from the surface scale the rest of the island is
+    /* Axis furniture, from the surface scale the rest of the island is
        already painted with. */
-    --stat-panel: var(--p-content-background);
-    --stat-panel-border: var(--p-content-border-color);
-    --stat-ink: var(--p-text-color);
     --stat-ink-muted: var(--p-text-muted-color);
     --stat-grid: var(--p-surface-300);
 
@@ -53,6 +56,12 @@
     --stat-focus: var(--p-primary-color);
 }
 
+/* The dark values, written twice on purpose. Wagtail's explicit choice is a
+   class and its default is the OS, and no portable CSS selector covers both a
+   bare class and that class inside a media query in one rule. `light-dark()`
+   would collapse them, at the price of every role falling back to unset --
+   charts with no colour at all -- on a browser that does not have it. The
+   duplication is the cheaper failure. Keep the two lists identical. */
 .w-theme-dark .node-statistics {
     --stat-grid: var(--p-surface-600);
     --stat-live: var(--p-teal-400);

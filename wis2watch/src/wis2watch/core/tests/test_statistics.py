@@ -23,8 +23,7 @@ from wis2watch.core.analysis import (
     Window,
     node_statistics_summary,
 )
-from wis2watch.core.models import HourlyRollup, MessageSource, WIS2Node
-from wis2watch.core.rollups import floor_to_hour
+from wis2watch.core.models import MessageSource, WIS2Node
 
 from .support import (
     SOMEWHERE,
@@ -32,6 +31,7 @@ from .support import (
     declare_station,
     observe_station,
     origin_broker,
+    published,
 )
 
 NOW = at("2026-08-11T12:34:56")
@@ -283,17 +283,13 @@ class SeriesTestCase(SummaryTestCase):
     """A node whose hours can be seeded one rollup at a time."""
 
     def rollup(self, *, hours_ago, messages=1, station=None, source=None, node=None):
-        """One hour of traffic, as the rollup run would have derived it.
-
-        The hour is floored the same way the rollups are, so a test says "three
-        hours ago" and lands in the bucket a reader would look for it in.
-        """
-        return HourlyRollup.objects.create(
-            hour=floor_to_hour(NOW - timedelta(hours=hours_ago)),
+        """One hour of this centre's traffic, that many hours before NOW."""
+        return published(
+            node or self.kenya,
             source=source or self.global_broker,
-            node=node or self.kenya,
+            hour=NOW - timedelta(hours=hours_ago),
+            messages=messages,
             station=station,
-            message_count=messages,
         )
 
     def hourly(self, **kwargs):
@@ -326,6 +322,30 @@ class BucketAxisTests(SeriesTestCase):
         self.assertEqual(len(buckets), 24)
         self.assertEqual(buckets[0].start, at("2026-08-10T12:00:00"))
         self.assertEqual(buckets[-1].start, at("2026-08-11T11:00:00"))
+
+    def test_a_longer_window_moves_its_own_axis_and_not_the_fixed_one(self):
+        """Why there are two axes at all, pinned before a control can move one.
+
+        At the default window the two lists are identical, so nothing here
+        would notice them being one list. Asking for a longer one is what
+        makes the difference real: the window's buckets become days, and the
+        fixed block goes on being the same 24 whole hours it was.
+        """
+        summary = self.summary(window=Window.resolve("7d"))
+
+        self.assertEqual(len(summary.buckets), 7)
+        self.assertEqual(summary.buckets[0].start, at("2026-08-05T00:00:00"))
+
+        self.assertEqual(len(summary.now.buckets), 24)
+        self.assertEqual(summary.now.buckets[0].start, at("2026-08-10T12:00:00"))
+        self.assertEqual(len(summary.now.hourly), 24)
+
+    def test_the_day_in_progress_is_the_one_bucket_marked_unfinished(self):
+        """`partial` is "real but incomplete", and only the newest day is."""
+        buckets = self.summary(window=Window.resolve("7d")).buckets
+
+        self.assertTrue(buckets[-1].partial)
+        self.assertFalse(any(bucket.partial for bucket in buckets[:-1]))
 
 
 class HourlySeriesTests(SeriesTestCase):

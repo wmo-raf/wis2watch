@@ -11,7 +11,7 @@
         @pointermove="onPointerMove($event, PAD_LEFT)"
         @pointerleave="clear"
         @focus="onFocus"
-        @blur="clear"
+        @blur="onBlur"
         @keydown="onKeydown"
     >
       <ChartHatch :id="hatchId"/>
@@ -53,9 +53,9 @@
         />
         <rect
             v-else-if="hour.stations > 0"
-            :y="y(hour.stations)"
+            :y="y(drawn(hour))"
             :width="band.barWidth"
-            :height="plotHeight - y(hour.stations)"
+            :height="plotHeight - y(drawn(hour))"
             fill="var(--stat-live)"
         />
 
@@ -164,13 +164,17 @@ const plotHeight = computed(() => props.height - PAD_BOTTOM)
 
 const starts = computed(() => props.buckets.map((bucket) => new Date(bucket.start)))
 
-// The declared population is the axis, except where the centre transmits for
-// more stations than anything declares -- which is a real finding of its own,
-// and clipping the bar that carries it would be the one way to lose it. The
-// declared line stays drawn where it is, so a bar crossing it says so.
-const yTop = computed(() =>
-    Math.max(1, props.declared, ...props.hourly.map((hour) => hour.stations))
-)
+// The declared population, and not the tallest bar. Height is coverage only
+// if the top never moves: two readers screenshotting one node on two days
+// have to be able to lay the images side by side. The floor of 1 is for a
+// centre that declares nothing, which still gets a real axis to draw zero
+// against.
+const yTop = computed(() => Math.max(1, props.declared))
+
+// A centre transmitting for more stations than anything declares reports over
+// full coverage, and that hour draws at the top rather than off the panel.
+// The bar is capped; the words below it are not, and say "43 of 40".
+const drawn = (hour) => Math.min(hour.stations, yTop.value)
 const y = computed(() => yScale(yTop.value, plotHeight.value))
 const band = computed(() => bandScale(props.hourly.length, plotWidth.value))
 const ticks = computed(() => roundHourTicks(starts.value, plotWidth.value))
@@ -257,6 +261,11 @@ function onFocus() {
   if (index.value === null) {
     moveTo(props.hourly.length - 1)
   }
+}
+
+function onBlur() {
+  focused.value = false
+  clear()
 }
 
 function onKeydown(event) {
