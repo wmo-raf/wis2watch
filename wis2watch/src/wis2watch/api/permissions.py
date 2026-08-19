@@ -21,6 +21,15 @@ class HasAdminAccess(BasePermission):
     message = "You do not have access to the monitoring admin."
 
     def has_permission(self, request, view):
+        """Whether this request may be answered at all.
+
+        Args:
+            request: the request being judged.
+            view: the view it was made to.
+
+        Returns:
+            bool: True where the reader could have opened the admin.
+        """
         user = request.user
 
         return bool(user and user.is_authenticated and user.has_perm(ADMIN_ACCESS))

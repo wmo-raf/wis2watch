@@ -16,12 +16,8 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone as dj_timezone
 
-from wis2watch.core.models import (
-    MessageSource,
-    Station,
-    StationSource,
-    WIS2Node,
-)
+from wis2watch.core.models import MessageSource, WIS2Node
+from wis2watch.core.tests.support import declare_station, observe_station
 
 
 def admin_reader(username="diagnostician"):
@@ -61,28 +57,15 @@ class StatisticsEndpointTestCase(TestCase):
         return response.json()
 
     def declare(self, wigos_id):
-        station, _ = Station.objects.get_or_create(wigos_id=wigos_id)
-        StationSource.objects.create(
-            station=station,
-            source_type=StationSource.NODE_REGISTRY,
-            node=self.kenya,
-        )
-
-        return station
+        return declare_station(self.kenya, wigos_id)
 
     def transmitted(self, wigos_id, *, hours_ago=1):
-        station, _ = Station.objects.get_or_create(wigos_id=wigos_id)
-        StationSource.objects.create(
-            station=station,
-            source_type=StationSource.OBSERVED,
-            node=self.kenya,
-            # Measured back from the real clock: the view has no ``now`` seam
-            # and should not grow one, so a fixed instant here would drift into
-            # "gone quiet" the day after it was written.
-            last_seen=dj_timezone.now() - timedelta(hours=hours_ago),
+        # Measured back from the real clock: the view has no ``now`` seam and
+        # should not grow one, so a fixed instant here would drift into "gone
+        # quiet" the day after it was written.
+        return observe_station(
+            self.kenya, wigos_id, last_seen=dj_timezone.now() - timedelta(hours=hours_ago)
         )
-
-        return station
 
 
 class AccessTests(StatisticsEndpointTestCase):

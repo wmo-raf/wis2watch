@@ -14,7 +14,6 @@ different charts.
 
 from datetime import timedelta
 
-from django.contrib.gis.geos import Point
 from django.test import SimpleTestCase, TestCase
 
 from wis2watch.core.analysis import (
@@ -24,20 +23,11 @@ from wis2watch.core.analysis import (
     Window,
     node_statistics_summary,
 )
-from wis2watch.core.models import (
-    MessageSource,
-    Station,
-    StationSource,
-    WIS2Node,
-)
+from wis2watch.core.models import MessageSource, WIS2Node
 
-from .support import at
+from .support import SOMEWHERE, at, declare_station, observe_station
 
 NOW = at("2026-08-11T12:34:56")
-
-#: Somewhere to put a station that has one. Where it is does not matter; that
-#: it has coordinates at all is the only thing counted here.
-NAIROBI = Point(36.75, -1.30, 1798.0, srid=4326)
 
 
 class WindowTests(SimpleTestCase):
@@ -87,11 +77,6 @@ class WindowTests(SimpleTestCase):
         self.assertEqual(until, at("2026-08-12T00:00:00"))
         self.assertEqual(since, at("2026-08-05T00:00:00"))
 
-    def test_a_window_covers_exactly_as_many_buckets_as_it_is_named_for(self):
-        for key, buckets in (("24h", 24), ("7d", 7), ("30d", 30), ("90d", 90)):
-            with self.subTest(window=key):
-                self.assertEqual(Window.resolve(key).bucket_count, buckets)
-
 
 class SummaryTestCase(TestCase):
     """A node whose stations are in every standing there is."""
@@ -105,35 +90,17 @@ class SummaryTestCase(TestCase):
         self.kenya = WIS2Node.objects.create(centre_id="ke-meteo", name="Kenya Met")
 
     def declare(self, wigos_id, *, node=None, located=True):
-        """The node's own registry saying it operates a station."""
-        station, _ = Station.objects.get_or_create(
-            wigos_id=wigos_id,
-            defaults={"location": NAIROBI if located else None},
+        return declare_station(
+            node or self.kenya, wigos_id, location=SOMEWHERE if located else None
         )
-
-        StationSource.objects.create(
-            station=station,
-            source_type=StationSource.NODE_REGISTRY,
-            node=self.kenya if node is None else node,
-        )
-
-        return station
 
     def transmitted(self, wigos_id, *, hours_ago=1, node=None, located=True):
-        """A station heard transmitting under a centre's topics."""
-        station, _ = Station.objects.get_or_create(
-            wigos_id=wigos_id,
-            defaults={"location": NAIROBI if located else None},
-        )
-
-        StationSource.objects.create(
-            station=station,
-            source_type=StationSource.OBSERVED,
-            node=self.kenya if node is None else node,
+        return observe_station(
+            node or self.kenya,
+            wigos_id,
             last_seen=NOW - timedelta(hours=hours_ago),
+            location=SOMEWHERE if located else None,
         )
-
-        return station
 
     def summary(self, node=None, **kwargs):
         kwargs.setdefault("now", NOW)

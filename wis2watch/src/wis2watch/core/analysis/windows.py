@@ -73,11 +73,6 @@ class Window:
         """How much time this window covers."""
         return timedelta(hours=self.hours)
 
-    @property
-    def bucket_count(self):
-        """How many buckets a series over this window has."""
-        return self.hours if self.grain == Grain.HOUR else self.hours // 24
-
     def bounds(self, now):
         """The half-open UTC interval this window covers at a given instant.
 

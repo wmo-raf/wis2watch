@@ -25,6 +25,11 @@
           of {{ counts.declared_station_count }} declared stations transmitting
         </p>
 
+        <p class="node-statistics__population">
+          Of all {{ population }} stations this centre declares or has been
+          heard transmitting for:
+        </p>
+
         <dl class="node-statistics__counts">
           <div
               v-for="figure in figures"
@@ -40,9 +45,13 @@
           Standing is flat {{ summary.stale_after_hours }}h, whatever window is
           chosen: a station is transmitting if this centre has been heard
           publishing for it within {{ summary.stale_after_hours }} hours.
+          The headline counts only stations the registry declares; the figures
+          above cover every station, declared or not, so a station that was
+          never declared and has since stopped is counted as gone quiet rather
+          than as undeclared.
           <template v-if="counts.unlocated_station_count">
-            {{ counts.unlocated_station_count }} of these stations carry no
-            coordinates and cannot be put on a map.
+            {{ counts.unlocated_station_count }} of them carry no coordinates
+            and cannot be put on a map.
           </template>
         </p>
       </div>
@@ -110,19 +119,36 @@ const error = ref('')
 
 const counts = computed(() => summary.value.now)
 
+// Deliberately not labelled "declared, never heard from" and the like. The
+// standings do not partition the declared population -- a station nothing
+// declares that stopped months ago is `gone_quiet`, not `undeclared` -- so a
+// label naming the registry on a figure that does not filter by it would be a
+// wrong number rather than a terse one. The population line above says which
+// population these cover, and the headline ratio says which one it counts.
 const figures = computed(() => [
+  {key: 'transmitting', label: 'Transmitting', value: counts.value.transmitting},
   {key: 'gone_quiet', label: 'Gone quiet', value: counts.value.gone_quiet},
   {
     key: 'never_transmitted',
-    label: 'Declared, never heard from',
+    label: 'Never heard from',
     value: counts.value.never_transmitted,
   },
   {
     key: 'undeclared_transmitting',
-    label: 'Transmitting, not declared',
+    label: 'Transmitting, undeclared',
     value: counts.value.undeclared_transmitting,
   },
 ])
+
+// Every station the centre declares or has been heard transmitting for. The
+// four standings are exhaustive over exactly this set, which is what makes
+// summing them the honest way to state the scale.
+const population = computed(() =>
+    counts.value.transmitting +
+    counts.value.gone_quiet +
+    counts.value.never_transmitted +
+    counts.value.undeclared_transmitting
+)
 
 onMounted(async () => {
   try {
@@ -170,6 +196,12 @@ onMounted(async () => {
 
 .node-statistics__headline strong {
   font-size: 1.6rem;
+}
+
+.node-statistics__population {
+  font-size: 0.8rem;
+  color: var(--w-color-text-meta);
+  margin: 0 0 0.5rem;
 }
 
 .node-statistics__counts {
