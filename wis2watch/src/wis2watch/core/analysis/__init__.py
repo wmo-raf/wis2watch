@@ -58,12 +58,14 @@ from .silence import (
 from .staleness import Staleness
 from .statistics import (
     Bucket,
+    DailyActivity,
     HourlyActivity,
     NodeStatisticsSummary,
     NowBlock,
     Vantage,
     WindowBounds,
     WindowOption,
+    WindowStats,
     node_statistics_summary,
 )
 from .stations import NodeStationRow, StationStanding, node_stations
@@ -73,6 +75,7 @@ __all__ = [
     "GAP_REPORTS",
     "Bucket",
     "CachePickup",
+    "DailyActivity",
     "DatasetSilenceRow",
     "Expectation",
     "GapReport",
@@ -106,6 +109,7 @@ __all__ = [
     "Window",
     "WindowBounds",
     "WindowOption",
+    "WindowStats",
     "dataset_silence",
     "default_attribution_window_hours",
     "default_volume_hours",

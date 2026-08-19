@@ -11,8 +11,8 @@ Two station numbers come out of that split and they are different questions.
 The *standing* ("412 of 500 transmitting") is now-anchored by definition. The
 *window coverage* ("478 of 500 reported at least once") moves. The gap between
 them is the finding the tab exists for: 66 stations reported this month and
-have since stopped. Only the standing is here; the coverage arrives with the
-control that moves it.
+have since stopped. They sit in different blocks so that a page cannot draw
+one and label it the other.
 
 Nothing here is re-derived. The standing counts are a count of exactly the
 rows the node detail page lists one at a time, from the same function, so the
@@ -29,7 +29,15 @@ from ...models import MessageSource
 from ..staleness import default_stale_after_hours
 from ..stations import StationStanding, node_stations
 from ..windows import Grain, Window
-from .series import Bucket, HourlyActivity, bucket_axis, hourly_activity
+from .series import (
+    Bucket,
+    DailyActivity,
+    HourlyActivity,
+    bucket_axis,
+    daily_activity,
+    hourly_activity,
+    window_totals,
+)
 
 #: The window the fixed block is always read over, whatever the reader has
 #: chosen. Named here rather than spelled as "24 hours" so that the block, the
@@ -113,6 +121,33 @@ class NowBlock:
 
 
 @dataclass(frozen=True)
+class WindowStats:
+    """What the centre did over the window the reader chose.
+
+    Everything here moves with the control, which is what keeps it out of the
+    fixed block above. The pair that matters is ``reported_station_count`` of
+    ``declared_station_count``: "478 of 500 reported at least once", against
+    the standing "412 of 500 transmitting", and the gap between them is the 66
+    stations that reported this month and have since stopped.
+
+    The denominator is the *same* now-anchored count the fixed block carries,
+    from the same call rather than a second one -- it travels here so the
+    sentence can be rendered from one block, and it does not move when the
+    control does. It is the one figure in this block that does not.
+
+    ``daily`` is ``None`` at the default window rather than a series of one:
+    a one-cell chart of the day in progress is not an aggregate of anything,
+    and the panel says why it is empty instead of drawing it.
+    """
+
+    reported_station_count: int
+    declared_station_count: int
+    messages_total: int
+    unattributed_messages_total: int
+    daily: list[DailyActivity] | None
+
+
+@dataclass(frozen=True)
 class NodeStatisticsSummary:
     """Everything series-shaped the statistics tab reads for one centre.
 
@@ -132,6 +167,7 @@ class NodeStatisticsSummary:
     vantage: Vantage
     buckets: list[Bucket]
     now: NowBlock
+    window_stats: WindowStats
 
 
 def node_statistics_summary(node, *, window=None, now=None):
@@ -152,6 +188,8 @@ def node_statistics_summary(node, *, window=None, now=None):
     window = window or Window.default()
     stale_after = default_stale_after_hours()
     since, until = window.bounds(now)
+    buckets = bucket_axis(since, until, window.grain, now=now)
+    fixed = _now_block(node, now=now, stale_after=stale_after)
 
     return NodeStatisticsSummary(
         node_id=node.pk,
@@ -170,8 +208,16 @@ def node_statistics_summary(node, *, window=None, now=None):
             for offered in Window.available()
         ],
         vantage=_vantage(),
-        buckets=bucket_axis(since, until, window.grain, now=now),
-        now=_now_block(node, now=now, stale_after=stale_after),
+        buckets=buckets,
+        now=fixed,
+        window_stats=_window_stats(
+            node,
+            window=window,
+            since=since,
+            until=until,
+            buckets=buckets,
+            declared_station_count=fixed.declared_station_count,
+        ),
     )
 
 
@@ -206,6 +252,37 @@ def _now_block(node, *, now, stale_after):
         unlocated_station_count=sum(not row.is_located for row in rows),
         buckets=buckets,
         hourly=hourly_activity(node, buckets),
+    )
+
+
+def _window_stats(node, *, window, since, until, buckets, declared_station_count):
+    """The moving figures, read over the window and from its own table.
+
+    The daily series is left out at hourly grain rather than served as a
+    single cell. The window control is what fills it, and a panel saying so is
+    a signpost to the control; a one-column chart of the day in progress is a
+    chart that says nothing and looks like it should.
+
+    Args:
+        node: the centre to report on.
+        window: the window the reader chose.
+        since: the start of it.
+        until: the exclusive end of it.
+        buckets: the window's own axis, which the daily series is indexed by.
+        declared_station_count: the standing denominator, counted once by the
+            fixed block and carried here rather than counted again.
+
+    Returns:
+        WindowStats: the coverage, the volumes and the daily series.
+    """
+    totals = window_totals(node, since, until, window.grain)
+
+    return WindowStats(
+        reported_station_count=totals.reported_station_count,
+        declared_station_count=declared_station_count,
+        messages_total=totals.messages_total,
+        unattributed_messages_total=totals.unattributed_messages_total,
+        daily=daily_activity(node, buckets) if window.grain == Grain.DAY else None,
     )
 
 

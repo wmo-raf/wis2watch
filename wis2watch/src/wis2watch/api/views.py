@@ -6,8 +6,9 @@ from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.status import HTTP_400_BAD_REQUEST
 
-from wis2watch.core.analysis import Window, node_statistics_summary
+from wis2watch.core.analysis import UnknownWindow, Window, node_statistics_summary
 from wis2watch.core.models import WIS2Node
 
 from .permissions import HasAdminAccess
@@ -58,15 +59,32 @@ def node_statistics_summary_api(request, node_id):
     dataclass is the contract -- readable in one place rather than spread over
     a serializer that has to be kept in step with it.
 
+    ``?window=`` is the whole of the input, and an enum at that. A free
+    ``since``/``until`` range is refused by there being no way to spell one:
+    ninety days at hourly grain is the query the daily rollups were built to
+    avoid, and an open range against a table nothing expires is unbounded.
+
     Args:
         request: HTTP request object.
         node_id (int): ID of the WIS2 Node.
 
     Returns:
-        Response: the summary, or 404 for a centre nothing knows about.
+        Response: the summary, 400 for a window nothing offers, or 404 for a
+        centre nothing knows about.
     """
     node = get_object_or_404(WIS2Node, pk=node_id)
-    window = Window.default()
+
+    try:
+        window = Window.resolve(request.query_params.get("window"))
+    except UnknownWindow as unknown:
+        # The valid list travels with the refusal rather than only in the
+        # message, so a client can render the control from a 400 as well as
+        # from a 200 -- and a reader is never sent into the source for the
+        # spellings.
+        return Response(
+            {"error": str(unknown), "valid_windows": unknown.valid_keys},
+            status=HTTP_400_BAD_REQUEST,
+        )
 
     started = perf_counter()
     summary = node_statistics_summary(node, window=window)
