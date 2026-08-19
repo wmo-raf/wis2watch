@@ -13,6 +13,7 @@ from .series import (
     WindowTotals,
     bucket_axis,
     daily_activity,
+    hour_of_day_profile,
     hourly_activity,
     window_totals,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "WindowTotals",
     "bucket_axis",
     "daily_activity",
+    "hour_of_day_profile",
     "hourly_activity",
     "node_statistics_summary",
     "window_totals",

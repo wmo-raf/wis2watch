@@ -20,6 +20,27 @@
  */
 import {onBeforeUnmount, onMounted, ref} from 'vue'
 
+//: The room every panel on the tab leaves for its axis furniture: the y
+//: labels down the left and the bucket labels underneath, in real pixels
+//: rather than scaled, so a 10px label stays 10px whatever Wagtail's layout
+//: does around it. Shared rather than agreed by four copies, because four
+//: panels stacked down one page have to start their plots at one x or they
+//: cannot be read against each other -- which is the whole reason the daily
+//: series is drawn on the hourly chart's axis.
+export const PAD_LEFT = 30
+export const PAD_BOTTOM = 14
+
+//: How tall the station-less mark stands, wherever the tab draws it. Enough
+//: to be unmistakable against a bucket that drew nothing, low enough that
+//: nobody reads it off the y axis -- and one number, because the same mark at
+//: two sizes is two marks to a reader.
+export const STUB_HEIGHT = 7
+
+/** A count in the reader's own locale, spelled in full. */
+export function formatCount(value) {
+    return value.toLocaleString()
+}
+
 /**
  * Value to pixel, y measured downwards, always anchored at zero.
  *
@@ -51,7 +72,7 @@ export function bandScale(count, plotWidth) {
 const HOUR_LABEL_STEPS = [1, 2, 3, 6, 12]
 
 /**
- * Which buckets of an hourly axis get a label, anchored to round UTC hours.
+ * Which buckets of an axis of hours get a label, anchored to round UTC hours.
  *
  * Two things at once, and both are needed. How many labels fit is measured in
  * real pixels -- which is what the ResizeObserver buys, since a ladder keyed
@@ -61,28 +82,87 @@ const HOUR_LABEL_STEPS = [1, 2, 3, 6, 12]
  * 05Z, 08Z, 11Z, and the hours a reader of WMO traffic is looking for are
  * 00/06/12/18Z.
  *
- * @param {Date[]} starts - the start of each bucket, oldest first.
+ * Takes the hours themselves rather than the bucket starts, so that the
+ * hour-of-day profile -- whose buckets are the clock rather than a moment in
+ * it -- is labelled by the same arithmetic as the hourly chart. Two charts on
+ * one page labelling 06Z at two different spacings are two axes to read.
+ *
+ * @param {number[]} hours - the UTC hour each bucket falls on, in order.
  * @param {number} plotWidth - the measured width of the plot, in pixels.
  * @param {number} minLabelPx - how much room one label needs.
  * @returns {number[]} the indices to label.
  */
-export function roundHourTicks(starts, plotWidth, minLabelPx = 40) {
-    if (!starts.length) {
+export function clockTicks(hours, plotWidth, minLabelPx = 40) {
+    if (!hours.length) {
         return []
     }
 
-    const perBucket = plotWidth / starts.length
+    const perBucket = plotWidth / hours.length
     const step =
-        HOUR_LABEL_STEPS.find((hours) => hours * perBucket >= minLabelPx) ??
+        HOUR_LABEL_STEPS.find((every) => every * perBucket >= minLabelPx) ??
         HOUR_LABEL_STEPS[HOUR_LABEL_STEPS.length - 1]
 
-    return starts.reduce((indices, start, index) => {
-        if (start.getUTCHours() % step === 0) {
+    return hours.reduce((indices, hour, index) => {
+        if (hour % step === 0) {
             indices.push(index)
         }
 
         return indices
     }, [])
+}
+
+//: The steps an axis top is allowed to be rounded up to, per decade. A top is
+//: a number a reader can find a middle of by eye, rather than whatever the
+//: tallest bar happened to be -- but the ladder has to be fine enough that a
+//: peak fills its panel: [1, 2, 5] alone tops a 23,400 peak out at 50,000 and
+//: draws the busiest hour of the window at less than half the plot.
+const NICE_STEPS = [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10]
+
+/**
+ * An axis top a reader can read a middle off, at or above the tallest value.
+ *
+ * Only for the axes whose top is not a population. Coverage charts top out at
+ * the declared station count and must never be scaled to their own data --
+ * the height of a bar there *is* the finding. A ratio and a message volume
+ * have no such ceiling, so the alternative to rounding up is an axis topped
+ * by an arbitrary number like 8,432.
+ *
+ * @param {number} max - the tallest value on the axis.
+ * @returns {number} the top to draw to, never below 1.
+ */
+export function niceTop(max) {
+    if (!(max > 0)) {
+        return 1
+    }
+
+    const decade = 10 ** Math.floor(Math.log10(max))
+    const step = NICE_STEPS.find((multiple) => max <= multiple * decade) ?? 10
+
+    return step * decade
+}
+
+/**
+ * A number short enough to sit beside an axis, without lying about its size.
+ *
+ * Message volumes over ninety days run to seven figures, and a y label of
+ * "1,240,000" is wider than the room the left pad leaves for it. Only the two
+ * steps above ten thousand are shortened: below that a count is short enough
+ * to be worth stating exactly, and rounding it would lose the figure a reader
+ * came for.
+ *
+ * @param {number} value - the number to label.
+ * @returns {string} the label.
+ */
+export function compactCount(value) {
+    if (value >= 1_000_000) {
+        return `${Math.round(value / 100_000) / 10}M`
+    }
+
+    if (value >= 10_000) {
+        return `${Math.round(value / 1_000)}k`
+    }
+
+    return value.toLocaleString()
 }
 
 /**

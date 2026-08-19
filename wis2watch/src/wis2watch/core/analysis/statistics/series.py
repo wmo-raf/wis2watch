@@ -31,9 +31,10 @@ here; whether the world received it is the propagation report's question.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from django.db.models import Count, Q, Sum
+from django.db.models.functions import ExtractHour
 
 from ...models import DailyStationRollup, HourlyRollup, MessageSource
 from ..windows import Grain
@@ -109,6 +110,11 @@ class WindowTotals:
     messages_total: int
     unattributed_messages_total: int
 
+
+#: How many hours a day has, which is how many buckets the hour-of-day
+#: profile carries. Named rather than spelled 24 in four places, because the
+#: profile is dense and every one of them has to agree.
+HOURS_IN_DAY = 24
 
 #: How long one bucket of each grain lasts.
 BUCKET_LENGTH = {
@@ -342,3 +348,54 @@ def _per_active_station(messages, stations):
         return None
 
     return round(messages / stations, 2)
+
+
+def hour_of_day_profile(node, since, until):
+    """Message volume folded onto the 24-hour clock, over a whole window.
+
+    The one series on the tab in raw message volume, and it is where the
+    synoptic rhythm lives -- the hourly chart gave that up when its unit
+    became distinct stations, and coverage per hour says nothing about
+    whether a centre publishes on the synoptic hours.
+
+    Read from the hourly rollups directly rather than from a third derived
+    layer, and the leading columns of ``(node, -hour, station)`` are what
+    makes that affordable: this is the one long-window query on the tab, and
+    it is a sum of one column over a node's range of hours rather than a
+    distinct count over the datasets under them. Distinct stations per
+    hour-of-day over ninety days is the query the daily table exists to
+    avoid; this is not that query.
+
+    The window includes the UTC day in progress, so the hours it has reached
+    are summed over one day more than the hours it has not. That is what "over
+    the window" means and it is not corrected here -- dropping today would put
+    this total out of step with ``messages_total`` beside it -- but it is a
+    real lean at the shortest daily window, and the panel names it.
+
+    The fold is in UTC and says so, rather than leaning on ``TIME_ZONE``.
+    ``ExtractHour`` reads the active timezone by default, so a deployment set
+    to anything but UTC would silently move every synoptic peak by its own
+    offset -- and a UTC test database would never notice.
+
+    Args:
+        node: the centre to count for.
+        since: the start of the window.
+        until: the exclusive end of it.
+
+    Returns:
+        list[int]: 24 message counts, indexed by UTC hour, zero-filled.
+    """
+    counted = {
+        row["utc_hour"]: row["messages"]
+        for row in HourlyRollup.objects.filter(
+            node=node,
+            source__source_type=MessageSource.GLOBAL_BROKER,
+            hour__gte=since,
+            hour__lt=until,
+        )
+        .annotate(utc_hour=ExtractHour("hour", tzinfo=timezone.utc))
+        .values("utc_hour")
+        .annotate(messages=Sum("message_count"))
+    }
+
+    return [counted.get(hour, 0) for hour in range(HOURS_IN_DAY)]
