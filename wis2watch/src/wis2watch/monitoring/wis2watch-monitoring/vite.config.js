@@ -43,7 +43,15 @@ export default defineConfig({
                 // means every rebuild adds a file and orphans the last one,
                 // and orphaned bundles are how a page ends up served by code
                 // nobody can find in the tree.
-                chunkFileNames: 'assets/[name].js',
+                //
+                // Pinned to a literal rather than `[name]` for the same
+                // reason. Rollup names a shared chunk after whichever module
+                // inside it it likes, so the chunk was `index.js` until #76
+                // shared one small file between the islands and it silently
+                // became `theme.js` -- a rename is a new committed file and
+                // an orphaned old one, which is the hazard above arriving by
+                // a door the hash was not guarding.
+                chunkFileNames: 'assets/shared.js',
             },
         },
     },

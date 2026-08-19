@@ -14,13 +14,10 @@
  * the next caller: the value it hands back changes when the theme does, and a
  * component that draws from it inside a `watch` is in step by construction.
  *
- * **Two things move a role, and only one of them is a class.** Wagtail carries
- * an explicit choice as `w-theme-dark` or `w-theme-light` on `<html>`, and its
- * default is `w-theme-system`, under which the operating system decides and
- * the class never changes at all. Watching the class alone leaves the canvas
- * painted in yesterday's colours for every reader who never opened the
- * setting, which is most of them -- the same scar `roles.css` carries in its
- * selectors, for the same reason.
+ * **Two things move a role, and only one of them is a class** -- Wagtail's on
+ * `<html>`, and the operating system under its `w-theme-system` default.
+ * Knowing that is `theme.js`'s job and not this file's; `watchTheme` is the
+ * whole of what this needs from it.
  *
  * Resolved against the host element rather than against `<html>`, because the
  * roles are declared on `.node-statistics` and inherited from there. An
@@ -28,6 +25,8 @@
  * which paints nothing at all.
  */
 import {onBeforeUnmount, onMounted, ref} from 'vue'
+
+import {watchTheme} from '@/theme.js'
 
 /**
  * The named roles, as colour strings that follow the theme.
@@ -41,12 +40,7 @@ import {onBeforeUnmount, onMounted, ref} from 'vue'
 export function useRoles(host, names) {
     const roles = ref({})
 
-    //: The reader's own default: no class of Wagtail's changes when the
-    //: operating system flips this, so nothing but this would repaint.
-    const system = window.matchMedia('(prefers-color-scheme: dark)')
-
-    let observer = null
-    let queued = false
+    let stopWatchingTheme = null
 
     function read() {
         if (!host.value) {
@@ -60,40 +54,15 @@ export function useRoles(host, names) {
         )
     }
 
-    /**
-     * Read the roles again on the next frame.
-     *
-     * A frame late rather than at once, and coalesced: a theme flip is a class
-     * swap on `<html>` that the observer may report more than once, and the
-     * values wanted are the ones that survive the whole swap.
-     */
-    function refresh() {
-        if (queued) {
-            return
-        }
-
-        queued = true
-        requestAnimationFrame(() => {
-            queued = false
-            read()
-        })
-    }
-
     onMounted(() => {
         read()
 
-        observer = new MutationObserver(refresh)
-        observer.observe(document.documentElement, {
-            attributes: true,
-            attributeFilter: ['class'],
-        })
-
-        system.addEventListener('change', refresh)
+        stopWatchingTheme = watchTheme(read)
     })
 
     onBeforeUnmount(() => {
-        observer?.disconnect()
-        system.removeEventListener('change', refresh)
+        stopWatchingTheme?.()
+        stopWatchingTheme = null
     })
 
     return roles

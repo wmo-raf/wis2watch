@@ -42,12 +42,13 @@
 </template>
 
 <script setup>
-import {ref, onMounted, watch, computed} from 'vue'
+import {ref, onMounted, onBeforeUnmount, watch, computed} from 'vue'
 import maplibregl from 'maplibre-gl'
-import 'maplibre-gl/dist/maplibre-gl.css'
 import Card from 'primevue/card'
 import Badge from 'primevue/badge'
 import Message from 'primevue/message'
+
+import {createBaseMap} from '@/basemap.js'
 
 const props = defineProps({
   nodesByCountry: {
@@ -122,8 +123,15 @@ const statusText = computed(() => {
   }
 })
 
+let teardownMap = null
+
 onMounted(() => {
   initMap()
+})
+
+onBeforeUnmount(() => {
+  teardownMap?.()
+  teardownMap = null
 })
 
 watch(() => props.nodesByCountry, (newVal) => {
@@ -139,18 +147,20 @@ watch(() => props.selectedNodeId, (nodeId) => {
   }
 })
 
+// The basemap, its controls and the theme flip all live in the helper. The
+// markers below are DOM overlays rather than map layers, so they ride over a
+// style change untouched -- but the helper's `transformStyle` is what keeps
+// that true for anything this map ever adds as a real source or layer.
 const initMap = () => {
-  map.value = new maplibregl.Map({
-    container: mapContainer.value,
-    style: 'https://geoserveis.icgc.cat/contextmaps/icgc_mapa_base_gris_simplificat.json',
+  const {map: baseMap, ready, destroy} = createBaseMap(mapContainer.value, {
     center: [20, 10],
     zoom: 2
   })
 
-  map.value.addControl(new maplibregl.FullscreenControl(), "bottom-right")
-  map.value.addControl(new maplibregl.NavigationControl({showCompass: false}), "bottom-right")
+  map.value = baseMap
+  teardownMap = destroy
 
-  map.value.on('load', () => {
+  ready.then(() => {
     console.log('🗺️ Map loaded')
     updateMarkers()
   })
