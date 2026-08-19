@@ -28,7 +28,9 @@ import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
  * @param {import('vue').Ref<number>} count - how many rows there are in all.
  * @param {number} rowHeight - how tall every one of them is, in pixels.
  * @param {number} overscan - how many rows to draw beyond each edge.
- * @returns the element refs to bind, the slice to draw, and the two spacers.
+ * @returns {{viewport: object, header: object, first: object, end: object,
+ *     onScroll: function, reset: function, topPad: object, bottomPad: object}}
+ *     the element refs to bind, the slice to draw, and the two spacers.
  */
 export function useVirtualRows(count, rowHeight, overscan = 8) {
     //: The scrolling box, and the header inside it whose height the rows
@@ -102,7 +104,8 @@ export function useVirtualRows(count, rowHeight, overscan = 8) {
         return Math.max(0, Math.min(count.value, Math.floor(above) - overscan))
     })
 
-    const last = computed(() => {
+    //: One past the last row drawn, so that it slices.
+    const end = computed(() => {
         const fits = Math.ceil(viewportHeight.value / rowHeight) + overscan * 2
 
         return Math.min(count.value, first.value + fits)
@@ -112,13 +115,13 @@ export function useVirtualRows(count, rowHeight, overscan = 8) {
         viewport,
         header,
         first,
-        last,
+        end,
         onScroll,
         reset,
         //: The height of everything above the drawn rows, and below them.
         //: Held open by a spacer each, so the scrollbar measures the whole
         //: population rather than the handful of rows on screen.
         topPad: computed(() => first.value * rowHeight),
-        bottomPad: computed(() => Math.max(0, count.value - last.value) * rowHeight),
+        bottomPad: computed(() => Math.max(0, count.value - end.value) * rowHeight),
     }
 }

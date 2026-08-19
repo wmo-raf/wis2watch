@@ -57,7 +57,7 @@
  */
 import {computed} from 'vue'
 
-import {presenceState, presenceTitle} from './presence.js'
+import {grainOf, presenceState, presenceTitle} from './presence.js'
 
 const props = defineProps({
   /** What the station was heard doing in each bucket, positional and dense. */
@@ -89,10 +89,14 @@ const props = defineProps({
     type: Number,
     required: true
   },
-  /** How tall the row is. Fixed, and the same for every row on the page. */
+  /**
+   * How tall the row is, in pixels. Required rather than defaulted, because
+   * the row height belongs to the table -- it is what the virtual list counts
+   * in -- and a default here would be a second copy of it, free to drift.
+   */
   height: {
     type: Number,
-    default: 14
+    required: true
   },
   /** What to call the station in the label a screen reader is given. */
   name: {
@@ -134,7 +138,7 @@ const openAt = computed(() => props.buckets.findIndex((bucket) => bucket.partial
 const label = computed(() => {
   const station = props.name || 'This station'
   const silent = cells.value.filter((cell) => cell.state === 'silent').length
-  const period = props.grain === 'day' ? 'days' : 'hours'
+  const period = grainOf(props.grain).period
 
   if (!silent) {
     return `${station}: heard in every one of ${cells.value.length} ${period}`

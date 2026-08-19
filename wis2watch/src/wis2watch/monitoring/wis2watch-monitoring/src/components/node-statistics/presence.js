@@ -20,7 +20,13 @@
  * 24 would draw every station on the page as thin every morning -- the exact
  * false alarm the open-bucket mark exists to prevent, reproduced in the fill.
  */
-import {formatDayLong, formatHourLong} from './charts/plot.js'
+import {
+    formatCount,
+    formatDay,
+    formatDayLong,
+    formatHour,
+    formatHourLong,
+} from './charts/plot.js'
 
 //: Below this much of a bucket, a station was heard *thinly* rather than
 //: fully. **Provisional.** #48 drew it at 90 days against seeded data and it
@@ -30,8 +36,95 @@ import {formatDayLong, formatHourLong} from './charts/plot.js'
 //: place rather than in every call site.
 export const THIN_FRACTION = 0.3
 
-//: How many hours a whole UTC day holds. The daily ceiling, spelled once.
+//: How many hours a whole UTC day holds, and how long an hour is. The daily
+//: ceiling and the arithmetic that shortens it, each spelled once.
 const HOURS_PER_DAY = 24
+const MS_PER_HOUR = 3_600_000
+
+/**
+ * Everything about a matrix cell that follows from the size of its bucket.
+ *
+ * A map rather than a branch, in the same shape as the server's own
+ * `PRESENCE_FOR_GRAIN` and for the same reason: the grain decides the
+ * ceiling, the wording and the formatter, and three answers to one question
+ * spelled in three `if`s is three places to forget one of them.
+ *
+ * `ceiling` is null where the grain has none. An hour carries messages, and
+ * there is no number of messages an hour is "full" at, so the scale there is
+ * the row's own busiest hour -- the convention the sparkline beside it
+ * already uses, and for the same reason: station traffic is heavy-tailed, and
+ * one dominant reporter scaled across the column would draw every other
+ * station as thin.
+ */
+export const GRAINS = {
+    day: {
+        //: What a run of these buckets is called, for the label a screen
+        //: reader is given.
+        period: 'days',
+        //: The words beside each colour, and the sentence that says what
+        //: the pale one is measured against. Per grain rather than one
+        //: template with the unit swapped in, because the middle state is not
+        //: the same claim at both: a day is judged against the clock, and an
+        //: hour against the station's own busiest.
+        legend: {
+            full: 'Heard for most of the day',
+            thin: 'Heard, but for a small part of the day',
+        },
+        scale:
+            'A cell is judged against the 24 hours of its day, so a pale one is'
+            + ' a station that was heard for only a little of it.',
+        long: formatDayLong,
+        short: formatDay,
+        ceiling: (bucket, now) => {
+            if (!bucket.partial) {
+                return HOURS_PER_DAY
+            }
+
+            // Never below one hour and never above a whole day: an axis read
+            // a moment after midnight would otherwise divide by nearly zero
+            // and call a station that has said nothing yet full.
+            const elapsed = Math.floor((now - Date.parse(bucket.start)) / MS_PER_HOUR)
+
+            return Math.min(HOURS_PER_DAY, Math.max(1, elapsed))
+        },
+        heard: (value, ceiling) => `heard in ${value} of ${ceiling} hours`,
+        silent: 'silent all day: nothing heard from this station',
+    },
+    hour: {
+        period: 'hours',
+        bucket: 'the hour',
+        legend: {
+            full: "Heard at this station's own usual rate",
+            thin: "Heard, but well below this station's busiest hour",
+        },
+        scale:
+            "A cell is judged against this station's own busiest hour \u2014 the"
+            + ' same scale the trace beside it is drawn to, and for the same'
+            + ' reason: station traffic is heavy-tailed, and one dominant'
+            + ' reporter scaled across the column would draw every other'
+            + ' station as thin.',
+        long: formatHourLong,
+        short: formatHour,
+        ceiling: null,
+        heard: (value) => `${formatCount(value)} messages`,
+        silent: 'silent: no messages this hour',
+    },
+}
+
+/**
+ * What a grain means, defaulting to the day.
+ *
+ * The default is not defensive tidiness: the rows and the summary arrive on
+ * separate requests, so this is asked the question before the window has been
+ * echoed back, and a matrix that throws in that moment takes the table with
+ * it.
+ *
+ * @param {string} grain - the server's own spelling, `day` or `hour`.
+ * @returns {object} the entry of `GRAINS` that grain names.
+ */
+export function grainOf(grain) {
+    return GRAINS[grain] || GRAINS.day
+}
 
 /**
  * What a cell says, given what was heard in it and what the bucket could hold.
@@ -51,17 +144,10 @@ export function presenceState(value, ceiling) {
 /**
  * The ceiling each bucket of a window is judged against, or null at hourly grain.
  *
- * A daily bucket has a ceiling that is a fact about the clock -- 24 hours,
- * and fewer for the day still in progress -- so it is the same for every row
- * and is worked out once for the whole table rather than a thousand times.
- *
- * An hourly bucket has no such ceiling: it carries messages, and there is no
- * number of messages an hour is "full" at. So the scale is the row's own
- * busiest hour, which is the convention the sparkline beside it already uses
- * and for the same reason -- station traffic is heavy-tailed, and one
- * dominant reporter scaled across the column would draw every other station
- * as thin. Null here says "each row against itself", which is a per-row
- * answer and cannot be given by this function.
+ * A daily bucket's ceiling is a fact about the clock, so it is the same for
+ * every row and is worked out once for the whole table rather than a thousand
+ * times. Null says "each row against its own busiest bucket", which is a
+ * per-row answer and cannot be given by this function.
  *
  * @param {{start: string, partial: boolean}[]} buckets - the window's axis.
  * @param {string} grain - `day` or `hour`, the server's own spelling.
@@ -69,24 +155,15 @@ export function presenceState(value, ceiling) {
  * @returns {number[]|null} a ceiling per bucket, or null at hourly grain.
  */
 export function bucketCeilings(buckets, grain, asOf) {
-    if (grain !== 'day') {
+    const ceiling = grainOf(grain).ceiling
+
+    if (!ceiling) {
         return null
     }
 
     const now = asOf ? Date.parse(asOf) : Date.now()
 
-    return buckets.map((bucket) => {
-        if (!bucket.partial) {
-            return HOURS_PER_DAY
-        }
-
-        // Never below one hour, and never above a whole day: an axis read a
-        // moment after midnight would otherwise divide by nearly zero and
-        // call a station that has said nothing yet "full".
-        const elapsed = (now - Date.parse(bucket.start)) / 3_600_000
-
-        return Math.min(HOURS_PER_DAY, Math.max(1, Math.floor(elapsed) || 1))
-    })
+    return buckets.map((bucket) => ceiling(bucket, now))
 }
 
 //: How wide one cell is drawn, by how many of them there are. Fixed pixels
@@ -102,8 +179,13 @@ const CELL_WIDTHS = [
 //: 450px grid, which is a band a reader can take in without scrolling.
 const NARROW_CELL = 5
 
-/** How wide one bucket is drawn, in real pixels. */
-export function cellWidth(count) {
+/**
+ * How wide one bucket is drawn, in real pixels.
+ *
+ * @param {number} count - how many buckets the window carries.
+ * @returns {number} the width of one cell.
+ */
+export function cellWidthFor(count) {
     return (CELL_WIDTHS.find(({upTo}) => count <= upTo) || {width: NARROW_CELL}).width
 }
 
@@ -122,27 +204,17 @@ export function cellWidth(count) {
  * @returns {string} the sentence.
  */
 export function presenceTitle(bucket, value, ceiling, grain) {
-    const start = new Date(bucket.start)
-    const when = grain === 'day' ? formatDayLong(start) : formatHourLong(start)
-    const state = presenceState(value, ceiling)
+    const words = grainOf(grain)
     // Said in the tooltip as well as drawn, because the three states are a
     // colour, and a colour is never the only carrier of a finding here.
-    const thin = state === 'thin' ? ', thinly' : ''
+    const thin = presenceState(value, ceiling) === 'thin' ? ', thinly' : ''
+    const heard = value ? `${words.heard(value, ceiling)}${thin}` : words.silent
+    // Driven by the bucket rather than by the grain: an hourly axis never
+    // carries an unfinished bucket, because the hour in progress is left out
+    // of the window rather than served half-counted.
+    const counting = bucket.partial
+        ? ` — the day is still being counted, ${ceiling}h of it so far`
+        : ''
 
-    if (grain === 'day') {
-        const heard = value
-            ? `heard in ${value} of ${ceiling} hours${thin}`
-            : 'silent all day: nothing heard from this station'
-        const counting = bucket.partial
-            ? ` — the day is still being counted, ${ceiling}h of it so far`
-            : ''
-
-        return `${when} — ${heard}${counting}`
-    }
-
-    const heard = value
-        ? `${value.toLocaleString()} messages${thin}`
-        : 'silent: no messages this hour'
-
-    return `${when} — ${heard}`
+    return `${words.long(new Date(bucket.start))} — ${heard}${counting}`
 }

@@ -1,5 +1,5 @@
 <template>
-  <div class="stations">
+  <div class="stations" :style="{'--stations-row': `${ROW_HEIGHT}px`}">
     <div class="stations__controls">
       <label class="stations__field">
         <span class="stations__field-label">Search</span>
@@ -86,14 +86,14 @@
                 <span aria-hidden="true">{{ arrow(column.key) }}</span>
               </button>
             </th>
-            <th scope="col" class="stations__cell--spark">
+            <th scope="col">
               24h activity
               <span class="stations__column-note">shape, flat 24h</span>
             </th>
             <!-- The matrix's own heading, and the only axis it has. Both ends
                  are placed off the same cell width the cells are drawn at, so
                  the labels cannot come to sit over the wrong column. -->
-            <th scope="col" class="stations__cell--matrix">
+            <th scope="col">
               {{ windowLabel }} &mdash; heard, thinly, or silent
               <span class="stations__column-note stations__axis" :style="{width: `${matrixWidth}px`}">
                 <span>{{ axisStart }}</span>
@@ -179,7 +179,7 @@
       <template v-if="buckets.length">
         The cells on the right are one {{ grain }} each, oldest at the left, and
         are read across a row for when a station stopped and down the column for
-        whether the same stations stop together.
+        whether the same stations stop together. {{ grainWords.scale }}
         <template v-if="openBucket">
           The newest column is the UTC day still being counted, marked with the
           same open edge the charts above use, and it is judged against the
@@ -231,8 +231,8 @@ import {computed, watch} from 'vue'
 
 import PresenceCells from './PresenceCells.vue'
 import Sparkline from './Sparkline.vue'
-import {formatCount, formatDay, formatHour, formatInstant, formatQuiet} from './charts/plot.js'
-import {bucketCeilings, cellWidth as widthOfCell} from './presence.js'
+import {formatCount, formatInstant, formatQuiet} from './charts/plot.js'
+import {bucketCeilings, cellWidthFor, grainOf} from './presence.js'
 import {STANDINGS, STANDING_LABEL, STANDING_RANK} from './standings.js'
 import {useVirtualRows} from './useVirtualRows.js'
 
@@ -416,25 +416,28 @@ const shown = computed(() => {
 
 const hidden = computed(() => props.stations.length - shown.value.length)
 
-const {viewport, header, first, last, onScroll, reset, topPad, bottomPad} =
+const {viewport, header, first, end, onScroll, reset, topPad, bottomPad} =
     useVirtualRows(computed(() => shown.value.length), ROW_HEIGHT)
 
 //: The rows on screen. Keyed by station id in the template, so scrolling
 //: moves the rows that stayed rather than repainting a screenful of matrix
 //: cells that have not changed.
-const drawn = computed(() => shown.value.slice(first.value, last.value))
+const drawn = computed(() => shown.value.slice(first.value, end.value))
 
 // Back to the top whenever the list underneath changes shape. Staying at
 // pixel 4,000 of a list that just became forty rows long is a panel that
 // looks empty, and the reader who narrowed it has not moved.
+// The rows themselves are in that list: a window change re-reads every one
+// of them, and pixel 4,000 of the last window's population is not a place a
+// reader chose to be in this one.
 watch(
-    () => [props.search, props.standing, props.sort, props.direction],
+    () => [props.stations, props.search, props.standing, props.sort, props.direction],
     () => reset()
 )
 
 //: How wide one cell is drawn, decided once here rather than by each row, so
 //: that a thousand rows cannot disagree about where a column is.
-const cellWidth = computed(() => widthOfCell(props.buckets.length))
+const cellWidth = computed(() => cellWidthFor(props.buckets.length))
 
 const matrixWidth = computed(() => cellWidth.value * props.buckets.length)
 
@@ -444,35 +447,33 @@ const ceilings = computed(() => bucketCeilings(props.buckets, props.grain, props
 
 const openBucket = computed(() => props.buckets.some((bucket) => bucket.partial))
 
+//: What this grain calls its buckets, its scale and its legend, from the one
+//: map the cells and their tooltips are drawn from.
+const grainWords = computed(() => grainOf(props.grain))
+
 function axisLabel(bucket) {
   if (!bucket) {
     return ''
   }
 
-  const start = new Date(bucket.start)
-
-  if (props.grain !== 'day') {
-    return formatHour(start)
-  }
-
-  return bucket.partial ? 'today' : formatDay(start)
+  // On the partial bucket, the word rather than the date: it is the bucket a
+  // reader looks for first, and "today" is what the charts' own axis calls it.
+  return bucket.partial ? 'today' : grainWords.value.short(new Date(bucket.start))
 }
 
 const axisStart = computed(() => axisLabel(props.buckets[0]))
 const axisEnd = computed(() => axisLabel(props.buckets[props.buckets.length - 1]))
 
-//: The three states in words. The middle one names the unit rather than the
-//: threshold, because "under 30%" is a number a reader would then have to
-//: convert; the tooltip on each cell carries the figures.
-const legend = computed(() => {
-  const of = props.grain === 'day' ? 'the day' : 'the hour'
-
-  return [
-    {key: 'full', label: `Heard for most of ${of}`},
-    {key: 'thin', label: `Heard, but for a small part of ${of}`},
-    {key: 'silent', label: 'Silent — nothing heard at all'},
-  ]
-})
+//: The three states in words. They say what the middle state is measured
+//: against rather than what the threshold is, because "under 30%" is a number
+//: a reader would then have to convert, and because a day and an hour are not
+//: measured against the same thing at all -- the tooltip on each cell carries
+//: the figures either way.
+const legend = computed(() => [
+  {key: 'full', label: grainWords.value.legend.full},
+  {key: 'thin', label: grainWords.value.legend.thin},
+  {key: 'silent', label: 'Silent — nothing heard at all'},
+])
 
 function label(standing) {
   return STANDING_LABEL[standing] || standing
@@ -630,8 +631,8 @@ function arrow(key) {
    what the virtual list counts in, so a cell that grows by a padding or a
    line-height puts every row on screen at the wrong offset. */
 .stations__table tbody td {
-  height: 14px;
-  line-height: 14px;
+  height: var(--stations-row);
+  line-height: var(--stations-row);
   overflow: hidden;
   text-overflow: ellipsis;
 }
