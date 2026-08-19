@@ -1,0 +1,84 @@
+# The development overlay. It is not applied unless you ask for it: set
+#
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml
+#
+# in your .env. Production never sets that line, so this file cannot be picked
+# up by a deployment that merely has it checked out.
+#
+# What it buys: every Python change under wis2watch/src takes effect on save,
+# in all five services. See docs/development.md for the whole loop, including
+# the Vue side, which runs on the host rather than in here.
+
+# What every Python service needs in order to reload. In one anchor because a
+# service that had only part of it is the confusing case -- code that reloads
+# but under production settings, or dev settings without the mount that makes
+# them reach anything.
+x-dev-environment: &dev-environment
+  # The dev settings module, not production. production.py hardcodes
+  # DEBUG = False after reading the environment, so selecting this module --
+  # not setting a variable -- is the only way to turn DEBUG on.
+  DJANGO_SETTINGS_MODULE: wis2watch.config.settings.dev
+  # dev.py sets DEBUG = True, but only after base.py has read this and derived
+  # VUE_FRONTEND_USE_DEV_SERVER from it. Setting it here keeps base's DEBUG and
+  # the effective DEBUG in agreement instead of quietly disagreeing.
+  DEBUG: "True"
+  # Host filesystem events do not reach a bind-mounted container reliably.
+  # See autoreload_exec in docker-entrypoint.sh.
+  WATCHFILES_FORCE_POLLING: "true"
+  # Bytecode belongs to the image, not to your working copy. Without this the
+  # container scatters __pycache__ through the mounted source tree.
+  PYTHONDONTWRITEBYTECODE: "1"
+
+# Only src. requirements.txt and pyproject.toml are installed at build time, so
+# a change to either needs a rebuild whether it is mounted or not. The editable
+# install points at this exact path, so imports resolve unchanged. The static
+# and media mounts from the base file sit deeper inside this one and still win.
+x-dev-source: &dev-source
+  - ./wis2watch/src:/wis2watch/app/src
+
+services:
+  wis2watch:
+    # runserver, which reloads itself. Daphne is first in INSTALLED_APPS, so
+    # this serves ASGI and /ws/ just as gunicorn does.
+    command: django-dev
+    # django-dev hands you a shell whose history holds the runserver command:
+    # `docker compose attach wis2watch`, then ctrl-c stops the server and
+    # leaves you inside the container. Also what makes breakpoint() usable.
+    tty: true
+    stdin_open: true
+    environment:
+      <<: *dev-environment
+      # Nothing reads the collected files in dev: with DEBUG on, urls.py serves
+      # static from the finders and media from MEDIA_ROOT. Collecting them on
+      # every start is startup latency spent for nobody.
+      COLLECT_STATICFILES_ON_STARTUP: "false"
+      # Whether the Vue islands come from the Vite dev server on the host or
+      # from the bundles committed under monitoring/static/vue. Defaults on,
+      # because DEBUG is on; set it False in .env if you are not running node.
+      VUE_FRONTEND_USE_DEV_SERVER: ${VUE_FRONTEND_USE_DEV_SERVER:-True}
+    volumes: *dev-source
+    # Replaces the base file's random host port rather than adding to it: dev
+    # is browsed at a fixed http://localhost:8000/, which is also the origin
+    # the Vite dev server allows by default. Not through the nginx proxy --
+    # that serves /static/ from collectstatic output, which is stale the moment
+    # you edit anything. docs/development.md says how to check nginx on purpose.
+    ports: !override
+      - "8000:8000"
+
+  wis2watch_celery_worker:
+    command: celery-worker-dev
+    environment: *dev-environment
+    volumes: *dev-source
+
+  wis2watch_celery_beat:
+    command: celery-beat-dev
+    environment: *dev-environment
+    volumes: *dev-source
+
+  # Still one, still the only owner of the broker connections. Reloading it
+  # drops and remakes those connections, which is the cost of editing the
+  # supervisor while it runs.
+  wis2watch_ingest:
+    command: ingest-dev
+    environment: *dev-environment
+    volumes: *dev-source

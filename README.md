@@ -73,3 +73,5 @@ in `.env`, empty for all of Africa.
 
 - [WIS2 data flow](docs/wis2-data-flow.md) -- the Global Services and the
   journey a notification takes through them.
+- [Development](docs/development.md) -- running the stack so that a change
+  takes effect when you save it, rather than when you rebuild.
