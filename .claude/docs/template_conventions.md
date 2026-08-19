@@ -97,7 +97,8 @@ Two separate CSS contexts — use the right tokens for each:
 Key `--w-color-*` tokens for admin templates:
 
 - Borders: `--w-color-border-furniture`
-- Muted text / secondary: `--w-color-grey-400`
+- Muted text / secondary: `--w-color-grey-400`, `--w-color-text-meta` (the semantic one — prefer it
+  for supporting prose and figure captions)
 - Subtle backgrounds / Panel headers bg: `--w-color-grey-50`, `--w-color-grey-100`
 - Menus: `--w-color-surface-menus`, `--w-color-surface-field`, `--w-color-surface-page`
 - Labels / primary text: `--w-color-text-label`

@@ -29,7 +29,8 @@
     <div id="node-statistics"
          data-node-id="{{ node.id }}"
          data-node-name="{{ node.name }}"
-         data-centre-id="{{ node.centre_id }}">
+         data-centre-id="{{ node.centre_id }}"
+         data-summary-url="{% url 'node_statistics_summary' node.id %}">
     </div>
 {% endblock %}
 

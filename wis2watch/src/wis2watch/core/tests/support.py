@@ -15,10 +15,11 @@ import socket
 from datetime import datetime, timezone
 from unittest import mock
 
+from django.contrib.gis.geos import Point
 from django.test import SimpleTestCase
 
 from ..interpretation import parse_topic
-from ..models import MessageSource
+from ..models import MessageSource, Station, StationSource
 
 FIXTURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
@@ -126,6 +127,71 @@ def origin_api(node, **kwargs):
         centre_id=node.centre_id,
         **kwargs,
     )
+
+
+#: Somewhere to put a station that has coordinates. Where it is does not
+#: matter to anything that seeds one; that it can be placed on a map at all is
+#: the only thing any of these tests count.
+SOMEWHERE = Point(36.75, -1.30, 1798.0, srid=4326)
+
+
+def declare_station(node, wigos_id, *, location=SOMEWHERE, **kwargs):
+    """A node's own registry saying it operates a station.
+
+    Args:
+        node: the centre declaring it.
+        wigos_id: the station's WIGOS identifier.
+        location: where it is, or None for a station nothing can place.
+        **kwargs: anything else the declaration carries, such as the names
+            the operator uses for it.
+
+    Returns:
+        Station: the station, created if this is the first source to name it.
+    """
+    station, _ = Station.objects.get_or_create(
+        wigos_id=wigos_id, defaults={"location": location}
+    )
+
+    StationSource.objects.create(
+        station=station,
+        source_type=StationSource.NODE_REGISTRY,
+        node=node,
+        **kwargs,
+    )
+
+    return station
+
+
+def observe_station(node, wigos_id, *, last_seen, location=SOMEWHERE):
+    """A station heard transmitting under a centre's topics.
+
+    Separate from the declaration on purpose, and both take the node: a
+    station may transmit under more than one centre's topics, and every
+    surface that reads one is meant to report the centre's own observation
+    rather than the station's latest anywhere. Seeding the two apart is what
+    lets a test say so.
+
+    Args:
+        node: the centre that was heard publishing for it.
+        wigos_id: the station's WIGOS identifier.
+        last_seen: when this centre was last heard publishing for it.
+        location: where it is, or None for a station nothing can place.
+
+    Returns:
+        Station: the station, created if this is the first source to name it.
+    """
+    station, _ = Station.objects.get_or_create(
+        wigos_id=wigos_id, defaults={"location": location}
+    )
+
+    StationSource.objects.create(
+        station=station,
+        source_type=StationSource.OBSERVED,
+        node=node,
+        last_seen=last_seen,
+    )
+
+    return station
 
 
 class NetworkAccessInTest(AssertionError):
