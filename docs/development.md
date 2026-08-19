@@ -211,19 +211,24 @@ a production host you run that command directly.
 docker compose exec wis2watch python manage.py dbbackup
 ```
 
-A restore needs the writers stopped first. The connector empties the database
-before it replays the dump, and the services reconnect to the empty one and
-carry on writing -- so a row the stack writes during the restore collides with
-the same primary key arriving from the dump, and `pg_restore` fails at the end
-building the index. `wis2watch` itself stays up because it is the container
-being exec'd into; stopping the proxy is what leaves it idle.
+A restore needs the whole stack stopped first, `wis2watch` included, which is
+why it runs in a container of its own rather than through `exec`:
 
 ```bash
-docker compose stop wis2watch_celery_worker wis2watch_celery_beat \
-                    wis2watch_ingest wis2watch_web_proxy
-docker compose exec wis2watch python manage.py dbrestore --i-know-this-drops-the-database
+docker compose stop wis2watch wis2watch_celery_worker \
+                    wis2watch_celery_beat wis2watch_ingest wis2watch_web_proxy
+docker compose run --rm --no-deps wis2watch manage dbrestore --i-know-this-drops-the-database
 docker compose start
 ```
+
+`dbrestore` checks this rather than trusting it, and names whatever it finds
+still connected. The reason is that the connector empties the database before
+it replays the dump, and nothing that was connected stays away: `WITH (FORCE)`
+closes those sessions, and the services reopen them within the second, against
+a database that is now empty and taking writes. A celery tick or an ingest
+write then takes a primary key the dump is about to bring, and `pg_restore`
+fails building that index at the very end -- naming a row written an hour
+earlier, which is nobody's first guess.
 
 There is deliberately no `make` target for this. A production deployment drives
 `docker compose` itself, and a friendlier name for the restore would put the

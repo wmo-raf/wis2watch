@@ -163,12 +163,24 @@ attach: check-dev ## Attach to runserver -- ctrl-c stops it, ctrl-p ctrl-q detac
 db-dump: check-dev ## Dump the database to docker/backup/
 	$(MANAGE) dbbackup
 
+# Not $(MANAGE): that is `compose exec`, which needs the web container running,
+# and `dbrestore` refuses to start while anything else holds a connection to
+# the database it is about to empty. So the stack comes down, the restore runs
+# in a container of its own, and the stack goes back up -- back up even when
+# the restore failed, which is why this is one shell line keeping the status.
+#
 # No --noinput: the prompt is the second of the two things standing between a
 # mistyped environment and a destroyed database. The flag is the first, and it
 # is spelled out rather than abbreviated on purpose. See docs/development.md.
+WRITERS = wis2watch wis2watch_celery_worker wis2watch_celery_beat wis2watch_ingest wis2watch_web_proxy
+
 .PHONY: db-restore
 db-restore: check-dev ## Restore the newest dump -- DROPS the current database first
-	$(MANAGE) dbrestore --i-know-this-drops-the-database
+	@$(COMPOSE) stop $(WRITERS); \
+	$(COMPOSE) run --rm --no-deps wis2watch manage dbrestore --i-know-this-drops-the-database; \
+	status=$$?; \
+	$(COMPOSE) start; \
+	exit $$status
 
 # ======================================================
 # HELP
