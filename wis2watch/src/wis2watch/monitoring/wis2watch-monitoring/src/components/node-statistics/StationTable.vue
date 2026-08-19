@@ -84,6 +84,40 @@
       </template>
     </p>
 
+    <!-- The whole of what is listed below, at half a pixel a station. It sits
+         under the filter rather than above it because it is drawn from what
+         the filter left: the rows the table is showing, in the order it is
+         showing them. Above the controls it would look like a fixed picture
+         of the centre, which is exactly the reading #66 recorded as a defect
+         when the prototype's wall ignored the filter. -->
+    <template v-if="shown.length && buckets.length">
+      <NavigatorWall
+          :stations="shown"
+          :buckets="buckets"
+          :grain="grain"
+          :ceilings="ceilings"
+          :window-label="windowLabel"
+      />
+
+      <!-- The wall's own two ends, in the same words the matrix's header
+           carries and drawn over the wall's full width rather than the
+           matrix's: the two surfaces run the same buckets in the same order,
+           but the wall spreads them across the panel and the cells do not, so
+           a reader locating a gap in time needs the ends said here too. -->
+      <p class="stations__wall-axis">
+        <span>{{ axisStart }}</span>
+        <span>{{ axisEnd }}</span>
+      </p>
+
+      <p class="stations__wall-note">
+        Every one of the {{ formatCount(shown.length) }} stations listed below,
+        one line each and none of them scrolled past &mdash; the same colours,
+        the same {{ grain }}s and the same order as the rows. It carries no
+        names: read a band or a gap here for <em>where</em> in the list to look,
+        and the rows for which stations they are.
+      </p>
+    </template>
+
     <div v-if="stations.length" ref="viewport" class="stations__scroll" @scroll="onScroll">
       <table class="stations__table">
         <colgroup>
@@ -275,6 +309,16 @@
  * it survives the trip through the address bar and either names a column of
  * this axis or names none of it.
  *
+ * **The navigator wall is the same list at a size no list can be read at.**
+ * The matrix can only ever have about fifty rows on screen, and a centre with
+ * a thousand stations has a finding that lives in all of them at once. So the
+ * wall above the rows draws every station the table is showing at half a pixel
+ * each -- the same vectors, the same order, the same colours -- and it is
+ * drawn from the *filtered* list rather than from the population, because a
+ * wall showing a thousand stations above a table filtered to forty-seven is
+ * two answers to one question. It carries no names and no gestures: it says
+ * where in the list to look, and the rows say what is there.
+ *
  * Any filter has to state what it hid. A count of rows on screen with nothing
  * saying how many there were is the number a reader mistakes for the
  * population -- and the degenerate case is worth saying out loud too: a filter
@@ -284,6 +328,7 @@
 import {computed, watch} from 'vue'
 
 import BucketHeads from './BucketHeads.vue'
+import NavigatorWall from './NavigatorWall.vue'
 import PresenceCells from './PresenceCells.vue'
 import Sparkline from './Sparkline.vue'
 import {formatCount, formatInstant, formatQuiet} from './charts/plot.js'
@@ -721,6 +766,25 @@ function arrow(key) {
   font-size: 0.8rem;
   color: var(--w-color-text-meta);
   margin: 0 0 0.5rem;
+}
+
+/* The wall's two ends, in the type the matrix's own end labels use. */
+.stations__wall-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--w-color-text-meta);
+  margin: 0.15rem 0 0.35rem;
+}
+
+/* What the wall is, under it rather than over it: the picture is the thing a
+   reader looks at first, and a caption above it delays that by a sentence. */
+.stations__wall-note {
+  font-size: 0.75rem;
+  color: var(--w-color-text-meta);
+  margin: 0 0 0.75rem;
+  max-width: 70ch;
 }
 
 /* The table scrolls inside its own panel rather than down the page. Every row
