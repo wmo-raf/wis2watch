@@ -35,6 +35,11 @@
  * its real width by `vector-effect`, so the trace does not thicken as the
  * column does.
  *
+ * `preserveAspectRatio="none"` stretches the 24 hours to whatever width the
+ * column has, so a slope here means nothing in absolute terms -- but every
+ * trace in the column is drawn at one width, and comparing rows down the
+ * column is the only comparison this drawing is for.
+ *
  * **An all-zero row draws on the baseline**, which is the row this component
  * exists for. It is the commonest row on a centre in trouble, and a column of
  * flat silent lines under one heading is the fastest way there is to see a

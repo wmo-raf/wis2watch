@@ -1,12 +1,20 @@
 /**
  * What the four standings are called, in one place for the whole island.
  *
- * The figures block and the station table name the same four things, and two
- * lists of labels is how "Never heard from" in one and "Declared, never heard
- * from" in the other end up on one page describing one number. The Python
- * side has exactly this map for its own surfaces (`StationStanding.LABELS`);
- * this is the client's copy of it, and the values are the API's own strings so
- * a filter, a row and a count are the same vocabulary.
+ * The figures block, the table's rows and its filter name the same four
+ * things, and three lists of labels is how "Never heard from" in one and
+ * "Declared, never heard from" in another end up on one page describing one
+ * number. The *keys* are the API's own strings, so a filter, a row and a count
+ * are the same vocabulary all the way to the server.
+ *
+ * The wording is deliberately not `StationStanding.LABELS`'s, and the reason
+ * is the figures block rather than the table. Those figures cover every
+ * station, declared or not -- a station nothing declares that stopped months
+ * ago counts as gone quiet, not as undeclared -- so Python's "Declared, never
+ * heard from" would be a *wrong* number there rather than a longer one. One
+ * page cannot carry two spellings of one standing, so the shorter wording that
+ * is true of both surfaces wins, and the Python labels stay for the surfaces
+ * that filter by declaration.
  *
  * The order is the server's reading order -- what has stopped first, then what
  * was never declared, then what is working -- so a filter control offers the
@@ -29,8 +37,3 @@ export const STANDING_LABEL = Object.fromEntries(
 export const STANDING_RANK = Object.fromEntries(
     STANDINGS.map(({key}, rank) => [key, rank])
 )
-
-//: The standings that mean nothing has been heard from the station lately.
-//: Named once, as the Python side names it once, because the table marks them
-//: and the map will colour by them.
-export const SILENT = ['never_transmitted', 'gone_quiet']

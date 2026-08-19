@@ -212,32 +212,53 @@
         </p>
       </section>
 
-      <section class="node-statistics__panel">
-        <StationTable
-            v-if="stations"
-            :stations="stations"
-            :search="table.search"
-            :standing="table.standing"
-            :sort="table.sort"
-            :direction="table.direction"
-            :window-label="summary.window.label"
-            :stale-after-hours="summary.stale_after_hours"
-            @choose="refine"
-        />
-
-        <Message v-else-if="stationsError" severity="error" :closable="false">
-          {{ stationsError }}
-        </Message>
-
-        <p v-else class="node-statistics__panel-empty">
-          Reading {{ nodeName }}'s stations one row at a time&hellip;
-        </p>
-      </section>
-
-      <Message severity="secondary" :closable="false">
-        The availability matrix and the map are not drawn yet.
-      </Message>
     </template>
+
+    <!-- Outside the block above, and that is the whole point of it being a
+         second request: the rows arrive on their own and are drawn whether or
+         not the figures did. Everything this panel needs to label itself --
+         the window it was read over, the threshold quiet is judged by -- is
+         echoed on the rows' own payload, so it never reaches into the
+         summary and cannot be taken down with it. -->
+    <section v-if="rows || stationsError" class="node-statistics__panel">
+      <h3 class="node-statistics__panel-heading">
+        Stations, what is broken first
+      </h3>
+      <p class="node-statistics__panel-note">
+        Every station this centre declares or has been heard transmitting for,
+        sorted so that what has stopped is at the top &mdash; the default sort
+        is a filter that hides nothing. Everything here is this centre's own
+        observation: a station may transmit under more than one centre's
+        topics, and what another centre heard is not on this page.
+      </p>
+
+      <StationTable
+          v-if="rows"
+          :stations="rows.stations"
+          :search="table.search"
+          :standing="table.standing"
+          :sort="table.sort"
+          :direction="table.direction"
+          :window-label="rows.window.label"
+          :stale-after-hours="rows.stale_after_hours"
+          @choose="refine"
+      />
+
+      <Message v-else severity="error" :closable="false">
+        {{ stationsError }}
+      </Message>
+    </section>
+
+    <!-- Only once the figures are up: before that the line at the top of the
+         page is already saying the tab is being read, and two of them is one
+         page reporting the same wait twice. -->
+    <p v-else-if="loading && summary" class="node-statistics__state">
+      Reading {{ nodeName }}'s stations one row at a time&hellip;
+    </p>
+
+    <Message v-if="summary" severity="secondary" :closable="false">
+      The availability matrix and the map are not drawn yet.
+    </Message>
   </div>
 </template>
 
@@ -328,12 +349,15 @@ const WINDOW_PARAM = 'window'
 const JSON_ONLY = {headers: {'Accept': 'application/json'}}
 
 const summary = ref(null)
-// Kept apart from the summary rather than merged into it, because the two
+// The rows' whole payload rather than just its list, because the panel labels
+// itself from the frame around them -- the window they were read over, the
+// threshold quiet is judged by. Kept apart from the summary because the two
 // arrive separately and on purpose: the headline figures are read long before
 // a thousand rows and their vectors have crossed the wire, and a page that
 // waits for the rows before drawing the numbers is a page that shows nothing
-// while the numbers are already known.
-const stations = ref(null)
+// while the numbers are already known. Reading the labels off the summary
+// instead would put that independence back: one failure, both panels gone.
+const rows = ref(null)
 const loading = ref(true)
 const error = ref('')
 const stationsError = ref('')
@@ -471,7 +495,7 @@ async function loadSummary() {
   error.value = ''
 
   try {
-    const response = await fetch(asked(props.summaryUrl), JSON_ONLY)
+    const response = await fetch(windowed(props.summaryUrl), JSON_ONLY)
 
     if (!response.ok) {
       throw new Error(await refusal(response))
@@ -495,7 +519,7 @@ async function loadStations() {
   stationsError.value = ''
 
   try {
-    const response = await fetch(asked(props.stationsUrl), JSON_ONLY)
+    const response = await fetch(windowed(props.stationsUrl), JSON_ONLY)
 
     if (!response.ok) {
       throw new Error(`The stations could not be read (${response.status}).`)
@@ -504,14 +528,14 @@ async function loadStations() {
     // All of them, and never merged into what is already on screen: a window
     // change re-reads every row, and rows left over from the last window
     // would carry its message counts under this window's label.
-    stations.value = (await response.json()).stations
+    rows.value = await response.json()
   } catch (failure) {
     stationsError.value = failure.message || 'The stations could not be read.'
   }
 }
 
 /** One of the tab's endpoints, asked over the window the reader chose. */
-function asked(endpoint) {
+function windowed(endpoint) {
   const url = new URL(endpoint, window.location.origin)
 
   if (windowKey.value) {

@@ -51,8 +51,48 @@ from ...models import HourlyRollup, MessageSource
 from ..staleness import default_stale_after_hours
 from ..stations import node_stations
 from ..windows import Grain, Window
-from .series import BUCKET_LENGTH, ROLLUP_FOR_GRAIN, Bucket, bucket_axis
-from .summary import FIXED_WINDOW_KEY, WindowBounds
+from .series import (
+    BUCKET_LENGTH,
+    FIXED_WINDOW_KEY,
+    ROLLUP_FOR_GRAIN,
+    Bucket,
+    WindowBounds,
+    bucket_axis,
+)
+
+
+@dataclass(frozen=True)
+class _Unit:
+    """What a presence vector carries at one grain, and how it is counted.
+
+    Two units, because the contract names two: how much of the *day* a station
+    was heard in, or how much it *published* in the hour. A cell saying only
+    "reported" cannot tell a station sending once from one sending every hour,
+    and which of those a day was is most of what a matrix is read for.
+
+    ``extra`` is the annotation the unit needs where nothing else already
+    counts it. Empty at hourly grain, where the message volume is read anyway.
+    """
+
+    column: str
+    extra: dict
+
+
+#: Which number a presence vector carries, by grain. A map rather than a
+#: branch, and in the same shape as ``ROLLUP_FOR_GRAIN`` and ``BUCKET_LENGTH``
+#: beside it: the grain decides the table, the bucket length and the unit, and
+#: three answers to one question spelled three ways is three places to forget.
+PRESENCE_FOR_GRAIN = {
+    Grain.HOUR: _Unit(column="messages", extra={}),
+    # The union of the hours every vantage point heard, approximated by the
+    # largest of them. Summing would report 48 hours in a day the moment
+    # origin ingestion is switched on, and a cell of "48 of 24" is worse than
+    # the approximation: where one vantage point heard an hour another missed,
+    # this undercounts by exactly that hour.
+    Grain.DAY: _Unit(
+        column="active_hours", extra={"active_hours": Max("active_hours")}
+    ),
+}
 
 
 @dataclass(frozen=True)
@@ -261,6 +301,7 @@ def _over_window(node, buckets, grain):
         return {}
 
     model, column = ROLLUP_FOR_GRAIN[grain]
+    unit = PRESENCE_FOR_GRAIN[grain]
     annotations = {
         "messages": Sum(
             "message_count",
@@ -270,15 +311,8 @@ def _over_window(node, buckets, grain):
         # all" can honestly be read from: a bucket heard only at the centre's
         # own broker was reported in, whatever the world received.
         "anywhere": Sum("message_count"),
+        **unit.extra,
     }
-
-    if grain == Grain.DAY:
-        # The union of the hours every vantage point heard, approximated by
-        # the largest of them. Summing would report 48 hours in a day the
-        # moment origin ingestion is switched on, and a cell of "48 of 24" is
-        # worse than the approximation: where one vantage point heard an hour
-        # another missed, this undercounts by exactly that hour.
-        annotations["active_hours"] = Max("active_hours")
 
     counted = defaultdict(dict)
 
@@ -299,7 +333,7 @@ def _over_window(node, buckets, grain):
     return {
         station_id: _Heard(
             presence=[
-                _presence(over_window.get(bucket.start), grain) for bucket in buckets
+                _presence(over_window.get(bucket.start), unit) for bucket in buckets
             ],
             messages=sum(row["messages"] or 0 for row in over_window.values()),
             active_buckets=sum(1 for row in over_window.values() if row["anywhere"]),
@@ -308,18 +342,13 @@ def _over_window(node, buckets, grain):
     }
 
 
-def _presence(row, grain):
+def _presence(row, unit):
     """What one cell of the matrix will be drawn from, or nothing.
 
-    Two units by grain, and the contract says so: how much of the day a
-    station was heard in, or how much it published in the hour. A cell saying
-    only "reported" cannot tell a station sending once from one sending every
-    hour, and which of those a day was is most of what a matrix is read for.
+    Zero for a bucket nothing was heard in, rather than an absent entry: the
+    vector is positional, and a silent bucket is the finding it is read for.
     """
     if row is None:
         return 0
 
-    if grain == Grain.DAY:
-        return row["active_hours"] or 0
-
-    return row["messages"] or 0
+    return row[unit.column] or 0

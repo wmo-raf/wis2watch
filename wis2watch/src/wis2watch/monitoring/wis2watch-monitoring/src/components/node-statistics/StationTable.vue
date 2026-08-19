@@ -1,15 +1,5 @@
 <template>
-  <section class="stations">
-    <h3 class="stations__heading">Stations, what is broken first</h3>
-
-    <p class="stations__note">
-      Every station this centre declares or has been heard transmitting for,
-      sorted so that what has stopped is at the top &mdash; the default sort is
-      a filter that hides nothing. Everything here is this centre's own
-      observation: a station may transmit under more than one centre's topics,
-      and what another centre heard is not on this page.
-    </p>
-
+  <div class="stations">
     <div class="stations__controls">
       <label class="stations__field">
         <span class="stations__field-label">Search</span>
@@ -56,15 +46,15 @@
         transmitting under its topics.
       </template>
       <template v-else-if="!filtering">
-        All <strong>{{ count(stations.length) }}</strong> stations, none hidden.
+        All <strong>{{ formatCount(stations.length) }}</strong> stations, none hidden.
       </template>
       <template v-else-if="hidden">
-        <strong>{{ count(shown.length) }}</strong> of
-        {{ count(stations.length) }} stations &mdash;
-        {{ count(hidden) }} hidden by the filter.
+        <strong>{{ formatCount(shown.length) }}</strong> of
+        {{ formatCount(stations.length) }} stations &mdash;
+        {{ formatCount(hidden) }} hidden by the filter.
       </template>
       <template v-else>
-        All <strong>{{ count(stations.length) }}</strong> stations match the
+        All <strong>{{ formatCount(stations.length) }}</strong> stations match the
         filter, so it is hiding none of them.
       </template>
     </p>
@@ -102,13 +92,15 @@
             <td class="stations__cell--text stations__id">{{ row.wigos_id }}</td>
             <td class="stations__cell--text stations__name">{{ displayName(row) }}</td>
             <td class="stations__cell--text">
-              <span class="stations__standing" :class="standingClass(row.standing)">
+              <span class="stations__standing" :class="`stations__standing--${row.standing}`">
                 {{ label(row.standing) }}
               </span>
             </td>
             <td class="stations__cell--text">{{ formatInstant(row.last_heard) }}</td>
             <td class="stations__cell--number">{{ formatQuiet(row.hours_quiet) }}</td>
-            <td class="stations__cell--number">{{ count(row.messages_in_window) }}</td>
+            <td class="stations__cell--number">
+              {{ formatCount(row.messages_in_window) }}
+            </td>
             <td class="stations__cell--spark">
               <Sparkline
                   :values="row.sparkline"
@@ -121,7 +113,7 @@
       </table>
 
       <p v-if="!shown.length" class="stations__empty">
-        No station matches this filter. All {{ count(stations.length) }} of them
+        No station matches this filter. All {{ formatCount(stations.length) }} of them
         are still here &mdash; clear the filter to see them.
       </p>
     </div>
@@ -135,7 +127,7 @@
       the comparable number is the message column beside it. A flat line on the
       baseline is a station the world heard nothing from.
     </p>
-  </section>
+  </div>
 </template>
 
 <script setup>
@@ -303,10 +295,6 @@ const shown = computed(() => {
 
 const hidden = computed(() => props.stations.length - shown.value.length)
 
-function count(value) {
-  return formatCount(value)
-}
-
 function label(standing) {
   return STANDING_LABEL[standing] || standing
 }
@@ -314,10 +302,6 @@ function label(standing) {
 /** What to call the station: the operator's own name, where there is one. */
 function displayName(row) {
   return row.local_name || row.name || row.wigos_id
-}
-
-function standingClass(standing) {
-  return `stations__standing--${standing}`
 }
 
 function choose(chosen) {
@@ -360,22 +344,11 @@ function arrow(key) {
 </script>
 
 <style scoped>
-.stations__heading {
-  font-size: 0.95rem;
-  margin: 0 0 0.25rem;
-  color: var(--w-color-text-label);
-}
-
-.stations__note,
 .stations__caveats {
   font-size: 0.8rem;
   color: var(--w-color-text-meta);
-  margin: 0 0 0.75rem;
-  max-width: 70ch;
-}
-
-.stations__caveats {
   margin: 0.75rem 0 0;
+  max-width: 70ch;
 }
 
 .stations__controls {
