@@ -202,6 +202,21 @@ make db-dump      # writes to docker/backup/
 make db-restore   # DROPS the database, then restores the newest dump
 ```
 
+Those two targets are development-only -- like everything in the `Makefile`,
+they refuse to run unless the development overlay is switched on. The backup
+itself is not: `make db-dump` is a wrapper around a management command, and on
+a production host you run that command directly.
+
+```bash
+docker compose exec wis2watch python manage.py dbbackup
+docker compose exec wis2watch python manage.py dbrestore --i-know-this-drops-the-database
+```
+
+There is deliberately no `make` target for this. A production deployment drives
+`docker compose` itself, and a friendlier name for the restore would put the
+command that drops the production database one tab-completion away from the one
+that drops the local one.
+
 Both go through `django-dbbackup`, but not through its stock PostgreSQL
 connector: that one cannot restore a TimescaleDB database, and the way it fails
 is worth knowing about before you need it to work.
