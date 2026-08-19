@@ -156,6 +156,21 @@ attach: check-dev ## Attach to runserver -- ctrl-c stops it, ctrl-p ctrl-q detac
 	$(COMPOSE) attach wis2watch
 
 # ======================================================
+# DATABASE BACKUPS
+# ======================================================
+
+.PHONY: db-dump
+db-dump: check-dev ## Dump the database to docker/backup/
+	$(MANAGE) dbbackup
+
+# No --noinput: the prompt is the second of the two things standing between a
+# mistyped environment and a destroyed database. The flag is the first, and it
+# is spelled out rather than abbreviated on purpose. See docs/development.md.
+.PHONY: db-restore
+db-restore: check-dev ## Restore the newest dump -- DROPS the current database first
+	$(MANAGE) dbrestore --i-know-this-drops-the-database
+
+# ======================================================
 # HELP
 # ======================================================
 

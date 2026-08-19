@@ -195,6 +195,55 @@ On **Linux** it fails. Your source tree belongs to you, uid 9999 cannot write
 to it, and `makemigrations` dies on a permission error. Set `UID` and `GID` in
 `.env` to your own `id -u` and `id -g`, then `docker compose build`.
 
+## Database backups
+
+```bash
+make db-dump      # writes to docker/backup/
+make db-restore   # DROPS the database, then restores the newest dump
+```
+
+Both go through `django-dbbackup`, but not through its stock PostgreSQL
+connector: that one cannot restore a TimescaleDB database, and the way it fails
+is worth knowing about before you need it to work.
+
+`pg_dump` writes a hypertable out as two separate things -- the chunks, as
+ordinary tables in a `_timescaledb_internal` schema, and the catalogue rows
+saying which tables those are, inside the extension. Replaying either against a
+live extension is what TimescaleDB refuses: the catalogue is guarded, and a
+chunk restored without its catalogue row is a table that merely resembles part
+of a hypertable. The documented way through is to suspend the guards for the
+duration, with `timescaledb_pre_restore()` before and
+`timescaledb_post_restore()` after -- and dbbackup has nowhere to put those
+calls, because `RESTORE_PREFIX` and `RESTORE_SUFFIX` wrap the command line
+rather than the SQL.
+
+So `wis2watch/utils/dbbackup.py` subclasses the connector to do it, and
+`wis2watch/core/management/commands/dbrestore.py` guards what that costs.
+
+**The restore drops the database.** Not `--clean`: a hypertable cannot be
+replayed over its own remains, so the target is dropped and recreated outright.
+That makes `dbrestore` a one-command way to destroy whichever database the
+environment points at, and on a production host the environment points at
+production. Hence `--i-know-this-drops-the-database`, which has no short form
+and is not implied by `--noinput`. `make db-restore` passes the flag and leaves
+the confirmation prompt in place.
+
+**The database image is pinned.** A TimescaleDB dump can only be restored into
+the extension version it was taken from, and a custom-format dump does not
+record which that was -- so a mismatch surfaces as catalogue-level strangeness
+rather than a legible error. `docker-compose.yml` therefore names
+`timescale/timescaledb-ha:pg17.10-ts2.29.1` rather than the floating `pg17` tag,
+which would otherwise drift between a server deployed once and a laptop that
+pulled last week. Moving the pin is a deliberate act: dumps taken before it
+cannot be restored after it.
+
+**Dumps are not in `media/`.** dbbackup 5 reads its storage from
+`STORAGES["dbbackup"]`, and silently ignores the older `DBBACKUP_STORAGE`
+settings -- so configuring the old ones sends dumps to `MEDIA_ROOT` instead,
+which `nginx.conf` serves at `/media/` with nothing in front of it. A dump holds
+every broker password in the registry. `settings/base.py` sets the `STORAGES`
+alias; leave it there.
+
 ## Things worth knowing
 
 **The watchers poll.** Filesystem events from the host do not cross a bind
