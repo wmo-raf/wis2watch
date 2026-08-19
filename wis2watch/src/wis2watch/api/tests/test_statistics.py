@@ -281,6 +281,13 @@ class WindowParameterTests(StatisticsEndpointTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["window"]["key"], "24h")
 
+    def test_an_empty_window_parameter_is_the_default_rather_than_a_refusal(self):
+        """A client that built a querystring is not a reader asking for '6h'."""
+        response = self.client.get(self.url(), {"window": ""})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["window"]["key"], "24h")
+
     def test_the_endpoint_logs_the_window_it_was_asked_for(self):
         with self.assertLogs("wis2watch.api.views", level="DEBUG") as logged:
             self.client.get(self.url(), {"window": "30d"})

@@ -75,7 +75,10 @@ def node_statistics_summary_api(request, node_id):
     node = get_object_or_404(WIS2Node, pk=node_id)
 
     try:
-        window = Window.resolve(request.query_params.get("window"))
+        # An empty ``?window=`` is a client that built a querystring, not a
+        # reader asking for a window nothing offers. Refusing it would make
+        # the shareable link fragile in a way the enum is not meant to be.
+        window = Window.resolve(request.query_params.get("window") or None)
     except UnknownWindow as unknown:
         # The valid list travels with the refusal rather than only in the
         # message, so a client can render the control from a 400 as well as

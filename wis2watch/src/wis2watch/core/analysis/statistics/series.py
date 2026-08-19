@@ -261,6 +261,14 @@ def _bucketed(node, buckets, grain):
     question of two tables whose bucket column is all that differs between
     them, and a second copy of this is how the two charts on one page come to
     count a station differently.
+
+    Args:
+        node: the centre to count for.
+        buckets: the axis to count against, dense and oldest first.
+        grain: the size of one bucket, which decides the table.
+
+    Returns:
+        list[_Counted]: one entry per bucket, in the same order.
     """
     if not buckets:
         return []
@@ -322,6 +330,13 @@ def _per_active_station(messages, stations):
     messages and a ratio of zero. That is the honest reading of "the world
     received nothing from them", and the propagation report is where it is
     diagnosed.
+
+    Args:
+        messages: how many messages the bucket carried.
+        stations: how many distinct stations reported in it.
+
+    Returns:
+        float | None: the ratio, or None where nobody reported.
     """
     if not stations:
         return None

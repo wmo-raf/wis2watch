@@ -3,7 +3,7 @@
     <svg
         :width="width"
         :height="height"
-        class="daily-chart__plot"
+        class="stat-plot"
         tabindex="0"
         role="listbox"
         :aria-label="axisLabel"
@@ -70,7 +70,10 @@
 
         <!-- The "so far" tick, drawn for the unfinished day whatever it did
              -- including a day it has published nothing at all in, which is
-             the outage a reader has come to the page for. -->
+             the outage a reader has come to the page for, and a day whose
+             traffic named nobody, where the hatch has the height and there is
+             no bar left to leave open. The tick is the part of the mark that
+             does not need one. -->
         <line
             v-if="buckets[bucket].partial"
             :x1="band.barWidth"
@@ -84,24 +87,24 @@
             v-if="index === bucket"
             :width="band.barWidth"
             :height="plotHeight"
-            class="daily-chart__marker"
-            :class="{'daily-chart__marker--focused': focused}"
+            class="stat-marker"
+            :class="{'stat-marker--focused': focused}"
         />
       </g>
 
       <text
           v-for="bucket in ticks"
           :key="`tick-${bucket}`"
-          :x="tickX(bucket)"
+          :x="tick(bucket).x"
           :y="height - 3"
           class="stat-tick"
-          :text-anchor="tickAnchor(bucket)"
+          :text-anchor="tick(bucket).anchor"
       >
         {{ buckets[bucket].partial ? 'today' : formatDay(starts[bucket]) }}
       </text>
     </svg>
 
-    <p class="daily-chart__readout">{{ readout }}</p>
+    <p class="stat-readout">{{ readout }}</p>
   </div>
 </template>
 
@@ -131,7 +134,7 @@
  * than unimportant, and is identical in both themes because it owes nothing
  * to colour.
  */
-import {computed, ref, useId} from 'vue'
+import {computed, useId} from 'vue'
 
 import ChartHatch from './charts/ChartHatch.vue'
 import {
@@ -139,6 +142,7 @@ import {
   formatDay,
   formatDayLong,
   spacedTicks,
+  tickPlacement,
   useMeasuredWidth,
   yScale,
 } from './charts/plot.js'
@@ -181,7 +185,6 @@ const PAD_BOTTOM = 14
 const STUB_HEIGHT = 7
 
 const hatchId = useId()
-const focused = ref(false)
 
 const {el, width} = useMeasuredWidth()
 const plotWidth = computed(() => Math.max(20, width.value - PAD_LEFT))
@@ -199,7 +202,10 @@ const y = computed(() => yScale(yTop.value, plotHeight.value))
 const band = computed(() => bandScale(props.daily.length, plotWidth.value))
 const ticks = computed(() => spacedTicks(props.daily.length, plotWidth.value))
 
-const {index, onPointerMove, clear, moveTo, step} = useBucketHover(
+// Focus and the arrow keys come from the same composable the pointer does,
+// so a reader walking this chart by keyboard and a reader pointing at it are
+// on one bucket -- and every chart on the tab answers the same keys.
+const {index, focused, onPointerMove, clear, onFocus, onBlur, onKeydown} = useBucketHover(
     () => props.daily.length,
     () => plotWidth.value
 )
@@ -209,28 +215,9 @@ const axisLabel = computed(
         'The newest day is still in progress.'
 )
 
-//: Half of the widest label these charts put under a bucket. The newest one
-//: is always labelled and always sits against the right edge, so a centred
-//: label there would be half outside the plot -- which is how "today" comes
-//: out reading "toda".
-const LABEL_HALF = 18
-
-/** Where a tick label sits, kept inside the plot at either end. */
-function tickX(bucket) {
-  const centre = PAD_LEFT + band.value.centre(bucket)
-
-  return Math.min(Math.max(centre, PAD_LEFT), width.value)
-}
-
-/** Which way a tick label runs, so that the end ones turn inwards. */
-function tickAnchor(bucket) {
-  const centre = PAD_LEFT + band.value.centre(bucket)
-
-  if (centre + LABEL_HALF > width.value) {
-    return 'end'
-  }
-
-  return centre - LABEL_HALF < PAD_LEFT ? 'start' : 'middle'
+/** Where one tick label goes, turned inwards at the ends of the axis. */
+function tick(bucket) {
+  return tickPlacement(PAD_LEFT + band.value.centre(bucket), PAD_LEFT, width.value)
 }
 
 function bucketDomId(bucket) {
@@ -264,7 +251,14 @@ function count(value) {
   return value.toLocaleString()
 }
 
-/** How far the day in progress has got, from server truth rather than a clock. */
+/**
+ * How far the day in progress has got.
+ *
+ * From ``generated_at`` rather than from a laptop clock -- and rather than
+ * from the window's ``until``, which the contract names but which at daily
+ * grain is the *end* of the day in progress, tomorrow midnight, and so says
+ * nothing about how much of today has been counted.
+ */
 const asOfHour = computed(() => {
   const at = new Date(props.asOf)
 
@@ -328,53 +322,9 @@ const readout = computed(() => {
   )
 })
 
-// Entering the chart lands on today, which is the day an operator checking on
-// a centre has come for.
-function onFocus() {
-  focused.value = true
-
-  if (index.value === null) {
-    moveTo(props.daily.length - 1)
-  }
-}
-
-function onBlur() {
-  focused.value = false
-  clear()
-}
-
-function onKeydown(event) {
-  const last = props.daily.length - 1
-
-  if (event.key === 'ArrowRight') {
-    step(1)
-  } else if (event.key === 'ArrowLeft') {
-    step(-1)
-  } else if (event.key === 'Home') {
-    moveTo(0)
-  } else if (event.key === 'End') {
-    moveTo(last)
-  } else if (event.key === 'Escape') {
-    clear()
-  } else {
-    return
-  }
-
-  event.preventDefault()
-}
 </script>
 
 <style scoped>
-.daily-chart__plot {
-  display: block;
-  width: 100%;
-}
-
-.daily-chart__plot:focus-visible {
-  outline: 2px solid var(--stat-focus);
-  outline-offset: 2px;
-}
-
 /* The unfinished day. Full-strength colour on purpose: the mark is the shape,
    and anything tonal here would be read as a smaller value. */
 .daily-chart__open {
@@ -387,26 +337,5 @@ function onKeydown(event) {
 .daily-chart__edge {
   stroke: var(--stat-live);
   stroke-width: 1.4;
-}
-
-.daily-chart__marker {
-  fill: var(--stat-hover);
-  opacity: 0.08;
-}
-
-.daily-chart__marker--focused {
-  stroke: var(--stat-focus);
-  stroke-width: 1;
-  opacity: 0.22;
-}
-
-/* Anchored under the axis rather than floating over the bars, for the reason
-   the hourly chart's is: a card covers a third of a plot this short. */
-.daily-chart__readout {
-  margin: 0.35rem 0 0;
-  min-height: 2.4em;
-  font-size: 0.75rem;
-  line-height: 1.2;
-  color: var(--stat-ink-muted);
 }
 </style>

@@ -3,7 +3,7 @@
     <svg
         :width="width"
         :height="height"
-        class="hourly-chart__plot"
+        class="stat-plot"
         tabindex="0"
         role="listbox"
         :aria-label="axisLabel"
@@ -63,8 +63,8 @@
             v-if="index === bucket"
             :width="band.barWidth"
             :height="plotHeight"
-            class="hourly-chart__marker"
-            :class="{'hourly-chart__marker--focused': focused}"
+            class="stat-marker"
+            :class="{'stat-marker--focused': focused}"
         />
       </g>
 
@@ -80,7 +80,7 @@
       </text>
     </svg>
 
-    <p class="hourly-chart__readout">{{ readout }}</p>
+    <p class="stat-readout">{{ readout }}</p>
   </div>
 </template>
 
@@ -110,7 +110,7 @@
  * whole hour, so the newest bar is a finished count rather than a partial one
  * that would draw as a collapse every time the page is opened.
  */
-import {computed, ref, useId} from 'vue'
+import {computed, useId} from 'vue'
 
 import ChartHatch from './charts/ChartHatch.vue'
 import {
@@ -156,7 +156,6 @@ const PAD_BOTTOM = 14
 const STUB_HEIGHT = 7
 
 const hatchId = useId()
-const focused = ref(false)
 
 const {el, width} = useMeasuredWidth()
 const plotWidth = computed(() => Math.max(20, width.value - PAD_LEFT))
@@ -179,7 +178,10 @@ const y = computed(() => yScale(yTop.value, plotHeight.value))
 const band = computed(() => bandScale(props.hourly.length, plotWidth.value))
 const ticks = computed(() => roundHourTicks(starts.value, plotWidth.value))
 
-const {index, onPointerMove, clear, moveTo, step} = useBucketHover(
+// Focus and the arrow keys come from the same composable the pointer does,
+// so a reader walking this chart by keyboard and a reader pointing at it are
+// on one bucket -- and every chart on the tab answers the same keys.
+const {index, focused, onPointerMove, clear, onFocus, onBlur, onKeydown} = useBucketHover(
     () => props.hourly.length,
     () => plotWidth.value
 )
@@ -253,74 +255,4 @@ const readout = computed(() => {
   )
 })
 
-// Entering the chart lands on the newest hour, which is the one an operator
-// checking on a centre has come for.
-function onFocus() {
-  focused.value = true
-
-  if (index.value === null) {
-    moveTo(props.hourly.length - 1)
-  }
-}
-
-function onBlur() {
-  focused.value = false
-  clear()
-}
-
-function onKeydown(event) {
-  const last = props.hourly.length - 1
-
-  if (event.key === 'ArrowRight') {
-    step(1)
-  } else if (event.key === 'ArrowLeft') {
-    step(-1)
-  } else if (event.key === 'Home') {
-    moveTo(0)
-  } else if (event.key === 'End') {
-    moveTo(last)
-  } else if (event.key === 'Escape') {
-    clear()
-  } else {
-    return
-  }
-
-  event.preventDefault()
-}
 </script>
-
-<style scoped>
-.hourly-chart__plot {
-  display: block;
-  width: 100%;
-}
-
-.hourly-chart__plot:focus-visible {
-  outline: 2px solid var(--stat-focus);
-  outline-offset: 2px;
-}
-
-/* Where the reader is. A wash rather than a colour of its own, so that it
-   reads the same over a bar, over a hatched stub and over bare ground. */
-.hourly-chart__marker {
-  fill: var(--stat-hover);
-  opacity: 0.08;
-}
-
-.hourly-chart__marker--focused {
-  stroke: var(--stat-focus);
-  stroke-width: 1;
-  opacity: 0.22;
-}
-
-/* Anchored under the axis rather than floating over the bars: on a plot this
-   short, a card covers a third of what it is describing. Its height is held
-   open so that moving along the axis does not move the page. */
-.hourly-chart__readout {
-  margin: 0.35rem 0 0;
-  min-height: 2.4em;
-  font-size: 0.75rem;
-  line-height: 1.2;
-  color: var(--stat-ink-muted);
-}
-</style>

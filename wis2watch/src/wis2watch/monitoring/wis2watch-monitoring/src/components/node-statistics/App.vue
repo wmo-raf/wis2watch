@@ -8,15 +8,16 @@
       {{ error }}
     </Message>
 
+    <div v-if="windows.length" class="node-statistics__bar">
+      <WindowControl
+          :model-value="windowKey"
+          :windows="windows"
+          :busy="loading"
+          @update:model-value="choose"
+      />
+    </div>
+
     <template v-if="summary">
-      <div class="node-statistics__bar">
-        <WindowControl
-            :model-value="windowKey"
-            :windows="summary.windows"
-            :busy="loading"
-            @update:model-value="choose"
-        />
-      </div>
 
       <Message
           v-if="!summary.vantage.active"
@@ -76,13 +77,13 @@
           </p>
 
           <p class="node-statistics__headline">
-            <strong>{{ window_stats.reported_station_count }}</strong>
-            of {{ window_stats.declared_station_count }} reported at least once
+            <strong>{{ windowStats.reported_station_count }}</strong>
+            of {{ windowStats.declared_station_count }} reported at least once
           </p>
 
           <p class="node-statistics__population">
-            {{ count(window_stats.messages_total) }} messages,
-            {{ count(window_stats.unattributed_messages_total) }} of them naming
+            {{ count(windowStats.messages_total) }} messages,
+            {{ count(windowStats.unattributed_messages_total) }} of them naming
             no station.
           </p>
 
@@ -99,7 +100,7 @@
             A station counts here if this centre was heard publishing for it
             once, at any vantage point, so a station the registry never
             declared can be counted into this figure but not into the
-            {{ window_stats.declared_station_count }} beside it.
+            {{ windowStats.declared_station_count }} beside it.
           </p>
         </div>
       </div>
@@ -127,7 +128,7 @@
           Stations reporting, day by day
         </h3>
 
-        <template v-if="window_stats.daily">
+        <template v-if="windowStats.daily">
           <p class="node-statistics__panel-note">
             One bar per UTC day, on the same axis as the hours above, so a
             node-wide outage is a gap the whole width of the panel rather than
@@ -139,7 +140,7 @@
 
           <DailyChart
               :buckets="summary.buckets"
-              :daily="window_stats.daily"
+              :daily="windowStats.daily"
               :declared="counts.declared_station_count"
               :as-of="summary.generated_at"
           />
@@ -223,20 +224,24 @@ const props = defineProps({
 //: server's own vocabulary for the values. One string, three places.
 const WINDOW_PARAM = 'window'
 
-//: What a reader who has chosen nothing is shown. The server has the same
-//: default, so this is only what the first request asks for -- the resolved
-//: window is always read back off the response.
-const DEFAULT_WINDOW = '24h'
-
 const summary = ref(null)
 const loading = ref(true)
 const error = ref('')
-const windowKey = ref(
-    new URLSearchParams(window.location.search).get(WINDOW_PARAM) || DEFAULT_WINDOW
-)
+
+// Empty until the URL or the reader says otherwise. There is no default
+// spelled here: the server owns the list of windows and which of them a
+// reader who has chosen nothing is shown, and a second copy of that on this
+// side is a page that can offer a window the API would refuse.
+const windowKey = ref(new URLSearchParams(window.location.search).get(WINDOW_PARAM) || '')
+
+// The windows on offer, kept beside the summary rather than read out of it,
+// so that a refusal can seed them too: a reader who arrives on a stale link
+// needs the control more than anyone, and a page with only an error on it is
+// a dead end.
+const windows = ref([])
 
 const counts = computed(() => summary.value.now)
-const window_stats = computed(() => summary.value.window_stats)
+const windowStats = computed(() => summary.value.window_stats)
 
 function count(value) {
   return value.toLocaleString()
@@ -280,7 +285,7 @@ const population = computed(() =>
 const stoppedSince = computed(() =>
     Math.max(
         0,
-        window_stats.value.reported_station_count - counts.value.transmitting
+        windowStats.value.reported_station_count - counts.value.transmitting
     )
 )
 
@@ -314,7 +319,10 @@ async function load() {
 
   try {
     const url = new URL(props.summaryUrl, window.location.origin)
-    url.searchParams.set(WINDOW_PARAM, windowKey.value)
+
+    if (windowKey.value) {
+      url.searchParams.set(WINDOW_PARAM, windowKey.value)
+    }
 
     const response = await fetch(url, {headers: {'Accept': 'application/json'}})
 
@@ -323,6 +331,7 @@ async function load() {
     }
 
     summary.value = await response.json()
+    windows.value = summary.value.windows
     // From the response rather than from what was asked for: the server
     // resolves the window, and a page labelling its charts from the request
     // is a page that can disagree with the numbers on them.
@@ -351,6 +360,10 @@ async function refusal(response) {
     const body = await response.json()
 
     if (body.valid_windows) {
+      // The control is rendered from these, so the reader can choose their
+      // way out of a stale link rather than being left with the refusal.
+      windows.value = body.valid_windows.map((key) => ({key, label: key}))
+
       // The server's own message names the window and the alternatives, but
       // it is written for whoever is holding the API. This is the same
       // refusal in the reader's terms, since a stale bookmark is how they

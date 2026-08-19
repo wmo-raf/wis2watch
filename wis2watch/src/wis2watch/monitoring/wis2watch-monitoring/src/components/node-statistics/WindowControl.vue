@@ -99,6 +99,6 @@ defineEmits(['update:modelValue'])
 .window-control__option--chosen {
   background: var(--stat-live);
   border-color: var(--stat-live);
-  color: #fff;
+  color: var(--stat-on-live);
 }
 </style>

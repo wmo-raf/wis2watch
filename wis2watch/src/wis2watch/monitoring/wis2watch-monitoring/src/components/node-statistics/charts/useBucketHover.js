@@ -24,6 +24,7 @@ import {bucketAtX} from './plot.js'
  */
 export function useBucketHover(bucketCount, plotWidth) {
     const index = ref(null)
+    const focused = ref(false)
 
     /** Follow the pointer, in coordinates relative to the plot's left edge. */
     function onPointerMove(event, padLeft = 0) {
@@ -57,5 +58,45 @@ export function useBucketHover(bucketCount, plotWidth) {
         moveTo(index.value === null ? bucketCount() - 1 : index.value + by)
     }
 
-    return {index, onPointerMove, clear, moveTo, step}
+    /** Enter the axis, landing on the newest bucket if nothing is chosen. */
+    function onFocus() {
+        focused.value = true
+
+        if (index.value === null) {
+            moveTo(bucketCount() - 1)
+        }
+    }
+
+    function onBlur() {
+        focused.value = false
+        clear()
+    }
+
+    /**
+     * Walk the axis by key.
+     *
+     * The same keys on every chart on the tab, which is the reason this lives
+     * beside the pointer route rather than in each of them: two charts on one
+     * page whose arrow keys step differently are two charts a reader has to
+     * learn separately.
+     */
+    function onKeydown(event) {
+        if (event.key === 'ArrowRight') {
+            step(1)
+        } else if (event.key === 'ArrowLeft') {
+            step(-1)
+        } else if (event.key === 'Home') {
+            moveTo(0)
+        } else if (event.key === 'End') {
+            moveTo(bucketCount() - 1)
+        } else if (event.key === 'Escape') {
+            clear()
+        } else {
+            return
+        }
+
+        event.preventDefault()
+    }
+
+    return {index, focused, onPointerMove, clear, moveTo, step, onFocus, onBlur, onKeydown}
 }

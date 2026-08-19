@@ -118,6 +118,35 @@ export function spacedTicks(count, plotWidth, minLabelPx = 44) {
     return indices
 }
 
+//: Half of the widest label a bucket axis puts under a tick. Enough for a
+//: date or the word "today", which are what the daily axis carries.
+const LABEL_HALF_PX = 18
+
+/**
+ * Where a tick label sits and which way it runs, kept inside the plot.
+ *
+ * The newest bucket of a rolling window is always worth labelling and always
+ * sits against the right edge, so a centred label there is half outside the
+ * plot -- which is how "today" comes out reading "toda". Turning the end
+ * labels inwards costs nothing and is the only alternative to dropping them.
+ *
+ * @param {number} centre - the bucket's centre, in plot coordinates.
+ * @param {number} padLeft - where the plot starts.
+ * @param {number} width - the full measured width of the chart.
+ * @returns {{x: number, anchor: string}} the label's position and anchor.
+ */
+export function tickPlacement(centre, padLeft, width) {
+    if (centre + LABEL_HALF_PX > width) {
+        return {x: width, anchor: 'end'}
+    }
+
+    if (centre - LABEL_HALF_PX < padLeft) {
+        return {x: padLeft, anchor: 'start'}
+    }
+
+    return {x: centre, anchor: 'middle'}
+}
+
 /** Pixel to bucket index, or null outside the plot. Hover, focus and select share it. */
 export function bucketAtX(px, count, plotWidth) {
     if (plotWidth <= 0 || count <= 0) {
