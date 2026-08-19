@@ -48,7 +48,7 @@ import Card from 'primevue/card'
 import Badge from 'primevue/badge'
 import Message from 'primevue/message'
 
-import {createBaseMap} from '@/composables/useBaseMap.js'
+import {createBaseMap} from '@/basemap.js'
 
 const props = defineProps({
   nodesByCountry: {

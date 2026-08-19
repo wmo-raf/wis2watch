@@ -1,6 +1,8 @@
 /**
- * The basemap both maps stand on: one style URL per lighting, the initial
- * view, the controls, and a promise that resolves when the style is loaded.
+ * The basemap every map in this project stands on: one style URL per
+ * lighting, the initial view, the controls, and a promise that resolves when
+ * the style is loaded. One map uses it today, and the statistics map panel is
+ * the second caller this shape was measured against.
  *
  * This is deliberately *not* a base map component. #50 extracted a shared map
  * from `MQTTMap.vue` and found that what survives extraction is about thirty
@@ -14,6 +16,19 @@
  * a caller that forgets `transformStyle` loses its own layers with no error
  * (see below). That is not a rule a comment can enforce, so the flip lives
  * here and nowhere else.
+ *
+ * **One rule for whoever adds the first symbol layer: name one font, never a
+ * stack.** `text-font: ['Noto Sans Regular']` is served; `['Noto Sans
+ * Regular', 'Arial Unicode MS Regular']` 404s, because a stack is fetched as
+ * one path built from the joined names and no font by that joined name
+ * exists. The failure is silent and total -- a symbol layer whose font cannot
+ * be fetched stops the whole source from tiling, so sibling circle layers
+ * render nothing while `addLayer` returns cleanly and `source.loaded()`
+ * reports `true`. #50 hit this and worked around it by naming a single font;
+ * its diagnosis of *why* was wrong, and the research on #67 found the rule is
+ * architectural rather than local -- OpenFreeMap, ICGC and VersaTiles all 404
+ * stacks and serve single fonts. `Noto Sans Regular` and `Noto Sans Bold` are
+ * the two this glyph endpoint serves.
  */
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -28,9 +43,10 @@ import {isDarkTheme, watchTheme} from '@/theme.js'
  * (transmitting) and 7.1:1 (silent).
  *
  * Both styles carry their own attribution in their TileJSON and MapLibre's
- * default `AttributionControl` renders it. Nothing here writes an attribution
- * string, and nothing should: a hand-written one goes stale the moment the
- * style's sources change.
+ * default `AttributionControl` renders it, on its default terms. Nothing here
+ * writes an attribution string and nothing configures the control: a
+ * hand-written string goes stale the moment the style's sources change, and
+ * the licences these tiles arrive under are not ours to fold away.
  *
  * **Two risks worth knowing before you rely on this.** OpenFreeMap is one
  * maintainer on two servers, donation-funded, with no SLA and a terms page
@@ -48,26 +64,6 @@ import {isDarkTheme, watchTheme} from '@/theme.js'
 export const BASEMAP_STYLES = {
     light: 'https://tiles.openfreemap.org/styles/positron',
     dark: 'https://tiles.openfreemap.org/styles/dark',
-}
-
-/**
- * **Name one font, never a stack.** Any `text-font` this project sets on a
- * symbol layer of its own must be exactly one of these, alone.
- *
- * A glyph endpoint serves `Noto Sans Regular`; it 404s the comma-separated
- * *stack* `["Noto Sans Regular", "Arial Unicode MS Regular"]`, because a stack
- * is requested as one path built from the joined names and no such font
- * exists. The failure is silent and total: a symbol layer whose font cannot be
- * fetched stops the whole source from tiling, so sibling circle layers render
- * nothing at all while `addLayer` returns cleanly and `source.loaded()`
- * reports `true`. #50 hit this and worked around it by naming a single font;
- * its diagnosis of *why* was wrong, and the research on #67 found the rule is
- * architectural rather than local -- OpenFreeMap, ICGC and VersaTiles all 404
- * stacks and serve single fonts.
- */
-export const BASEMAP_FONTS = {
-    regular: 'Noto Sans Regular',
-    bold: 'Noto Sans Bold',
 }
 
 /** The style URL for the lighting the page is in right now. */
@@ -103,9 +99,6 @@ export function createBaseMap(container, {center, zoom}) {
         style: basemapStyleUrl(),
         center,
         zoom,
-        //: The style's own attribution, folded into an "i" so it does not eat
-        //: the bottom of a small map.
-        attributionControl: {compact: true},
     })
 
     //: Bottom-right, which is where the shipped map has always had them and
@@ -128,6 +121,13 @@ export function createBaseMap(container, {center, zoom}) {
         })
     })
 
+    /**
+     * The style URL the map is on. Moved by `transformStyle` rather than
+     * here, because that callback runs only once the incoming style has
+     * actually been fetched: a style that 404s leaves this naming the style
+     * still on screen, and the next flip tries again instead of deciding it
+     * has nothing to do.
+     */
     let current = basemapStyleUrl()
 
     /**
@@ -148,10 +148,11 @@ export function createBaseMap(container, {center, zoom}) {
             return
         }
 
-        current = wanted
-
         map.setStyle(wanted, {
             transformStyle: (previous, next) => {
+                //: Reached only once the incoming style has been fetched.
+                current = wanted
+
                 if (!previous || !basemapOwns) {
                     return next
                 }
