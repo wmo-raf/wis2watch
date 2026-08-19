@@ -61,6 +61,11 @@ export const GRAINS = {
         //: What a run of these buckets is called, for the label a screen
         //: reader is given.
         period: 'days',
+        //: The word a sentence naming one of these buckets takes before it:
+        //: dark *on* a day, dark *at* an hour. In the map rather than in a
+        //: ternary at the one call site, because the next surface to name a
+        //: bucket in a sentence would write the ternary again.
+        preposition: 'on',
         //: The words beside each colour, and the sentence that says what
         //: the pale one is measured against. Per grain rather than one
         //: template with the unit swapped in, because the middle state is not
@@ -92,6 +97,7 @@ export const GRAINS = {
     },
     hour: {
         period: 'hours',
+        preposition: 'at',
         bucket: 'the hour',
         legend: {
             full: "Heard at this station's own usual rate",

@@ -27,7 +27,7 @@
       </label>
 
       <button
-          v-if="filtering"
+          v-if="narrowing"
           type="button"
           class="stations__clear"
           @click="choose({search: '', standing: ''})"
@@ -35,6 +35,31 @@
         Clear filter
       </button>
     </div>
+
+    <!-- What the picked bucket did to this list, said out loud and on its
+         own line. Its own numbers rather than the combined ones below,
+         because a reader who has a search running too cannot otherwise tell
+         which of the two hid what -- and because the degenerate case is a
+         finding: a bucket in which every station was dark hides nobody, and a
+         page that suppressed the sentence there would be a page that looks
+         unfiltered on the worst day this centre has had. -->
+    <p v-if="picked && stations.length" class="stations__picked" role="status">
+      <span class="stations__picked-what">
+        Dark {{ grainWords.preposition }} {{ pickedName }}
+      </span>
+      <template v-if="darkCount === stations.length">
+        &mdash; every one of the {{ formatCount(stations.length) }} stations was,
+        so this hides none of them.
+      </template>
+      <template v-else>
+        &mdash; {{ formatCount(darkCount) }} of
+        {{ formatCount(stations.length) }} stations were, so this hides
+        {{ formatCount(stations.length - darkCount) }}.
+      </template>
+      <button type="button" class="stations__clear" @click="choose({bucket: ''})">
+        Clear selection
+      </button>
+    </p>
 
     <!-- The population header. Whatever is on screen, this says what the whole
          of it is -- and where a filter is on, what it took away. A count of
@@ -99,6 +124,21 @@
                 <span>{{ axisStart }}</span>
                 <span>{{ axisEnd }}</span>
               </span>
+              <!-- One head per column, and picking one filters the rows below
+                   to the stations that were dark in it. It sits in the header
+                   because that is where a reader who has just read a band down
+                   the matrix is already looking, and it is drawn at the cell
+                   width the rows use, so a head cannot come to sit over the
+                   wrong column. -->
+              <BucketHeads
+                  v-if="buckets.length"
+                  :buckets="buckets"
+                  :grain="grain"
+                  :cell-width="cellWidth"
+                  :selected="bucket"
+                  :window-label="windowLabel"
+                  @select="choose({bucket: $event})"
+              />
             </th>
           </tr>
         </thead>
@@ -179,7 +219,11 @@
       <template v-if="buckets.length">
         The cells on the right are one {{ grain }} each, oldest at the left, and
         are read across a row for when a station stopped and down the column for
-        whether the same stations stop together. {{ grainWords.scale }}
+        whether the same stations stop together. Pick a column head above them
+        &mdash; or a bar on any chart drawn over this window &mdash; to keep only
+        the stations that were dark in that {{ grain }}, which is the one way to
+        a cohort that has since recovered: every sort here describes where a
+        station stands now. {{ grainWords.scale }}
         <template v-if="openBucket">
           The newest column is the UTC day still being counted, marked with the
           same open edge the charts above use, and it is judged against the
@@ -221,6 +265,16 @@
  * never re-derives that; leaving the sort unchosen leaves the rows exactly as
  * they arrived, which is also the order the matrix is worth reading in.
  *
+ * **A picked bucket is a filter like the others, and it is the only one that
+ * is about a moment.** Selecting a column of the matrix -- or a bar of any
+ * chart drawn over this window -- keeps the stations that were dark in it.
+ * That is not a convenience: a subset still dark forms a band anyone can see,
+ * but a subset that has already recovered is invisible under every sort here,
+ * because RANK and last-heard both describe where a station stands *now*. The
+ * selection travels as the bucket's start rather than as a column index, so
+ * it survives the trip through the address bar and either names a column of
+ * this axis or names none of it.
+ *
  * Any filter has to state what it hid. A count of rows on screen with nothing
  * saying how many there were is the number a reader mistakes for the
  * population -- and the degenerate case is worth saying out loud too: a filter
@@ -229,10 +283,12 @@
  */
 import {computed, watch} from 'vue'
 
+import BucketHeads from './BucketHeads.vue'
 import PresenceCells from './PresenceCells.vue'
 import Sparkline from './Sparkline.vue'
 import {formatCount, formatInstant, formatQuiet} from './charts/plot.js'
 import {bucketCeilings, cellWidthFor, grainOf} from './presence.js'
+import {bucketIndexOf, bucketName, darkIn} from './selection.js'
 import {STANDINGS, STANDING_LABEL, STANDING_RANK} from './standings.js'
 import {useVirtualRows} from './useVirtualRows.js'
 
@@ -254,6 +310,15 @@ const props = defineProps({
   },
   /** When the rows were read, which is what makes today a part-day. */
   asOf: {
+    type: String,
+    default: ''
+  },
+  /**
+   * The bucket the reader picked, as the server spelled its start, or empty.
+   * A start rather than an index, so that a link carrying one either names a
+   * column of this window's axis or names none of it -- never the wrong one.
+   */
+  bucket: {
     type: String,
     default: ''
   },
@@ -365,12 +430,53 @@ const COLUMN_BY_KEY = Object.fromEntries(COLUMNS.map((column) => [column.key, co
 //: the rows not drawn.
 const COLUMN_COUNT = COLUMNS.length + 2
 
-const filtering = computed(() => Boolean(props.search.trim() || props.standing))
+//: What the two fields above the table are doing, which is what their own
+//: clear button is offered for. The picked bucket has its own line and its
+//: own button: one control that clears three things is a control a reader
+//: presses to drop a search and loses the day they were reading.
+const narrowing = computed(() => Boolean(props.search.trim() || props.standing))
+
+//: Whether anything at all is being kept off the page, which is what the
+//: population count speaks about.
+const filtering = computed(() => narrowing.value || picked.value)
+
+//: Which column of this window's axis the selection names, or -1 where it
+//: names none of it. A link carrying a day of a 90-day window, opened at the
+//: default 24 hours, lands here: the selection is ignored rather than
+//: resolved to whichever column happens to sit at that index.
+const pickedAt = computed(() => bucketIndexOf(props.buckets, props.bucket))
+
+const picked = computed(() => pickedAt.value !== -1)
+
+//: The bucket the reader picked, in the words its own grain uses.
+const pickedName = computed(
+    () => bucketName(props.buckets[pickedAt.value], props.grain)
+)
+
+//: How many of the whole population were dark in it -- the selection's own
+//: figure, counted over every station rather than over what the search and
+//: the standing filter have left, so that the sentence stating it is true
+//: whatever else is on.
+const darkCount = computed(() => {
+  if (!picked.value) {
+    return 0
+  }
+
+  return props.stations.filter((row) => darkIn(row, pickedAt.value)).length
+})
 
 const matching = computed(() => {
   const wanted = props.search.trim().toLowerCase()
 
   return props.stations.filter((row) => {
+    // The selection first, because it is the one filter that is about a
+    // moment rather than about the station as it stands now -- and it is the
+    // only route to a cohort that has already recovered, which no sort of
+    // this table can show.
+    if (picked.value && !darkIn(row, pickedAt.value)) {
+      return false
+    }
+
     if (props.standing && row.standing !== props.standing) {
       return false
     }
@@ -431,7 +537,14 @@ const drawn = computed(() => shown.value.slice(first.value, end.value))
 // of them, and pixel 4,000 of the last window's population is not a place a
 // reader chose to be in this one.
 watch(
-    () => [props.stations, props.search, props.standing, props.sort, props.direction],
+    () => [
+      props.stations,
+      props.search,
+      props.standing,
+      props.bucket,
+      props.sort,
+      props.direction,
+    ],
     () => reset()
 )
 
@@ -575,6 +688,30 @@ function arrow(key) {
   background: transparent;
   color: var(--w-color-text-label);
   cursor: pointer;
+}
+
+/* The picked bucket, on its own line above the population count and looking
+   like the control it is: a reader who arrived on a link has to be able to
+   see at a glance that the list in front of them is a filtered one. */
+.stations__picked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--w-color-text-meta);
+  margin: 0 0 0.35rem;
+}
+
+/* The button belongs on the line rather than at the bottom of it: this row
+   has no field labels above it for it to clear. */
+.stations__picked .stations__clear {
+  align-self: auto;
+}
+
+.stations__picked-what {
+  font-weight: 600;
+  color: var(--w-color-text-label);
 }
 
 .stations__population {

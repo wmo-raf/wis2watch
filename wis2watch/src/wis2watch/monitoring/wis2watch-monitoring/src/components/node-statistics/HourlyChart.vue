@@ -4,11 +4,13 @@
         :width="width"
         :height="height"
         class="stat-plot"
+        :class="{'stat-plot--selectable': selectable}"
         tabindex="0"
         role="listbox"
         :aria-label="axisLabel"
         :aria-activedescendant="index === null ? undefined : bucketDomId(index)"
         @pointermove="onPointerMove($event, PAD_LEFT)"
+        @click="onClick($event, PAD_LEFT)"
         @pointerleave="clear"
         @focus="onFocus"
         @blur="onBlur"
@@ -37,7 +39,7 @@
           :id="bucketDomId(bucket)"
           :key="bucket"
           role="option"
-          :aria-selected="index === bucket"
+          :aria-selected="chosen === bucket"
           :aria-label="describe(bucket)"
           :transform="`translate(${PAD_LEFT + band.x(bucket)}, 0)`"
       >
@@ -57,6 +59,17 @@
             :width="band.barWidth"
             :height="plotHeight - y(drawn(hour))"
             fill="var(--stat-live)"
+        />
+
+        <!-- The bucket the reader picked, and it stays there while the
+             pointer moves on: the hover mark says where the reader is, and
+             this says what the table below is filtered by. Outlined rather
+             than washed, so the two are told apart at a glance. -->
+        <rect
+            v-if="chosen === bucket"
+            :width="band.barWidth"
+            :height="plotHeight"
+            class="stat-chosen"
         />
 
         <rect
@@ -126,6 +139,7 @@ import {
   yScale,
 } from './charts/plot.js'
 import {useBucketHover} from './charts/useBucketHover.js'
+import {SELECT_HINT, bucketIndexOf} from './selection.js'
 
 const props = defineProps({
   /** The hourly axis, as the server drew it: `[{start, partial}]`. */
@@ -143,11 +157,56 @@ const props = defineProps({
     type: Number,
     required: true
   },
+  /**
+   * The bucket the reader has picked, as the server spelled its start, or
+   * empty for none. A start rather than an index, because this chart's axis
+   * and the station rows' axis arrive on two separate requests: an index
+   * means "the third column of whichever list you happen to be holding".
+   */
+  selected: {
+    type: String,
+    default: ''
+  },
+  /**
+   * Whether picking a bucket here means anything. False where this chart's
+   * axis is not the one the station rows are drawn against, because a click
+   * naming a bucket the matrix has no column for would filter the table to
+   * nothing at all.
+   */
+  selectable: {
+    type: Boolean,
+    default: false
+  },
   height: {
     type: Number,
     default: 140
   },
 })
+
+const emit = defineEmits(['select'])
+
+/**
+ * Say which bucket the reader picked, or that they dropped the selection.
+ *
+ * The bucket's start rather than its index, which is the one thing this chart
+ * and the station rows can both be sure means the same bucket.
+ */
+function pick(at) {
+  if (!props.selectable) {
+    return
+  }
+
+  // Picking the bucket that is already picked drops it, so the gesture that
+  // made the filter is also the one that undoes it -- the pointer's way out,
+  // beside Escape's.
+  const start = at === null ? '' : props.buckets[at].start
+
+  emit('select', start === props.selected ? '' : start)
+}
+
+//: Where the selection sits on this axis, or -1 where it names no bucket of
+//: it -- a link carrying a day of a 90-day window, opened at 24 hours.
+const chosen = computed(() => bucketIndexOf(props.buckets, props.selected))
 
 const hatchId = useId()
 
@@ -177,13 +236,16 @@ const ticks = computed(() =>
 // Focus and the arrow keys come from the same composable the pointer does,
 // so a reader walking this chart by keyboard and a reader pointing at it are
 // on one bucket -- and every chart on the tab answers the same keys.
-const {index, focused, onPointerMove, clear, onFocus, onBlur, onKeydown} = useBucketHover(
-    () => props.hourly.length,
-    () => plotWidth.value
-)
+const {index, focused, onPointerMove, onClick, clear, onFocus, onBlur, onKeydown} =
+    useBucketHover(
+        () => props.hourly.length,
+        () => plotWidth.value,
+        {onSelect: pick}
+    )
 
 const axisLabel = computed(
-    () => `Stations reporting per hour, over the last ${props.hourly.length} whole UTC hours`
+    () => `Stations reporting per hour, over the last ${props.hourly.length} whole UTC` +
+        ` hours.${props.selectable ? ` ${SELECT_HINT}` : ''}`
 )
 
 function bucketDomId(bucket) {

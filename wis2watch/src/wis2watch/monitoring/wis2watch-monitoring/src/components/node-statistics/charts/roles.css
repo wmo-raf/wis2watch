@@ -158,6 +158,23 @@
     opacity: 0.22;
 }
 
+/* What the reader picked, which stays put while the pointer moves on. Outlined in the focus colour rather than washed like
+   the hover mark, because the two are on screen at once and a second wash
+   would be the same mark at a second strength: "where I am" and "what the
+   table below is filtered by" are different claims. Colour is not the only
+   carrier -- the filtered table says the bucket's name in words. */
+.node-statistics .stat-chosen {
+    fill: var(--stat-focus);
+    fill-opacity: 0.1;
+    stroke: var(--stat-focus);
+    stroke-width: 1.5;
+}
+
+/* A chart whose buckets can be picked says so under the pointer. */
+.node-statistics .stat-plot--selectable {
+    cursor: pointer;
+}
+
 /* The unfinished bucket, shared by every panel that draws the day in
    progress. Full-strength colour on purpose, and the mark is the *shape*: up
    the left, across the top, and no right-hand side at all. Anything tonal
