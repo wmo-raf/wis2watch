@@ -57,7 +57,7 @@
  */
 import {computed} from 'vue'
 
-import {grainOf, presenceStates, presenceTitle} from './presence.js'
+import {grainOf, presenceStates, presenceTitle, rowCeilings} from './presence.js'
 
 const props = defineProps({
   /** What the station was heard doing in each bucket, positional and dense. */
@@ -107,18 +107,15 @@ const props = defineProps({
 
 const width = computed(() => props.cellWidth * props.buckets.length)
 
-// The row's own busiest bucket, for the hourly axis that has no other
-// ceiling. Never zero: a row that was heard nothing from divides by one and
-// draws silent all the way across, which is the truth about it.
-const peak = computed(() => Math.max(1, ...props.values))
+// What each bucket is judged against, and what that makes it -- both from
+// the one place that decides them, so that this row and the same row's line
+// on the navigator wall above the table cannot come to disagree about which
+// buckets were thin. The tooltip needs the ceiling as well as the state,
+// because it says the figures out loud: "heard in 4 of 24 hours".
+const against = computed(
+    () => rowCeilings(props.values, props.ceilings, props.buckets.length)
+)
 
-function ceilingAt(index) {
-  return props.ceilings ? props.ceilings[index] : peak.value
-}
-
-// The states from the one place that decides them, so that this row and the
-// same row's stripe on the navigator wall above the table cannot come to
-// disagree about which buckets were thin.
 const states = computed(
     () => presenceStates(props.values, props.ceilings, props.buckets.length)
 )
@@ -128,9 +125,9 @@ const cells = computed(() =>
       index,
       x: index * props.cellWidth,
       state: states.value[index],
-      // The sentence keeps the ceiling, because it says the figures out loud
-      // -- "heard in 4 of 24 hours" -- and a state alone cannot.
-      title: presenceTitle(bucket, props.values[index] || 0, ceilingAt(index), props.grain),
+      title: presenceTitle(
+          bucket, props.values[index] || 0, against.value[index], props.grain
+      ),
     }))
 )
 

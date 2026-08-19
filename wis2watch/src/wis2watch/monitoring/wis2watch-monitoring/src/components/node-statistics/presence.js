@@ -148,6 +148,37 @@ export function presenceState(value, ceiling) {
 }
 
 /**
+ * What each bucket of *one station's* vector is judged against.
+ *
+ * The axis's own ceilings where the window has them. Where it has not -- an
+ * hourly axis, there being no number of messages an hour is full at -- the
+ * row's own busiest bucket, which is the convention the sparkline beside it
+ * already uses: station traffic is heavy-tailed, and one dominant reporter
+ * scaled across the column would draw every other station as thin.
+ *
+ * That fallback is spelled here and nowhere else. Two surfaces draw this
+ * vector and both need it -- the cells on the row for the figures in their
+ * tooltips, the navigator wall for its states -- and a second copy of it is
+ * how one surface comes to call a station thin while the other calls it full.
+ *
+ * @param {number[]} values - what the station was heard doing per bucket.
+ * @param {number[]|null} ceilings - the axis's own, or null for the row's.
+ * @param {number} count - how many buckets the axis carries.
+ * @returns {number[]} a ceiling per bucket.
+ */
+export function rowCeilings(values, ceilings, count) {
+    if (ceilings) {
+        return ceilings
+    }
+
+    // Never zero: a row that was heard nothing from divides by one and draws
+    // silent all the way across, which is the truth about it.
+    const peak = Math.max(1, ...values)
+
+    return Array.from({length: count}, () => peak)
+}
+
+/**
  * One station's whole vector, said as states, against the axis it is drawn on.
  *
  * Two surfaces draw this vector -- the matrix cell strip on the row itself and
@@ -156,12 +187,6 @@ export function presenceState(value, ceiling) {
  * matrix are the same band only if the *states* come from here: a wall that
  * re-derived "thin" from `active_hours` would eventually be a wall drawn to a
  * threshold the cells beneath it no longer use.
- *
- * The per-row ceiling lives here for the same reason. Where the window has no
- * ceiling of its own -- an hourly axis, there being no number of messages an
- * hour is full at -- every surface has to fall back to the *row's own busiest
- * bucket*, and two copies of that fallback is how one surface comes to call a
- * station thin while the other calls it full.
  *
  * Read against the axis rather than against the vector, because the two can
  * disagree for a moment mid-swap between windows: a vector shorter than the
@@ -174,14 +199,12 @@ export function presenceState(value, ceiling) {
  * @param {number} count - how many buckets the axis carries.
  * @returns {string[]} `silent`, `thin` or `full`, one per bucket.
  */
-export function presenceStates(values, ceilings, count = values.length) {
-    // Never zero: a row that was heard nothing from divides by one and draws
-    // silent all the way across, which is the truth about it.
-    const peak = ceilings ? 0 : Math.max(1, ...values)
+export function presenceStates(values, ceilings, count) {
+    const against = rowCeilings(values, ceilings, count)
 
     return Array.from(
         {length: count},
-        (_, at) => presenceState(values[at] || 0, ceilings ? ceilings[at] : peak)
+        (_, at) => presenceState(values[at] || 0, against[at])
     )
 }
 
@@ -231,6 +254,37 @@ const NARROW_CELL = 5
  */
 export function cellWidthFor(count) {
     return (CELL_WIDTHS.find(({upTo}) => count <= upTo) || {width: NARROW_CELL}).width
+}
+
+//: How much of the navigator wall one station gets. Half a pixel is #48's
+//: figure and it is the point of the thing rather than a detail: it is what
+//: puts a thousand stations in one viewport, and it is far too little to
+//: label -- which is why the wall is a navigator and the table is the view.
+const WALL_PX_PER_STATION = 0.5
+
+//: The wall's floor and ceiling in height. The floor is for the small centre,
+//: where twenty stations at half a pixel would be a ten-pixel smear rather
+//: than a picture; the ceiling is what keeps the promise of "no scrolling" at
+//: a centre big enough to break it, at the price of squeezing the lines below
+//: half a pixel -- which `pixelBand` below is written to survive.
+const WALL_MIN_HEIGHT = 44
+const WALL_MAX_HEIGHT = 500
+
+/**
+ * How tall the navigator wall is drawn, for a list of this many stations.
+ *
+ * Here beside `cellWidthFor` rather than in the component, for the reason
+ * that one is here: how big a mark is drawn is a decision about what can be
+ * read, and the tab keeps those together.
+ *
+ * @param {number} count - how many stations are listed.
+ * @returns {number} the wall's height in CSS pixels.
+ */
+export function wallHeightFor(count) {
+    return Math.max(
+        WALL_MIN_HEIGHT,
+        Math.min(WALL_MAX_HEIGHT, Math.round(count * WALL_PX_PER_STATION))
+    )
 }
 
 /**

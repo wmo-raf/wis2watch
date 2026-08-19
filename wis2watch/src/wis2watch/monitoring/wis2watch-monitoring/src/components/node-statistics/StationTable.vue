@@ -99,6 +99,16 @@
           :window-label="windowLabel"
       />
 
+      <!-- The wall's own two ends, in the same words the matrix's header
+           carries and drawn over the wall's full width rather than the
+           matrix's: the two surfaces run the same buckets in the same order,
+           but the wall spreads them across the panel and the cells do not, so
+           a reader locating a gap in time needs the ends said here too. -->
+      <p class="stations__wall-axis">
+        <span>{{ axisStart }}</span>
+        <span>{{ axisEnd }}</span>
+      </p>
+
       <p class="stations__wall-note">
         Every one of the {{ formatCount(shown.length) }} stations listed below,
         one line each and none of them scrolled past &mdash; the same colours,
@@ -756,6 +766,16 @@ function arrow(key) {
   font-size: 0.8rem;
   color: var(--w-color-text-meta);
   margin: 0 0 0.5rem;
+}
+
+/* The wall's two ends, in the type the matrix's own end labels use. */
+.stations__wall-axis {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--w-color-text-meta);
+  margin: 0.15rem 0 0.35rem;
 }
 
 /* What the wall is, under it rather than over it: the picture is the thing a

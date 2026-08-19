@@ -1,5 +1,5 @@
 <template>
-  <div ref="host" class="wall">
+  <div ref="el" class="wall">
     <canvas ref="surface" class="wall__canvas" role="img" :aria-label="label"/>
   </div>
 </template>
@@ -35,10 +35,11 @@
  * again when they move -- `useRoles` is that seam, and it is the whole of the
  * theme handling here.
  */
-import {computed, onBeforeUnmount, onMounted, ref, watch} from 'vue'
+import {computed, ref, watch} from 'vue'
 
+import {formatCount, useMeasuredWidth} from './charts/plot.js'
 import {useRoles} from './charts/useRoles.js'
-import {grainOf, pixelBand, presenceStates} from './presence.js'
+import {grainOf, pixelBand, presenceStates, wallHeightFor} from './presence.js'
 
 const props = defineProps({
   /** The rows the table is showing, in the order it is showing them. */
@@ -73,58 +74,53 @@ const props = defineProps({
   },
 })
 
-//: How much of the wall one station gets. Half a pixel is #48's figure and it
-//: is the point of the thing rather than a detail: it is what puts a thousand
-//: stations in one viewport, and it is far too little to label -- which is why
-//: this is a navigator and the table is the view.
-const PX_PER_STATION = 0.5
-
-//: The wall's floor and ceiling in height. The floor is for the small centre,
-//: where twenty stations at half a pixel would be a ten-pixel smear rather
-//: than a picture; the ceiling is what keeps the promise of "no scrolling"
-//: at a centre big enough to break it, at the price of squeezing the rows
-//: below half a pixel -- which the painting below is written to survive.
-const MIN_HEIGHT = 44
-const MAX_HEIGHT = 500
-
 //: Which role paints which state, and in which order. A map rather than a
 //: branch, in the same shape as the matrix's own stylesheet and naming the
 //: same three roles, so that the wall and the cells beneath it are one
 //: legend rather than two.
 //:
-//: The *order* is the whole trick of drawing a thousand rows into five
-//: hundred pixels. Where two stations share a pixel, the one painted last is
-//: the one seen -- so the worse news is painted last, and an outage cannot be
-//: hidden by a healthy neighbour it happens to be squeezed against. A wall
-//: that lost a dark station to rounding would be a navigator pointing at
-//: nothing.
+//: The *order* is the whole trick of drawing more stations than there are
+//: pixels to draw them on. Where two lines share a pixel the one painted last
+//: is the one seen, so the worse news is painted last: an outage cannot be
+//: hidden by a healthy neighbour it happens to be squeezed against.
+//:
+//: That is a bias and it is chosen rather than fallen into. Under compression
+//: -- above about a thousand stations, and only there -- a silent station can
+//: claim the pixel a live one would have had, so the wall over-reports
+//: darkness rather than under-reporting it. That is the direction a navigator
+//: has to fail in: it sends a reader to rows that turn out to be fine, where
+//: the other way round it would quietly not send them at all.
+//:
+//: It is also why silence is painted at all when the ground is already the
+//: silent colour: that pass exists to take back the pixels the live pass
+//: covered, and on an uncompressed wall it draws nothing new.
 const PAINT_ORDER = [
   {state: 'full', role: 'live'},
   {state: 'thin', role: 'thin'},
   {state: 'silent', role: 'empty'},
 ]
 
-const host = ref(null)
 const surface = ref(null)
+
+// The width the page leaves the wall, measured the way every panelled chart
+// on the tab measures its own: the admin's sidebar collapses, and a canvas
+// painted to a width it no longer has is a picture of the wrong shape.
+const {el, width} = useMeasuredWidth()
 
 // The roles this wall paints with, and every one of them is also a fill in
 // the matrix's own stylesheet. The ground is `empty` rather than the panel's
 // background on purpose: the wall's ground *is* silence, and what a reader
-// hunts on it is the absence of the live colour.
-const roles = useRoles(host, ['live', 'thin', 'empty'])
+// hunts on it is the absence of the live colour. Resolved against the panel
+// element, which is what the roles are inherited through.
+const roles = useRoles(el, ['live', 'thin', 'empty'])
 
-const width = ref(0)
-
-const height = computed(() => Math.max(
-    MIN_HEIGHT,
-    Math.min(MAX_HEIGHT, Math.round(props.stations.length * PX_PER_STATION))
-))
+const height = computed(() => wallHeightFor(props.stations.length))
 
 const label = computed(() => {
   const period = grainOf(props.grain).period
 
   return (
-      `All ${props.stations.length.toLocaleString()} stations listed below at`
+      `All ${formatCount(props.stations.length)} stations listed below at`
       + ` once, one line each, in the same order and the same colours as the`
       + ` rows: the ${period} of ${props.windowLabel.toLowerCase()} run left to`
       + ` right, oldest first. A gap the full height of it is every station`
@@ -174,8 +170,8 @@ function paint() {
   PAINT_ORDER.forEach(({state, role}) => {
     context.fillStyle = roles.value[role]
 
-    rows.forEach((states, at) => {
-      const [top, bottom] = pixelBand(at, rows.length, canvasHeight)
+    rows.forEach((states, row) => {
+      const [top, bottom] = pixelBand(row, rows.length, canvasHeight)
 
       // The run rather than the cell: a station heard through a whole window
       // is one rectangle, and it is the ordinary case.
@@ -223,27 +219,13 @@ function repaint() {
   })
 }
 
-let observer = null
-
-onMounted(() => {
-  // The panel is inside Wagtail's own layout, so the wall's width is whatever
-  // the page leaves it rather than a number this component can know. Watched
-  // rather than read once: the admin's sidebar collapses.
-  observer = new ResizeObserver(() => {
-    width.value = host.value?.clientWidth || 0
-  })
-
-  if (host.value) {
-    observer.observe(host.value)
-    width.value = host.value.clientWidth
-  }
-})
-
-onBeforeUnmount(() => observer?.disconnect())
-
 watch(
     [width, height, roles, () => props.stations, () => props.buckets, () => props.ceilings],
-    repaint
+    repaint,
+    // The first paint as well as every later one: the measured width and the
+    // resolved roles are both settled by the time this runs, and a wall that
+    // waited for one of them to *change* would open blank.
+    {immediate: true}
 )
 </script>
 
