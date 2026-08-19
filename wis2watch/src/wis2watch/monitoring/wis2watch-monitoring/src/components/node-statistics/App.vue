@@ -56,8 +56,27 @@
         </p>
       </div>
 
+      <section class="node-statistics__panel">
+        <h3 class="node-statistics__panel-heading">
+          Stations reporting, hour by hour
+        </h3>
+        <p class="node-statistics__panel-note">
+          One bar per whole UTC hour, against every station the registry
+          declares &mdash; so the height of a bar is how much of this centre
+          was reporting, not how busy it was. Message volume is in the words
+          below the chart.
+        </p>
+
+        <HourlyChart
+            :buckets="summary.now.buckets"
+            :hourly="summary.now.hourly"
+            :declared="counts.declared_station_count"
+        />
+      </section>
+
       <Message severity="secondary" :closable="false">
-        The charts, the station table and the map are not drawn yet.
+        The daily series, the station table, the matrix and the map are not
+        drawn yet.
       </Message>
     </template>
   </div>
@@ -67,12 +86,12 @@
 /**
  * The node statistics dashboard.
  *
- * What is drawn so far is the standing block: how many of the centre's
+ * What is drawn so far is the standing block -- how many of the centre's
  * stations are working, how many have stopped, and how many it transmits for
- * without declaring them. Every moving view -- the hourly chart, the daily
- * series, the station table, the availability matrix, the map -- arrives on
- * its own ticket and reads the same endpoint over a window this page does not
- * offer a control for yet.
+ * without declaring them -- and the hourly chart under it. Every remaining
+ * view (the daily series, the station table, the availability matrix, the
+ * map) arrives on its own ticket and reads the same endpoint over a window
+ * this page does not offer a control for yet.
  *
  * Two things about these numbers that the labels alone do not carry.
  *
@@ -92,6 +111,12 @@
  */
 import {computed, onMounted, ref} from 'vue'
 import Message from 'primevue/message'
+
+import HourlyChart from './HourlyChart.vue'
+// The tab's colour vocabulary, loaded once for the island. Unscoped on
+// purpose: a role is not one component's styling, and every surface added
+// after this one is bound by the same names.
+import './charts/roles.css'
 
 const props = defineProps({
   nodeId: {
@@ -220,6 +245,26 @@ onMounted(async () => {
   font-size: 1.3rem;
   margin: 0;
   color: var(--w-color-text-label);
+}
+
+.node-statistics__panel {
+  border: 1px solid var(--w-color-border-furniture);
+  border-radius: 0.3rem;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.node-statistics__panel-heading {
+  font-size: 0.95rem;
+  margin: 0 0 0.25rem;
+  color: var(--w-color-text-label);
+}
+
+.node-statistics__panel-note {
+  font-size: 0.8rem;
+  color: var(--w-color-text-meta);
+  margin: 0 0 0.75rem;
+  max-width: 70ch;
 }
 
 .node-statistics__caveats {

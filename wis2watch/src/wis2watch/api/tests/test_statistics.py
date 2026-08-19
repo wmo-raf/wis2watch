@@ -17,7 +17,7 @@ from django.urls import reverse
 from django.utils import timezone as dj_timezone
 
 from wis2watch.core.models import MessageSource, WIS2Node
-from wis2watch.core.tests.support import declare_station, observe_station
+from wis2watch.core.tests.support import declare_station, observe_station, published
 
 
 def admin_reader(username="diagnostician"):
@@ -117,6 +117,8 @@ class SummaryResponseTests(StatisticsEndpointTestCase):
                 "undeclared_transmitting",
                 "declared_station_count",
                 "unlocated_station_count",
+                "buckets",
+                "hourly",
             },
         )
 
@@ -168,6 +170,69 @@ class SummaryResponseTests(StatisticsEndpointTestCase):
             any("24h" in line for line in logged.output),
             logged.output,
         )
+
+
+class HourlySeriesResponseTests(StatisticsEndpointTestCase):
+    """The axis and the series the tab's first chart is drawn from."""
+
+    def rollup(self, *, hours_ago=1, messages=1, station=None):
+        """One hour of Global Broker traffic for this centre.
+
+        Measured back from the real clock for the same reason the observations
+        above are: the view has no ``now`` seam, so a fixed instant here would
+        fall out of the window the day after it was written.
+        """
+        return published(
+            self.kenya,
+            source=self.global_broker,
+            hour=dj_timezone.now() - timedelta(hours=hours_ago),
+            messages=messages,
+            station=station,
+        )
+
+    def test_the_bucket_axis_travels_once_at_the_top(self):
+        """Not repeated per series, and never worked out on the client."""
+        summary = self.summary()
+
+        self.assertEqual(len(summary["buckets"]), 24)
+        self.assertEqual(set(summary["buckets"][0]), {"start", "partial"})
+        self.assertTrue(summary["buckets"][0]["start"].endswith("Z"))
+        self.assertFalse(any(bucket["partial"] for bucket in summary["buckets"]))
+
+    def test_the_fixed_block_carries_the_hours_its_series_are_drawn_on(self):
+        now = self.summary()["now"]
+
+        self.assertEqual(len(now["buckets"]), 24)
+        self.assertEqual(now["buckets"], self.summary()["buckets"])
+
+    def test_the_hourly_series_is_dense_and_crosses_the_wire_whole(self):
+        series = self.summary()["now"]["hourly"]
+
+        self.assertEqual(len(series), 24)
+        self.assertEqual(
+            set(series[0]), {"messages", "unattributed_messages", "stations"}
+        )
+
+    def test_an_hour_of_traffic_is_counted_into_its_own_bucket(self):
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=1, messages=4, station=station)
+
+        series = self.summary()["now"]["hourly"]
+
+        self.assertEqual(series[-1], {
+            "messages": 4,
+            "unattributed_messages": 0,
+            "stations": 1,
+        })
+
+    def test_an_hour_that_named_no_station_reaches_the_client_as_such(self):
+        """The mark the chart draws instead of a bar depends on this pair."""
+        self.rollup(hours_ago=1, messages=6, station=None)
+
+        series = self.summary()["now"]["hourly"]
+
+        self.assertEqual(series[-1]["unattributed_messages"], 6)
+        self.assertEqual(series[-1]["stations"], 0)
 
 
 class MountPointTests(TestCase):

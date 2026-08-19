@@ -19,7 +19,8 @@ from django.contrib.gis.geos import Point
 from django.test import SimpleTestCase
 
 from ..interpretation import parse_topic
-from ..models import MessageSource, Station, StationSource
+from ..models import HourlyRollup, MessageSource, Station, StationSource
+from ..rollups import floor_to_hour
 
 FIXTURE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 
@@ -192,6 +193,36 @@ def observe_station(node, wigos_id, *, last_seen, location=SOMEWHERE):
     )
 
     return station
+
+
+def published(node, *, source, hour, messages=1, station=None, dataset=None):
+    """One hour of a centre's traffic, as the rollup run would have derived it.
+
+    The hour is floored the way the rollups floor it, so a test says "three
+    hours ago" and the row lands in the bucket a reader would look for it in
+    rather than one boundary away from it.
+
+    Args:
+        node: the centre that published.
+        source: the vantage point the messages were observed from. Required
+            rather than defaulted, because which vantage a row was written
+            under is the whole of what several of these tests are about.
+        hour: any instant inside the hour to count against.
+        messages: how many notifications the bucket holds.
+        station: the station they named, or None for traffic naming nobody.
+        dataset: the dataset they belong to, or None for an unclaimed topic.
+
+    Returns:
+        HourlyRollup: the bucket.
+    """
+    return HourlyRollup.objects.create(
+        hour=floor_to_hour(hour),
+        source=source,
+        node=node,
+        dataset=dataset,
+        station=station,
+        message_count=messages,
+    )
 
 
 class NetworkAccessInTest(AssertionError):

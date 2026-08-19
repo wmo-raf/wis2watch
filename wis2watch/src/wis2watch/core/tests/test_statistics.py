@@ -25,7 +25,14 @@ from wis2watch.core.analysis import (
 )
 from wis2watch.core.models import MessageSource, WIS2Node
 
-from .support import SOMEWHERE, at, declare_station, observe_station
+from .support import (
+    SOMEWHERE,
+    at,
+    declare_station,
+    observe_station,
+    origin_broker,
+    published,
+)
 
 NOW = at("2026-08-11T12:34:56")
 
@@ -270,3 +277,175 @@ def node_detail_standings(node):
         counts[row.standing] += 1
 
     return counts
+
+
+class SeriesTestCase(SummaryTestCase):
+    """A node whose hours can be seeded one rollup at a time."""
+
+    def rollup(self, *, hours_ago, messages=1, station=None, source=None, node=None):
+        """One hour of this centre's traffic, that many hours before NOW."""
+        return published(
+            node or self.kenya,
+            source=source or self.global_broker,
+            hour=NOW - timedelta(hours=hours_ago),
+            messages=messages,
+            station=station,
+        )
+
+    def hourly(self, **kwargs):
+        return self.summary(**kwargs).now.hourly
+
+
+class BucketAxisTests(SeriesTestCase):
+    """Where the chart's columns fall, which no client is allowed to decide."""
+
+    def test_the_axis_is_dense_over_the_whole_window(self):
+        buckets = self.summary().buckets
+
+        self.assertEqual(len(buckets), 24)
+
+    def test_the_axis_starts_at_the_window_start_and_steps_by_the_hour(self):
+        buckets = self.summary().buckets
+
+        self.assertEqual(buckets[0].start, at("2026-08-10T12:00:00"))
+        self.assertEqual(buckets[1].start, at("2026-08-10T13:00:00"))
+        self.assertEqual(buckets[-1].start, at("2026-08-11T11:00:00"))
+
+    def test_no_hourly_bucket_is_incomplete(self):
+        """The hour in progress is left out rather than drawn as a collapse."""
+        self.assertFalse(any(bucket.partial for bucket in self.summary().buckets))
+
+    def test_the_fixed_block_carries_its_own_axis_of_whole_hours(self):
+        """The window will move; the standing block's 24 hours will not."""
+        buckets = self.summary().now.buckets
+
+        self.assertEqual(len(buckets), 24)
+        self.assertEqual(buckets[0].start, at("2026-08-10T12:00:00"))
+        self.assertEqual(buckets[-1].start, at("2026-08-11T11:00:00"))
+
+    def test_a_longer_window_moves_its_own_axis_and_not_the_fixed_one(self):
+        """Why there are two axes at all, pinned before a control can move one.
+
+        At the default window the two lists are identical, so nothing here
+        would notice them being one list. Asking for a longer one is what
+        makes the difference real: the window's buckets become days, and the
+        fixed block goes on being the same 24 whole hours it was.
+        """
+        summary = self.summary(window=Window.resolve("7d"))
+
+        self.assertEqual(len(summary.buckets), 7)
+        self.assertEqual(summary.buckets[0].start, at("2026-08-05T00:00:00"))
+
+        self.assertEqual(len(summary.now.buckets), 24)
+        self.assertEqual(summary.now.buckets[0].start, at("2026-08-10T12:00:00"))
+        self.assertEqual(len(summary.now.hourly), 24)
+
+    def test_the_day_in_progress_is_the_one_bucket_marked_unfinished(self):
+        """`partial` is "real but incomplete", and only the newest day is."""
+        buckets = self.summary(window=Window.resolve("7d")).buckets
+
+        self.assertTrue(buckets[-1].partial)
+        self.assertFalse(any(bucket.partial for bucket in buckets[:-1]))
+
+
+class HourlySeriesTests(SeriesTestCase):
+    """The last 24 whole hours, as the bar per hour the tab opens on."""
+
+    def test_every_hour_is_present_even_where_nothing_was_published(self):
+        """A silent hour is the finding; a client filling gaps can get it wrong."""
+        self.assertEqual(len(self.hourly()), 24)
+
+    def test_the_series_is_positional_against_the_axis(self):
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=1, station=station, messages=5)
+
+        series = self.hourly()
+
+        self.assertEqual(series[-1].messages, 5)
+        self.assertEqual(series[-2].messages, 0)
+
+    def test_an_hour_counts_the_distinct_stations_heard_in_it(self):
+        first = self.declare("0-20000-0-63708")
+        second = self.declare("0-20000-0-63709")
+        self.rollup(hours_ago=1, station=first, messages=3)
+        self.rollup(hours_ago=1, station=second, messages=4)
+
+        self.assertEqual(self.hourly()[-1].stations, 2)
+
+    def test_a_station_heard_at_two_vantage_points_is_one_station(self):
+        """DISTINCT absorbs what the Global Broker filter exists to prevent."""
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=1, station=station, messages=3)
+        self.rollup(
+            hours_ago=1, station=station, messages=3, source=origin_broker(self.kenya)
+        )
+
+        self.assertEqual(self.hourly()[-1].stations, 1)
+
+    def test_a_station_heard_only_at_its_own_broker_still_counts(self):
+        """Distinct-station counts are vantage-free, by #42's decision."""
+        station = self.declare("0-20000-0-63708")
+        self.rollup(
+            hours_ago=1, station=station, messages=3, source=origin_broker(self.kenya)
+        )
+
+        self.assertEqual(self.hourly()[-1].stations, 1)
+
+    def test_message_volume_is_counted_from_the_global_broker_only(self):
+        """Summing the vantage points would report one message as many."""
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=1, station=station, messages=3)
+        self.rollup(
+            hours_ago=1, station=station, messages=3, source=origin_broker(self.kenya)
+        )
+
+        self.assertEqual(self.hourly()[-1].messages, 3)
+
+    def test_messages_naming_no_station_are_counted_apart_and_included(self):
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=1, station=station, messages=3)
+        self.rollup(hours_ago=1, station=None, messages=2)
+
+        hour = self.hourly()[-1]
+
+        self.assertEqual(hour.messages, 5)
+        self.assertEqual(hour.unattributed_messages, 2)
+        self.assertEqual(hour.stations, 1)
+
+    def test_a_busy_hour_that_named_nobody_is_not_a_silent_hour(self):
+        """The case that forced the unit: traffic with no station to plot."""
+        self.rollup(hours_ago=1, station=None, messages=7)
+
+        hour = self.hourly()[-1]
+
+        self.assertEqual(hour.stations, 0)
+        self.assertEqual(hour.unattributed_messages, 7)
+
+    def test_an_hour_older_than_the_window_is_left_out(self):
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=25, station=station, messages=9)
+
+        self.assertEqual(sum(hour.messages for hour in self.hourly()), 0)
+
+    def test_the_hour_in_progress_is_left_out(self):
+        """It is a part-counted hour, and drawing it is a collapse every hour."""
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=0, station=station, messages=9)
+
+        self.assertEqual(sum(hour.messages for hour in self.hourly()), 0)
+
+    def test_another_centres_traffic_is_not_counted_here(self):
+        djibouti = WIS2Node.objects.create(centre_id="dj-anm", name="Djibouti")
+        station = self.declare("0-20000-0-63708")
+        self.rollup(hours_ago=1, station=station, messages=9, node=djibouti)
+
+        self.assertEqual(sum(hour.messages for hour in self.hourly()), 0)
+
+    def test_a_node_that_published_nothing_gets_a_real_zero_series(self):
+        """An empty chart against a real axis, not an absent one."""
+        series = self.hourly()
+
+        self.assertEqual(len(series), 24)
+        self.assertEqual(sum(hour.messages for hour in series), 0)
+        self.assertEqual(sum(hour.stations for hour in series), 0)
+        self.assertEqual(sum(hour.unattributed_messages for hour in series), 0)

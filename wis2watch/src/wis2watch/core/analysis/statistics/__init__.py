@@ -6,9 +6,10 @@ station, and one station in full -- and they are answered by different queries
 against different tables. Each gets its own module as it arrives.
 """
 
+from .series import Bucket, HourlyActivity, bucket_axis, hourly_activity
 from .summary import (
     NodeStatisticsSummary,
-    StandingCounts,
+    NowBlock,
     Vantage,
     WindowBounds,
     WindowOption,
@@ -16,10 +17,14 @@ from .summary import (
 )
 
 __all__ = [
+    "Bucket",
+    "HourlyActivity",
     "NodeStatisticsSummary",
-    "StandingCounts",
+    "NowBlock",
     "Vantage",
     "WindowBounds",
     "WindowOption",
+    "bucket_axis",
+    "hourly_activity",
     "node_statistics_summary",
 ]

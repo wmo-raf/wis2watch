@@ -1,0 +1,100 @@
+/**
+ * The tab's colour vocabulary: named roles, never colours at the call site.
+ *
+ * One vocabulary for everything that carries a *finding*. The charts here,
+ * and later the station table, the availability matrix, the navigator wall
+ * and the map, all reference a role -- so "silent" is one decision in one
+ * place rather than a red that four components each chose for themselves and
+ * slowly disagreed on.
+ *
+ * Panel chrome is deliberately not in here. A panel's border and its heading
+ * are Wagtail's furniture, and the tab keeps the page's own ground rather
+ * than laying a second one over it, so those read `--w-color-*` exactly as
+ * the rest of the admin does. A role is for a mark that means something.
+ *
+ * Where a PrimeVue token means the right thing it is used, because those
+ * already carry the admin's own light and dark values. Where none does -- and
+ * "a step toward the ground, darker than live on dark and paler on light" is
+ * a relationship rather than a palette slot -- the value is hand-picked and
+ * given an explicit dark counterpart.
+ *
+ * Roles are declared as custom properties and read as `var(--stat-...)` in
+ * fills and strokes, so a theme flip repaints everything with no JavaScript
+ * and no reload. Nothing may resolve a role to a colour string in JS unless
+ * the surface genuinely cannot take a custom property -- a canvas or
+ * MapLibre's paint properties -- and those arrive with their own tickets.
+ *
+ * Wagtail carries the reader's choice on <html>, and its default is
+ * `w-theme-system`, which means the OS decides. Naming only `.w-theme-dark`
+ * is the scar the island's PrimeVue setup already carries once: it leaves
+ * everything light for everybody who never opened the setting, which is most
+ * people. Hence the same two selectors here.
+ */
+
+.node-statistics {
+    /* Axis furniture, from the surface scale the rest of the island is
+       already painted with. */
+    --stat-ink-muted: var(--p-text-muted-color);
+    --stat-grid: var(--p-surface-300);
+
+    /* The two standings the whole tab is bound by. The map will be the third
+       caller of the silent one; it is declared here rather than where the
+       first chart happened to need it. */
+    --stat-live: var(--p-teal-600);
+    --stat-silent: var(--p-red-500);
+
+    /* Hatch: "no value on this axis", and nothing else. It carries the hour
+       that published messages naming no station, and later the ratio series'
+       null buckets. Real-but-incomplete is a different mark, because one mark
+       with two meanings is a cipher. */
+    --stat-hatch-ground: var(--p-surface-50);
+    --stat-hatch-line: var(--p-surface-400);
+
+    /* Where the reader is: the hovered or focused bucket. A wash rather than
+       a colour, so it reads over a bar and over bare ground alike. */
+    --stat-hover: var(--p-text-color);
+    --stat-focus: var(--p-primary-color);
+}
+
+/* The dark values, written twice on purpose. Wagtail's explicit choice is a
+   class and its default is the OS, and no portable CSS selector covers both a
+   bare class and that class inside a media query in one rule. `light-dark()`
+   would collapse them, at the price of every role falling back to unset --
+   charts with no colour at all -- on a browser that does not have it. The
+   duplication is the cheaper failure. Keep the two lists identical. */
+.w-theme-dark .node-statistics {
+    --stat-grid: var(--p-surface-600);
+    --stat-live: var(--p-teal-400);
+    --stat-silent: var(--p-red-400);
+    --stat-hatch-ground: var(--p-surface-900);
+    --stat-hatch-line: var(--p-surface-500);
+}
+
+@media (prefers-color-scheme: dark) {
+    .w-theme-system .node-statistics {
+        --stat-grid: var(--p-surface-600);
+        --stat-live: var(--p-teal-400);
+        --stat-silent: var(--p-red-400);
+        --stat-hatch-ground: var(--p-surface-900);
+        --stat-hatch-line: var(--p-surface-500);
+    }
+}
+
+/* Axis furniture, shared by every chart so that four panels cannot drift into
+   four typographies. Unscoped on purpose: these are the tokens themselves,
+   not one component's styling. */
+.node-statistics .stat-tick {
+    font-size: 9.5px;
+    fill: var(--stat-ink-muted);
+}
+
+.node-statistics .stat-axis {
+    stroke: var(--stat-grid);
+    stroke-width: 1;
+}
+
+.node-statistics .stat-gridline {
+    stroke: var(--stat-grid);
+    stroke-width: 1;
+    stroke-dasharray: 2 3;
+}

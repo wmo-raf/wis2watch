@@ -57,8 +57,10 @@ from .silence import (
 )
 from .staleness import Staleness
 from .statistics import (
+    Bucket,
+    HourlyActivity,
     NodeStatisticsSummary,
-    StandingCounts,
+    NowBlock,
     Vantage,
     WindowBounds,
     WindowOption,
@@ -69,12 +71,14 @@ from .windows import Grain, UnknownWindow, Window
 
 __all__ = [
     "GAP_REPORTS",
+    "Bucket",
     "CachePickup",
     "DatasetSilenceRow",
     "Expectation",
     "GapReport",
     "GapReportSummary",
     "Grain",
+    "HourlyActivity",
     "NodeDatasetRow",
     "NodeDetail",
     "NodeOverviewRow",
@@ -82,6 +86,7 @@ __all__ = [
     "NodeStationRow",
     "NodeStatisticsSummary",
     "Notice",
+    "NowBlock",
     "OriginReachability",
     "OriginState",
     "OriginTransport",
@@ -90,7 +95,6 @@ __all__ = [
     "Silence",
     "SilentStationRow",
     "Staleness",
-    "StandingCounts",
     "StationStanding",
     "SyncRunRow",
     "SyncScope",
