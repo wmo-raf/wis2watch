@@ -414,12 +414,15 @@ const table = ref({
 // a dead end.
 const windows = ref([])
 
-//: Whether the hourly chart is drawn on the *window's* axis, which is true
-//: only while the window is the hourly one. It is the flat-24h chart at every
-//: other window, and a bucket picked on it there would name an hour the
-//: station rows have no column for -- so the gesture is offered where it
-//: means something and withheld where it would filter the table to nothing.
-const hourlyIsTheWindow = computed(() => summary.value?.window.grain === 'hour')
+//: Whether the hourly chart is drawn on the axis the station rows are drawn
+//: against, which is true only while the window is the hourly one. It is the
+//: flat-24h chart at every other window, and a bucket picked on it there
+//: would name an hour the rows have no column for -- so the gesture is
+//: offered where it means something and withheld where it would filter the
+//: table to nothing. Read off the *rows'* payload rather than the summary's,
+//: because the axis being asked about is theirs: with no rows on the page
+//: there is nothing for a pick to filter either.
+const hourlyIsTheWindow = computed(() => rows.value?.window.grain === 'hour')
 
 const counts = computed(() => summary.value.now)
 const windowStats = computed(() => summary.value.window_stats)
@@ -507,6 +510,8 @@ function refine(chosen) {
     // says something about a sort that is not happening.
     dir: table.value.sort ? table.value.direction : '',
   })
+
+  dropSelectionOffTheAxis()
 }
 
 /**
@@ -585,9 +590,16 @@ async function loadStations() {
  *
  * A window the reader moves to that still carries the bucket keeps it: the
  * same day is the same day on a 30-day axis and a 90-day one.
+ *
+ * Asked on every refinement as well as on every load, because the two
+ * payloads are read at two instants: an hour the charts still carry can have
+ * fallen off the rows' axis already, and a table that quietly ignores the
+ * bucket in its own address bar is the one state here nobody could explain.
+ * It settles in one step -- clearing the bucket is a refinement whose own
+ * check returns immediately.
  */
 function dropSelectionOffTheAxis() {
-  if (!table.value.bucket) {
+  if (!table.value.bucket || !rows.value) {
     return
   }
 

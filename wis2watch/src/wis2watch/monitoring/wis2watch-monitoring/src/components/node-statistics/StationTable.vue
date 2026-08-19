@@ -27,7 +27,7 @@
       </label>
 
       <button
-          v-if="narrowing"
+          v-if="narrowedByFields"
           type="button"
           class="stations__clear"
           @click="choose({search: '', standing: ''})"
@@ -430,15 +430,18 @@ const COLUMN_BY_KEY = Object.fromEntries(COLUMNS.map((column) => [column.key, co
 //: the rows not drawn.
 const COLUMN_COUNT = COLUMNS.length + 2
 
-//: What the two fields above the table are doing, which is what their own
-//: clear button is offered for. The picked bucket has its own line and its
-//: own button: one control that clears three things is a control a reader
-//: presses to drop a search and loses the day they were reading.
-const narrowing = computed(() => Boolean(props.search.trim() || props.standing))
+//: Whether the two fields above the table are narrowing anything, which is
+//: what their own clear button is offered for. The picked bucket is not among
+//: them: it has its own line and its own button, because one control that
+//: clears three things is a control a reader presses to drop a search and
+//: loses the day they were reading.
+const narrowedByFields = computed(
+    () => Boolean(props.search.trim() || props.standing)
+)
 
-//: Whether anything at all is being kept off the page, which is what the
-//: population count speaks about.
-const filtering = computed(() => narrowing.value || picked.value)
+//: Whether anything at all is being kept off the page, which is the question
+//: the population count answers.
+const filtering = computed(() => narrowedByFields.value || picked.value)
 
 //: Which column of this window's axis the selection names, or -1 where it
 //: names none of it. A link carrying a day of a 90-day window, opened at the

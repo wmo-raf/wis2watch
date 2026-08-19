@@ -20,7 +20,7 @@
         :id="headDomId(at)"
         :key="bucket.start"
         role="option"
-        :aria-selected="chosen === at"
+        :aria-selected="isPicked(at)"
         :aria-label="describe(at)"
         :transform="`translate(${at * cellWidth}, 0)`"
     >
@@ -33,7 +33,7 @@
           class="heads__head"
           :class="{
             'heads__head--on': index === at,
-            'heads__head--chosen': chosen === at,
+            'heads__head--picked': pickedAt === at,
           }"
       >
         <title>{{ describe(at) }}</title>
@@ -65,9 +65,9 @@
  */
 import {computed, useId} from 'vue'
 
-import {useBucketHover} from './charts/useBucketHover.js'
+import {useBucketPick} from './charts/useBucketPick.js'
 import {grainOf} from './presence.js'
-import {SELECT_HINT, bucketIndexOf} from './selection.js'
+import {SELECT_HINT} from './selection.js'
 
 const props = defineProps({
   /** The window's own axis, the same one every row is drawn against. */
@@ -90,6 +90,16 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  /**
+   * Whether picking a column here means anything, which it always does: these
+   * heads *are* the rows' own axis. The prop exists because `useBucketPick`
+   * reads it on every surface, and a strip that is drawn at all is a strip
+   * whose columns are the ones being filtered.
+   */
+  selectable: {
+    type: Boolean,
+    default: true
+  },
   /** What the window is called, for the label a screen reader is given. */
   windowLabel: {
     type: String,
@@ -109,29 +119,11 @@ const emit = defineEmits(['select'])
 
 const width = computed(() => props.cellWidth * props.buckets.length)
 
-//: Where the selection sits on this axis, or -1 where it names no column of
-//: it -- which is what a link from another window resolves to.
-const chosen = computed(() => bucketIndexOf(props.buckets, props.selected))
-
-/** Say which bucket the reader picked, or that they dropped the selection. */
-function pick(at) {
-  // Picking the bucket that is already picked drops it, so the gesture that
-  // made the filter is also the one that undoes it -- the pointer's way out,
-  // beside Escape's.
-  const start = at === null ? '' : props.buckets[at].start
-
-  emit('select', start === props.selected ? '' : start)
-}
-
-// The same composable the charts use, and for the same reason: the arrow
-// keys, Enter and Escape have to mean here exactly what they mean there, or
-// the matrix is a second gesture to learn on one page.
-const {index, onPointerMove, onClick, clear, onFocus, onBlur, onKeydown} =
-    useBucketHover(
-        () => props.buckets.length,
-        () => width.value,
-        {onSelect: pick}
-    )
+// The same composable the charts pick with, and for the same reason: the
+// arrow keys, Enter and Escape have to mean here exactly what they mean
+// there, or the matrix is a second gesture to learn on one page.
+const {index, pickedAt, isPicked, onPointerMove, onClick, clear, onFocus, onBlur,
+  onKeydown} = useBucketPick(props, emit, () => props.buckets.length, () => width.value)
 
 const axisLabel = computed(
     () => `The ${grainOf(props.grain).period} of ${props.windowLabel.toLowerCase()},` +
@@ -188,7 +180,7 @@ function describe(at) {
 
 /* What the table below is filtered by, in the same focus colour the charts
    outline their picked bucket with. */
-.heads__head--chosen {
+.heads__head--picked {
   fill: var(--stat-focus);
   fill-opacity: 1;
 }

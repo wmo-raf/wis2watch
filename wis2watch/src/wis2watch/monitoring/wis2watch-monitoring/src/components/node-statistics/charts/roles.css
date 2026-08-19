@@ -163,7 +163,7 @@
    would be the same mark at a second strength: "where I am" and "what the
    table below is filtered by" are different claims. Colour is not the only
    carrier -- the filtered table says the bucket's name in words. */
-.node-statistics .stat-chosen {
+.node-statistics .stat-picked {
     fill: var(--stat-focus);
     fill-opacity: 0.1;
     stroke: var(--stat-focus);
