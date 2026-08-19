@@ -145,8 +145,12 @@ import {computed, useId} from 'vue'
 
 import ChartHatch from './charts/ChartHatch.vue'
 import {
+  PAD_BOTTOM,
+  PAD_LEFT,
+  STUB_HEIGHT,
   bandScale,
   compactCount,
+  formatCount,
   formatDay,
   formatDayLong,
   niceTop,
@@ -178,15 +182,6 @@ const props = defineProps({
     default: 120
   },
 })
-
-//: The same furniture the two charts above leave, so that three panels stack
-//: with their plots starting at one x.
-const PAD_LEFT = 30
-const PAD_BOTTOM = 14
-
-//: The station-less mark, at the height the whole tab draws it. The same mark
-//: at two sizes is two marks to a reader.
-const STUB_HEIGHT = 7
 
 const hatchId = useId()
 
@@ -237,7 +232,7 @@ function pointAt(bucket) {
   return {
     bucket,
     x: band.value.centre(bucket),
-    y: y.value(Math.min(ratios.value[bucket], yTop.value)),
+    y: y.value(ratios.value[bucket]),
   }
 }
 
@@ -334,10 +329,6 @@ const openRun = computed(() => {
   return `M ${from.x} ${from.y} L ${to.x} ${to.y}`
 })
 
-function count(value) {
-  return value.toLocaleString()
-}
-
 /**
  * How far the day in progress has got, from the server's own clock.
  *
@@ -366,11 +357,14 @@ function describe(bucket) {
       : formatDayLong(starts.value[bucket])
 
   if (!has(day.messages_per_active_station)) {
-    if (day.unattributed_messages > 0) {
+    // Which of the two hatched cases this is, decided on the volume itself
+    // rather than on the station-less share of it: the sentence claims the
+    // centre published *nothing*, and only the total can say that.
+    if (day.messages > 0) {
       return (
           `${on}: no messages per station, because no station reported. ` +
-          `${count(day.unattributed_messages)} messages arrived carrying no ` +
-          'WIGOS identifier, so there is nothing to divide them between.'
+          `${formatCount(day.messages)} messages arrived carrying no WIGOS ` +
+          'identifier, so there is nothing to divide them between.'
       )
     }
 
@@ -381,9 +375,9 @@ function describe(bucket) {
   }
 
   return (
-      `${on}: ${count(day.messages_per_active_station)} messages per active ` +
-      `station, from ${count(day.messages)} messages and ` +
-      `${count(day.stations)} stations.` +
+      `${on}: ${formatCount(day.messages_per_active_station)} messages per active ` +
+      `station, from ${formatCount(day.messages)} messages and ` +
+      `${formatCount(day.stations)} stations.` +
       (partial ? ' The day is still being counted.' : '')
   )
 }

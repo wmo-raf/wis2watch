@@ -366,6 +366,12 @@ def hour_of_day_profile(node, since, until):
     hour-of-day over ninety days is the query the daily table exists to
     avoid; this is not that query.
 
+    The window includes the UTC day in progress, so the hours it has reached
+    are summed over one day more than the hours it has not. That is what "over
+    the window" means and it is not corrected here -- dropping today would put
+    this total out of step with ``messages_total`` beside it -- but it is a
+    real lean at the shortest daily window, and the panel names it.
+
     The fold is in UTC and says so, rather than leaning on ``TIME_ZONE``.
     ``ExtractHour`` reads the active timezone by default, so a deployment set
     to anything but UTC would silently move every synoptic peak by its own

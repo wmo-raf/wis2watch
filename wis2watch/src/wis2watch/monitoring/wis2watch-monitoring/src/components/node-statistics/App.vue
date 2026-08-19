@@ -194,7 +194,9 @@
             centre's daily rhythm, and the one chart here that plots messages
             rather than stations. Peaks on the synoptic hours are a centre
             reporting to schedule; a flat profile is one publishing whenever
-            observations happen to arrive.
+            observations happen to arrive. Today's hours so far are in the sum,
+            so over a short window the hours already past today are summed over
+            one day more than the hours still to come.
           </p>
 
           <HourOfDayChart

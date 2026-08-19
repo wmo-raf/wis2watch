@@ -138,7 +138,11 @@ import {computed, useId} from 'vue'
 
 import ChartHatch from './charts/ChartHatch.vue'
 import {
+  PAD_BOTTOM,
+  PAD_LEFT,
+  STUB_HEIGHT,
   bandScale,
+  formatCount,
   formatDay,
   formatDayLong,
   spacedTicks,
@@ -174,15 +178,6 @@ const props = defineProps({
     default: 140
   },
 })
-
-//: Room for the y labels on the left and the day labels underneath, in real
-//: pixels, for the reason the hourly chart measures rather than scales.
-const PAD_LEFT = 30
-const PAD_BOTTOM = 14
-
-//: How tall the station-less mark stands, kept identical to the hourly
-//: chart's: the same mark at two sizes is two marks to a reader.
-const STUB_HEIGHT = 7
 
 const hatchId = useId()
 
@@ -247,10 +242,6 @@ function openBucketPath(day) {
   return `M 0 ${plotHeight.value} L 0 ${top} L ${band.value.barWidth} ${top}`
 }
 
-function count(value) {
-  return value.toLocaleString()
-}
-
 /**
  * How far the day in progress has got.
  *
@@ -282,7 +273,7 @@ function describe(bucket) {
 
   if (isNameless(day)) {
     return (
-        `${on}: no station reported, but ${count(day.unattributed_messages)} ` +
+        `${on}: no station reported, but ${formatCount(day.unattributed_messages)} ` +
         `messages arrived carrying no WIGOS identifier.`
     )
   }
@@ -292,14 +283,14 @@ function describe(bucket) {
   }
 
   const reporting = props.declared > 0
-      ? `${count(day.stations)} of ${count(props.declared)} stations reported`
-      : `${count(day.stations)} stations reported`
+      ? `${formatCount(day.stations)} of ${formatCount(props.declared)} stations reported`
+      : `${formatCount(day.stations)} stations reported`
   const each = day.messages_per_active_station === null
       ? ''
-      : `, ${count(day.messages_per_active_station)} each`
+      : `, ${formatCount(day.messages_per_active_station)} each`
 
   return (
-      `${on}: ${reporting}, ${count(day.messages)} messages${each}.` +
+      `${on}: ${reporting}, ${formatCount(day.messages)} messages${each}.` +
       (partial ? ' The day is still being counted.' : '')
   )
 }

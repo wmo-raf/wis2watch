@@ -20,6 +20,27 @@
  */
 import {onBeforeUnmount, onMounted, ref} from 'vue'
 
+//: The room every panel on the tab leaves for its axis furniture: the y
+//: labels down the left and the bucket labels underneath, in real pixels
+//: rather than scaled, so a 10px label stays 10px whatever Wagtail's layout
+//: does around it. Shared rather than agreed by four copies, because four
+//: panels stacked down one page have to start their plots at one x or they
+//: cannot be read against each other -- which is the whole reason the daily
+//: series is drawn on the hourly chart's axis.
+export const PAD_LEFT = 30
+export const PAD_BOTTOM = 14
+
+//: How tall the station-less mark stands, wherever the tab draws it. Enough
+//: to be unmistakable against a bucket that drew nothing, low enough that
+//: nobody reads it off the y axis -- and one number, because the same mark at
+//: two sizes is two marks to a reader.
+export const STUB_HEIGHT = 7
+
+/** A count in the reader's own locale, spelled in full. */
+export function formatCount(value) {
+    return value.toLocaleString()
+}
+
 /**
  * Value to pixel, y measured downwards, always anchored at zero.
  *
@@ -90,15 +111,6 @@ export function clockTicks(hours, plotWidth, minLabelPx = 40) {
     }, [])
 }
 
-/** Which buckets of an hourly axis get a label, from their bucket starts. */
-export function roundHourTicks(starts, plotWidth, minLabelPx = 40) {
-    return clockTicks(
-        starts.map((start) => start.getUTCHours()),
-        plotWidth,
-        minLabelPx
-    )
-}
-
 //: The steps an axis top is allowed to be rounded up to, per decade. A top is
 //: a number a reader can find a middle of by eye, rather than whatever the
 //: tallest bar happened to be -- but the ladder has to be fine enough that a
@@ -133,8 +145,10 @@ export function niceTop(max) {
  * A number short enough to sit beside an axis, without lying about its size.
  *
  * Message volumes over ninety days run to seven figures, and a y label of
- * "1,240,000" is wider than the room the left pad leaves for it. Thousands
- * and millions are the only two steps this needs.
+ * "1,240,000" is wider than the room the left pad leaves for it. Only the two
+ * steps above ten thousand are shortened: below that a count is short enough
+ * to be worth stating exactly, and rounding it would lose the figure a reader
+ * came for.
  *
  * @param {number} value - the number to label.
  * @returns {string} the label.

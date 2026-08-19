@@ -87,10 +87,15 @@
  * Twenty-four buckets, and they are the *clock* rather than moments on it. A
  * bar is every 06Z in the window added together, which is the only way a
  * habit is visible at all: one day's 06Z is an anecdote, ninety of them are a
- * schedule. Which also means there is no partial bucket here and nothing to
- * mark as unfinished -- the day in progress contributes its hours to the
- * hours it has reached, and no bucket is "still being counted" in a way a
- * reader could act on.
+ * schedule.
+ *
+ * There is no partial bucket here and nothing to mark as unfinished, because
+ * no bucket is "still being counted" in a way a reader could act on. What the
+ * day in progress does instead is *lean* the profile: at 11:00 UTC the hours
+ * up to 11Z have been summed over one day more than the hours after it. Over
+ * ninety days that is a ninetieth and invisible; over seven it is a seventh,
+ * which is why the panel says so in words rather than leaving a reader to
+ * find a peak that is really a sampling difference.
  *
  * The hours are UTC, from the server, and the panel says so in its heading.
  * A local-time fold would move every peak by the reader's own offset and read
@@ -99,9 +104,12 @@
 import {computed, useId} from 'vue'
 
 import {
+  PAD_BOTTOM,
+  PAD_LEFT,
   bandScale,
   clockTicks,
   compactCount,
+  formatCount,
   niceTop,
   useMeasuredWidth,
   yScale,
@@ -125,11 +133,8 @@ const props = defineProps({
   },
 })
 
-//: The same furniture every panel on the tab leaves, so the plots line up.
-const PAD_LEFT = 30
-const PAD_BOTTOM = 14
-
-//: How many buckets the clock has. The server sends exactly this many.
+//: How many buckets the clock has. The server sends exactly this many, and
+//: the axis, the even-day line and the labels all have to agree about it.
 const HOURS = 24
 
 const hourId = useId()
@@ -145,19 +150,16 @@ const total = computed(() => props.hourOfDay.reduce((sum, messages) => sum + mes
 const yTop = computed(() => niceTop(Math.max(...props.hourOfDay, 0)))
 
 const y = computed(() => yScale(yTop.value, plotHeight.value))
-const band = computed(() => bandScale(props.hourOfDay.length, plotWidth.value))
+const band = computed(() => bandScale(HOURS, plotWidth.value))
 
 // Labelled by the same arithmetic the hourly chart is, so 06Z is spaced the
 // same on both panels and a reader learns one axis rather than two.
 const ticks = computed(() =>
-    clockTicks(
-        props.hourOfDay.map((_messages, hour) => hour),
-        plotWidth.value
-    )
+    clockTicks(Array.from({length: HOURS}, (_empty, hour) => hour), plotWidth.value)
 )
 
 const {index, focused, onPointerMove, clear, onFocus, onBlur, onKeydown} = useBucketHover(
-    () => props.hourOfDay.length,
+    () => HOURS,
     () => plotWidth.value
 )
 
@@ -172,10 +174,6 @@ function label(hour) {
 
 function bucketDomId(hour) {
   return `${hourId}-hour-${hour}`
-}
-
-function count(value) {
-  return value.toLocaleString()
 }
 
 //: The busiest hour of the clock, which is the finding a reader is looking
@@ -204,7 +202,7 @@ function describe(hour) {
   const share = total.value > 0 ? Math.round((messages / total.value) * 100) : 0
 
   return (
-      `${label(hour)}: ${count(messages)} messages, ${share}% of everything ` +
+      `${label(hour)}: ${formatCount(messages)} messages, ${share}% of everything ` +
       'this centre published in the window.'
   )
 }
@@ -222,7 +220,7 @@ const readout = computed(() => {
 
   return (
       `Every ${label(peak.value)} of ${props.windowLabel.toLowerCase()} added ` +
-      `together is this centre's busiest hour, at ${count(props.hourOfDay[peak.value])} ` +
+      `together is this centre's busiest hour, at ${formatCount(props.hourOfDay[peak.value])} ` +
       'messages. The dashed line is what an even day would be.'
   )
 })

@@ -114,10 +114,14 @@ import {computed, useId} from 'vue'
 
 import ChartHatch from './charts/ChartHatch.vue'
 import {
+  PAD_BOTTOM,
+  PAD_LEFT,
+  STUB_HEIGHT,
   bandScale,
+  clockTicks,
+  formatCount,
   formatHour,
   formatHourLong,
-  roundHourTicks,
   useMeasuredWidth,
   yScale,
 } from './charts/plot.js'
@@ -145,16 +149,6 @@ const props = defineProps({
   },
 })
 
-//: Room for the y labels on the left and the hour labels underneath. Both are
-//: measured in real pixels rather than scaled, so they stay legible whatever
-//: width Wagtail's layout leaves the panel.
-const PAD_LEFT = 30
-const PAD_BOTTOM = 14
-
-//: How tall the station-less mark stands. Enough to be unmistakable against a
-//: bucket that drew nothing, low enough that nobody reads it off the y axis.
-const STUB_HEIGHT = 7
-
 const hatchId = useId()
 
 const {el, width} = useMeasuredWidth()
@@ -176,7 +170,9 @@ const yTop = computed(() => Math.max(1, props.declared))
 const drawn = (hour) => Math.min(hour.stations, yTop.value)
 const y = computed(() => yScale(yTop.value, plotHeight.value))
 const band = computed(() => bandScale(props.hourly.length, plotWidth.value))
-const ticks = computed(() => roundHourTicks(starts.value, plotWidth.value))
+const ticks = computed(() =>
+    clockTicks(starts.value.map((start) => start.getUTCHours()), plotWidth.value)
+)
 
 // Focus and the arrow keys come from the same composable the pointer does,
 // so a reader walking this chart by keyboard and a reader pointing at it are
@@ -199,10 +195,6 @@ function isNameless(hour) {
   return hour.stations === 0 && hour.unattributed_messages > 0
 }
 
-function count(value) {
-  return value.toLocaleString()
-}
-
 /**
  * One hour in words.
  *
@@ -218,7 +210,7 @@ function describe(bucket) {
 
   if (isNameless(hour)) {
     return (
-        `${at}: no station reported, but ${count(hour.unattributed_messages)} ` +
+        `${at}: no station reported, but ${formatCount(hour.unattributed_messages)} ` +
         `messages arrived carrying no WIGOS identifier.`
     )
   }
@@ -228,13 +220,13 @@ function describe(bucket) {
   }
 
   const reporting = props.declared > 0
-      ? `${count(hour.stations)} of ${count(props.declared)} stations reported`
-      : `${count(hour.stations)} stations reported`
+      ? `${formatCount(hour.stations)} of ${formatCount(props.declared)} stations reported`
+      : `${formatCount(hour.stations)} stations reported`
   const nameless = hour.unattributed_messages > 0
-      ? `, ${count(hour.unattributed_messages)} of them naming no station`
+      ? `, ${formatCount(hour.unattributed_messages)} of them naming no station`
       : ''
 
-  return `${at}: ${reporting}, ${count(hour.messages)} messages${nameless}.`
+  return `${at}: ${reporting}, ${formatCount(hour.messages)} messages${nameless}.`
 }
 
 // What the panel says when the reader is not on a bucket: which hours these
