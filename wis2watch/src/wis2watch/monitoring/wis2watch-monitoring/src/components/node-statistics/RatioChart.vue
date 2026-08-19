@@ -4,11 +4,13 @@
         :width="width"
         :height="height"
         class="stat-plot"
+        :class="{'stat-plot--selectable': selectable}"
         tabindex="0"
         role="listbox"
         :aria-label="axisLabel"
         :aria-activedescendant="index === null ? undefined : bucketDomId(index)"
         @pointermove="onPointerMove($event, PAD_LEFT)"
+        @click="onClick($event, PAD_LEFT)"
         @pointerleave="clear"
         @focus="onFocus"
         @blur="onBlur"
@@ -88,10 +90,21 @@
           :id="bucketDomId(bucket)"
           :key="bucket"
           role="option"
-          :aria-selected="index === bucket"
+          :aria-selected="isPicked(bucket)"
           :aria-label="describe(bucket)"
           :transform="`translate(${PAD_LEFT + band.x(bucket)}, 0)`"
       >
+        <!-- The bucket the reader picked, and it stays there while the
+             pointer moves on: the hover mark says where the reader is, and
+             this says what the table below is filtered by. Outlined rather
+             than washed, so the two are told apart at a glance. -->
+        <rect
+            v-if="pickedAt === bucket"
+            :width="band.barWidth"
+            :height="plotHeight"
+            class="stat-picked"
+        />
+
         <rect
             v-if="index === bucket"
             :width="band.barWidth"
@@ -159,7 +172,8 @@ import {
   useMeasuredWidth,
   yScale,
 } from './charts/plot.js'
-import {useBucketHover} from './charts/useBucketHover.js'
+import {useBucketPick} from './charts/useBucketPick.js'
+import {SELECT_HINT} from './selection.js'
 
 const props = defineProps({
   /** The window's axis, as the server drew it: `[{start, partial}]`. */
@@ -177,11 +191,28 @@ const props = defineProps({
     type: String,
     required: true
   },
+  /** The bucket picked, as the server spelled its start, or empty for none. */
+  selected: {
+    type: String,
+    default: ''
+  },
+  /**
+   * Whether picking a bucket here means anything. False where this chart's
+   * axis is not the one the station rows are drawn against, because a click
+   * naming a bucket the matrix has no column for would filter the table to
+   * nothing at all. `useBucketPick` is where both of these are read.
+   */
+  selectable: {
+    type: Boolean,
+    default: false
+  },
   height: {
     type: Number,
     default: 120
   },
 })
+
+const emit = defineEmits(['select'])
 
 const hatchId = useId()
 
@@ -202,7 +233,10 @@ const y = computed(() => yScale(yTop.value, plotHeight.value))
 const band = computed(() => bandScale(props.daily.length, plotWidth.value))
 const ticks = computed(() => spacedTicks(props.daily.length, plotWidth.value))
 
-const {index, focused, onPointerMove, clear, onFocus, onBlur, onKeydown} = useBucketHover(
+const {index, focused, pickedAt, isPicked, onPointerMove, onClick, clear, onFocus,
+  onBlur, onKeydown} = useBucketPick(
+    props,
+    emit,
     () => props.daily.length,
     () => plotWidth.value
 )
@@ -210,7 +244,7 @@ const {index, focused, onPointerMove, clear, onFocus, onBlur, onKeydown} = useBu
 const axisLabel = computed(
     () => `Messages per active station, per UTC day, over the last ` +
         `${props.daily.length} days. Days on which no station reported have no ` +
-        'value and break the line.'
+        `value and break the line.${props.selectable ? ` ${SELECT_HINT}` : ''}`
 )
 
 /** Where one tick label goes, turned inwards at the ends of the axis. */

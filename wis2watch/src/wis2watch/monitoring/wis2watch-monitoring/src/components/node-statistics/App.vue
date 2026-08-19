@@ -120,6 +120,9 @@
             :buckets="summary.now.buckets"
             :hourly="summary.now.hourly"
             :declared="counts.declared_station_count"
+            :selected="table.bucket"
+            :selectable="hourlyIsTheWindow"
+            @select="refine({bucket: $event})"
         />
       </section>
 
@@ -143,6 +146,9 @@
               :daily="windowStats.daily"
               :declared="counts.declared_station_count"
               :as-of="summary.generated_at"
+              :selected="table.bucket"
+              selectable
+              @select="refine({bucket: $event})"
           />
         </template>
 
@@ -173,6 +179,9 @@
               :buckets="summary.buckets"
               :daily="windowStats.daily"
               :as-of="summary.generated_at"
+              :selected="table.bucket"
+              selectable
+              @select="refine({bucket: $event})"
           />
         </template>
 
@@ -242,6 +251,7 @@
           :buckets="rows.buckets"
           :grain="rows.window.grain"
           :as-of="rows.generated_at"
+          :bucket="table.bucket"
           :search="table.search"
           :standing="table.standing"
           :sort="table.sort"
@@ -301,6 +311,14 @@
  * matrix's worth of per-station vectors -- and the figures should not wait for
  * the rows. Sorting, filtering and searching them is done here rather than by
  * the server, and lands in the same querystring the window does.
+ *
+ * **A bucket picked on a chart or a matrix column filters the rows to the
+ * stations that were dark in it**, and it is the same querystring state as
+ * the rest. The charts and the matrix are drawn from two payloads, so the
+ * selection travels as the bucket's start rather than as a column index: an
+ * index would mean "the third column of whichever list you happen to be
+ * holding", and the two lists are not always the same length. A bucket the
+ * rows' axis does not carry is dropped rather than guessed at.
  *
  * Both URLs are handed in as props rather than assembled here. The bundle is
  * built ahead of time, so a path composed inside it is a path nobody can
@@ -382,6 +400,10 @@ const windowKey = ref(readParam(WINDOW_PARAM))
 const table = ref({
   search: readParam('q'),
   standing: readParam('standing'),
+  // The bucket a reader picked on a chart or a column head, as the server
+  // spelled its start. Read off the URL cold like the rest of them, which is
+  // what makes a filtered view a link somebody can send.
+  bucket: readParam('bucket'),
   sort: readParam('sort'),
   direction: readParam('dir') || 'asc',
 })
@@ -391,6 +413,16 @@ const table = ref({
 // needs the control more than anyone, and a page with only an error on it is
 // a dead end.
 const windows = ref([])
+
+//: Whether the hourly chart is drawn on the axis the station rows are drawn
+//: against, which is true only while the window is the hourly one. It is the
+//: flat-24h chart at every other window, and a bucket picked on it there
+//: would name an hour the rows have no column for -- so the gesture is
+//: offered where it means something and withheld where it would filter the
+//: table to nothing. Read off the *rows'* payload rather than the summary's,
+//: because the axis being asked about is theirs: with no rows on the page
+//: there is nothing for a pick to filter either.
+const hourlyIsTheWindow = computed(() => rows.value?.window.grain === 'hour')
 
 const counts = computed(() => summary.value.now)
 const windowStats = computed(() => summary.value.window_stats)
@@ -472,11 +504,14 @@ function refine(chosen) {
   writeParams({
     q: table.value.search,
     standing: table.value.standing,
+    bucket: table.value.bucket,
     sort: table.value.sort,
     // Never on its own: a direction with nothing sorted by it is a link that
     // says something about a sort that is not happening.
     dir: table.value.sort ? table.value.direction : '',
   })
+
+  dropSelectionOffTheAxis()
 }
 
 /**
@@ -536,8 +571,44 @@ async function loadStations() {
     // change re-reads every row, and rows left over from the last window
     // would carry its message counts under this window's label.
     rows.value = await response.json()
+
+    dropSelectionOffTheAxis()
   } catch (failure) {
     stationsError.value = failure.message || 'The stations could not be read.'
+  }
+}
+
+/**
+ * Forget a picked bucket the rows have no column for.
+ *
+ * A selection is a bucket start rather than a column index precisely so that
+ * this case can be *detected* -- a link carrying a day of a 90-day window,
+ * opened at the default 24 hours, names an instant this axis does not carry.
+ * It is dropped rather than left in the address bar, because a querystring
+ * naming a filter that is not running is a link that reproduces the wrong
+ * view the next time it is opened.
+ *
+ * A window the reader moves to that still carries the bucket keeps it: the
+ * same day is the same day on a 30-day axis and a 90-day one.
+ *
+ * Asked on every refinement as well as on every load, because the two
+ * payloads are read at two instants: an hour the charts still carry can have
+ * fallen off the rows' axis already, and a table that quietly ignores the
+ * bucket in its own address bar is the one state here nobody could explain.
+ * It settles in one step -- clearing the bucket is a refinement whose own
+ * check returns immediately.
+ */
+function dropSelectionOffTheAxis() {
+  if (!table.value.bucket || !rows.value) {
+    return
+  }
+
+  const carried = rows.value.buckets.some(
+      (bucket) => bucket.start === table.value.bucket
+  )
+
+  if (!carried) {
+    refine({bucket: ''})
   }
 }
 
