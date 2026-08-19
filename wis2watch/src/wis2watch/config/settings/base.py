@@ -83,6 +83,13 @@ INSTALLED_APPS = [
     "wis2watch.ingest",
     "wis2watch.ws",
     "wis2watch.monitoring",
+
+    # Below the project's own apps on purpose. Django registers management
+    # commands by walking INSTALLED_APPS in reverse, so the application listed
+    # *earliest* wins a duplicate name -- and wis2watch.core deliberately
+    # shadows dbbackup's `dbrestore` to guard the drop it performs. Moving this
+    # line above wis2watch.core would silently reinstate the unguarded version.
+    "dbbackup",
 ]
 
 MIDDLEWARE = [
@@ -136,20 +143,28 @@ DATABASES = {
     )
 }
 
-DBBACKUP_STORAGE = 'django.core.files.storage.FileSystemStorage'
-DBBACKUP_STORAGE_OPTIONS = {'location': os.path.join(BASE_DIR, "backup")}
+# Database backups. Where the dumps go is set in STORAGES["dbbackup"] below:
+# dbbackup 5 reads that alias, and ignores the DBBACKUP_STORAGE settings older
+# versions used. Ignores them silently, so the symptom of setting them instead
+# is dumps landing in MEDIA_ROOT, which nginx serves to the public.
 DBBACKUP_CLEANUP_KEEP_MEDIA = 1
 DBBACKUP_CLEANUP_KEEP = 1
+
+# Both entries name the same connector because dbbackup consults them in turn:
+# the alias entry wins whenever one exists for the database being dumped, so
+# CONNECTOR_MAPPING on its own would never be reached while "default" is here.
+#
+# There are deliberately no DUMP_SUFFIX or RESTORE_SUFFIX entries. `-e plpgsql`
+# once lived here, and excluded TimescaleDB's catalogue from the dump while
+# still dumping the chunk tables it describes -- which is a dump that cannot be
+# restored. The connector owns its own flags; see wis2watch/utils/dbbackup.py.
+DBBACKUP_CONNECTOR = "wis2watch.utils.dbbackup.TimescaleConnector"
 DBBACKUP_CONNECTORS = {
-    "default": {
-        "CONNECTOR": "dbbackup.db.postgresql.PgDumpBinaryConnector",  # Use pg_dump binary
-        "DUMP_SUFFIX": "-e plpgsql",  # dump only system extensions
-        "RESTORE_SUFFIX": "--if-exists"  # Drop only if exists
-    }
+    "default": {"CONNECTOR": DBBACKUP_CONNECTOR},
 }
 
 DBBACKUP_CONNECTOR_MAPPING = {
-    "timescale.db.backends.postgis": "dbbackup.db.postgresql.PgDumpBinaryConnector",
+    "timescale.db.backends.postgis": DBBACKUP_CONNECTOR,
 }
 
 # Password validation
@@ -207,6 +222,13 @@ STORAGES = {
     },
     "staticfiles": {
         "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+    # Database dumps, which must not fall back to the default storage: that is
+    # MEDIA_ROOT, and nginx serves MEDIA_ROOT at /media/ with no authentication
+    # in front of it. A dump holds every broker password in the registry.
+    "dbbackup": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+        "OPTIONS": {"location": os.path.join(BASE_DIR, "backup")},
     },
 }
 
