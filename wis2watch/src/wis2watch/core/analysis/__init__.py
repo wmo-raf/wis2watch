@@ -35,9 +35,7 @@ from .gaps import (
 from .node_detail import (
     NodeDatasetRow,
     NodeDetail,
-    NodeStationRow,
     OriginState,
-    StationStanding,
     SyncRunRow,
     SyncScope,
     node_detail,
@@ -58,6 +56,16 @@ from .silence import (
     silence_by_node,
 )
 from .staleness import Staleness
+from .statistics import (
+    NodeStatisticsSummary,
+    StandingCounts,
+    Vantage,
+    WindowBounds,
+    WindowOption,
+    node_statistics_summary,
+)
+from .stations import NodeStationRow, StationStanding, node_stations
+from .windows import Grain, UnknownWindow, Window
 
 __all__ = [
     "GAP_REPORTS",
@@ -66,11 +74,13 @@ __all__ = [
     "Expectation",
     "GapReport",
     "GapReportSummary",
+    "Grain",
     "NodeDatasetRow",
     "NodeDetail",
     "NodeOverviewRow",
     "NodeSilence",
     "NodeStationRow",
+    "NodeStatisticsSummary",
     "Notice",
     "OriginReachability",
     "OriginState",
@@ -80,12 +90,18 @@ __all__ = [
     "Silence",
     "SilentStationRow",
     "Staleness",
+    "StandingCounts",
     "StationStanding",
     "SyncRunRow",
     "SyncScope",
     "UnattributedRateRow",
     "UndeclaredStationRow",
+    "UnknownWindow",
     "UnregisteredCentreRow",
+    "Vantage",
+    "Window",
+    "WindowBounds",
+    "WindowOption",
     "dataset_silence",
     "default_attribution_window_hours",
     "default_volume_hours",
@@ -93,6 +109,8 @@ __all__ = [
     "gap_report_summaries",
     "node_detail",
     "node_overview",
+    "node_stations",
+    "node_statistics_summary",
     "propagation_gaps",
     "propagation_gaps_left_out",
     "silence_by_node",
