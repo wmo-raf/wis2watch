@@ -28,7 +28,13 @@ from django.utils import timezone as dj_timezone
 from ...models import MessageSource
 from ..staleness import default_stale_after_hours
 from ..stations import StationStanding, node_stations
-from ..windows import Window
+from ..windows import Grain, Window
+from .series import Bucket, HourlyActivity, bucket_axis, hourly_activity
+
+#: The window the fixed block is always read over, whatever the reader has
+#: chosen. Named here rather than spelled as "24 hours" so that the block, the
+#: staleness threshold and the shortest window on offer stay one number.
+FIXED_WINDOW_KEY = "24h"
 
 
 @dataclass(frozen=True)
@@ -79,12 +85,21 @@ class Vantage:
 
 
 @dataclass(frozen=True)
-class StandingCounts:
-    """How a centre's stations stand, at this instant.
+class NowBlock:
+    """What is true of a centre's stations at this instant.
 
-    Judged over a flat 24 hours whatever window the reader has chosen, because
-    "is this station working" is a question about now. The window control moves
-    everything on the tab except these.
+    Everything here is judged over a flat 24 hours whatever window the reader
+    has chosen, because "is this station working" and "what has this centre
+    been doing today" are questions about now. The window control moves
+    everything on the tab except this block, which is why it is kept apart in
+    the payload: a client cannot then accidentally bind a fixed figure to a
+    control it does not depend on.
+
+    It carries its own axis. The window's buckets are the same 24 whole hours
+    while the window is the default one, and stop being so the moment a daily
+    window is chosen -- so the hours these series are indexed by are stated
+    here rather than inferred from a bucket list that is about to move
+    underneath them.
     """
 
     transmitting: int
@@ -93,11 +108,20 @@ class StandingCounts:
     undeclared_transmitting: int
     declared_station_count: int
     unlocated_station_count: int
+    buckets: list[Bucket]
+    hourly: list[HourlyActivity]
 
 
 @dataclass(frozen=True)
 class NodeStatisticsSummary:
-    """Everything series-shaped the statistics tab reads for one centre."""
+    """Everything series-shaped the statistics tab reads for one centre.
+
+    ``buckets`` is the axis the window's own series are indexed by, and it
+    travels once rather than being repeated inside each of them. It is what
+    the daily series and the station rows' presence vectors will be read
+    against; the fixed block above carries its own, because the two axes are
+    the same list only while the window is the hourly one.
+    """
 
     node_id: int
     centre_id: str
@@ -106,7 +130,8 @@ class NodeStatisticsSummary:
     window: WindowBounds
     windows: list[WindowOption]
     vantage: Vantage
-    now: StandingCounts
+    buckets: list[Bucket]
+    now: NowBlock
 
 
 def node_statistics_summary(node, *, window=None, now=None):
@@ -145,23 +170,30 @@ def node_statistics_summary(node, *, window=None, now=None):
             for offered in Window.available()
         ],
         vantage=_vantage(),
-        now=_standing_counts(node, now=now, stale_after=stale_after),
+        buckets=bucket_axis(since, until, window.grain, now=now),
+        now=_now_block(node, now=now, stale_after=stale_after),
     )
 
 
-def _standing_counts(node, *, now, stale_after):
-    """How many of the centre's stations are in each standing.
+def _now_block(node, *, now, stale_after):
+    """What is true of the centre right now: how it stands, and today's hours.
 
-    A count of the rows the node detail page lists, not a second query that
-    happens to agree with it today. The counting is cheap; the agreement is
-    what is being bought.
+    The standing figures are a count of the rows the node detail page lists,
+    not a second query that happens to agree with them today. The counting is
+    cheap; the agreement is what is being bought.
+
+    The hours are read over the fixed 24-hour window rather than the one the
+    reader chose, so this block draws the same chart whatever the control says
+    -- which is the whole reason it is a block of its own.
     """
     rows = node_stations(node, now=now, stale_after=stale_after)
+    since, until = Window.resolve(FIXED_WINDOW_KEY).bounds(now)
+    buckets = bucket_axis(since, until, Grain.HOUR, now=now)
 
     def standing(*wanted):
         return sum(row.standing in wanted for row in rows)
 
-    return StandingCounts(
+    return NowBlock(
         transmitting=standing(StationStanding.TRANSMITTING),
         gone_quiet=standing(StationStanding.GONE_QUIET),
         never_transmitted=standing(StationStanding.NEVER_TRANSMITTED),
@@ -172,6 +204,8 @@ def _standing_counts(node, *, now, stale_after):
         undeclared_transmitting=standing(StationStanding.UNDECLARED),
         declared_station_count=sum(row.declared_by_registry for row in rows),
         unlocated_station_count=sum(not row.is_located for row in rows),
+        buckets=buckets,
+        hourly=hourly_activity(node, buckets),
     )
 
 
