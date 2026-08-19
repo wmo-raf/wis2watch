@@ -102,6 +102,28 @@ class RestoreCommandTests(SimpleTestCase):
             any("timescaledb_post_restore" in c for c in connector.commands)
         )
 
+    def test_holds_its_flags_against_the_command_that_overwrites_them(self):
+        """dbbackup's `dbrestore` sets these on the connector before it calls it.
+
+        `connector.drop = not self.no_drop` and `connector.pg_options = ...`,
+        in the two lines above `connector.restore_dump(...)`. So the class
+        attributes are set, then overwritten, then used -- and the restore runs
+        with the --clean that the whole procedure exists to avoid. This
+        reproduces that assignment rather than trusting the defaults, because
+        the defaults are not what the connector runs with in production.
+        """
+        connector = RecordingConnector()
+        connector.drop = True
+        connector.if_exists = True
+        connector.pg_options = ""
+
+        connector.restore_dump(io.BytesIO(b""))
+        restore = next(c for c in connector.commands if c.startswith("pg_restore"))
+
+        self.assertNotIn("--clean", restore)
+        self.assertNotIn("--if-exists", restore)
+        self.assertIn("--no-owner", restore)
+
     def test_replaces_the_database_rather_than_cleaning_it(self):
         """--clean would DROP the very objects pre_restore has just suspended."""
         commands = self.restore().commands

@@ -209,7 +209,20 @@ a production host you run that command directly.
 
 ```bash
 docker compose exec wis2watch python manage.py dbbackup
+```
+
+A restore needs the writers stopped first. The connector empties the database
+before it replays the dump, and the services reconnect to the empty one and
+carry on writing -- so a row the stack writes during the restore collides with
+the same primary key arriving from the dump, and `pg_restore` fails at the end
+building the index. `wis2watch` itself stays up because it is the container
+being exec'd into; stopping the proxy is what leaves it idle.
+
+```bash
+docker compose stop wis2watch_celery_worker wis2watch_celery_beat \
+                    wis2watch_ingest wis2watch_web_proxy
 docker compose exec wis2watch python manage.py dbrestore --i-know-this-drops-the-database
+docker compose start
 ```
 
 There is deliberately no `make` target for this. A production deployment drives
@@ -247,7 +260,7 @@ the confirmation prompt in place.
 the extension version it was taken from, and a custom-format dump does not
 record which that was -- so a mismatch surfaces as catalogue-level strangeness
 rather than a legible error. `docker-compose.yml` therefore names
-`timescale/timescaledb-ha:pg17.10-ts2.29.1` rather than the floating `pg17` tag,
+`timescale/timescaledb-ha:pg17.10-ts2.28.1` rather than the floating `pg17` tag,
 which would otherwise drift between a server deployed once and a laptop that
 pulled last week. Moving the pin is a deliberate act: dumps taken before it
 cannot be restored after it.

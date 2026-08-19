@@ -52,6 +52,10 @@ logger = logging.getLogger("dbbackup.command")
 #: past on the way to finding out whether the restore actually worked.
 DUMP_FLAGS = ("--no-owner", "--no-privileges", "--no-tablespaces")
 
+#: Applied to the restore. Named separately from DUMP_FLAGS because they have
+#: to be re-applied during the restore itself; see ``_restore_dump``.
+RESTORE_FLAGS = ("--no-owner", "--no-privileges")
+
 #: The extensions the dump's objects are defined in terms of. ``timescaledb``
 #: is here because ``pre_restore()`` needs it; ``postgis`` because a geometry
 #: column cannot be created before the type exists.
@@ -76,7 +80,7 @@ class TimescaleConnector(PgDumpBinaryConnector):
     #: Inserted immediately after ``pg_restore``. The dump was taken with the
     #: matching flags; repeating them means a dump someone took by hand still
     #: restores onto a laptop that has none of prod's roles.
-    pg_options = ["--no-owner", "--no-privileges"]
+    pg_options = list(RESTORE_FLAGS)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -124,10 +128,28 @@ class TimescaleConnector(PgDumpBinaryConnector):
 
     def _restore_dump(self, dump):
         """Replay the dump into a database made ready to receive a hypertable."""
-        # Django's own connection to the database being dropped would block the
-        # drop. Nothing here needs the ORM.
         from django.db import connections
 
+        # Setting these as class attributes is not enough. dbbackup's own
+        # `dbrestore` assigns `connector.drop` and `connector.pg_options` from
+        # its command-line options in the line before it calls this, so
+        # whatever the class said has already been overwritten by the time the
+        # restore starts -- `drop` back to True, `pg_options` back to empty.
+        # Re-asserting them here is the last word on it.
+        #
+        # What that assignment costs, left standing: `drop` puts back --clean
+        # and --if-exists, whose DROPs go against the extension-owned objects
+        # that `pre_restore()` has just suspended the guards on. They fail, the
+        # tables they should have removed keep the rows already in them, and
+        # the dump's data is then appended to those -- so the restore ends in
+        # a wall of duplicate-key errors, several minutes in, on a database it
+        # has already emptied.
+        self.drop = False
+        self.if_exists = False
+        self.pg_options = list(RESTORE_FLAGS)
+
+        # Django's own connection to the database being dropped would block the
+        # drop. Nothing here needs the ORM.
         connections.close_all()
 
         self._recreate_database()
