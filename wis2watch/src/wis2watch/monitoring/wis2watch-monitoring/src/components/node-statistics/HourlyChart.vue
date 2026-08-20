@@ -23,13 +23,16 @@
 
       <!-- Where full coverage is. The bars are read against this line rather
            than against each other, which is the whole reason the axis top is
-           the declared population and not the tallest hour. -->
+           the declared population and not the tallest hour. There is no such
+           line where nothing is declared: the axis top is then a population
+           that was observed, and a full-coverage rule drawn across it would
+           be the one claim this chart cannot make. -->
       <line
-          v-if="declared > 0"
+          v-if="isCoverage"
           :x1="PAD_LEFT"
           :x2="width"
-          :y1="y(declared)"
-          :y2="y(declared)"
+          :y1="y(yTop)"
+          :y2="y(yTop)"
           class="stat-gridline"
       />
       <line :x1="PAD_LEFT" :x2="width" :y1="plotHeight" :y2="plotHeight" class="stat-axis"/>
@@ -93,6 +96,7 @@
       </text>
     </svg>
 
+    <p v-if="!isCoverage" class="stat-axis-note">{{ observedAxisNote(yTop) }}</p>
     <p class="stat-readout">{{ readout }}</p>
   </div>
 </template>
@@ -129,6 +133,8 @@ import ChartHatch from './charts/ChartHatch.vue'
 import {
   PAD_BOTTOM,
   PAD_LEFT,
+  POPULATION_BASES,
+  POPULATION_DECLARED,
   STUB_HEIGHT,
   bandScale,
   clockTicks,
@@ -136,6 +142,7 @@ import {
   formatHour,
   formatHourLong,
   hourRangeReadout,
+  observedAxisNote,
   useMeasuredWidth,
   yScale,
 } from './charts/plot.js'
@@ -153,10 +160,16 @@ const props = defineProps({
     type: Array,
     required: true
   },
-  /** How many stations the registry declares: the top of the axis. */
-  declared: {
-    type: Number,
-    required: true
+  /**
+   * The top of the axis and where it came from: `{top, basis}`, as
+   * `populationAxis` derived it. Handed in rather than derived here, because
+   * the chart below this one is drawn on the same axis and a second
+   * derivation is how the two come to disagree.
+   */
+  axis: {
+    type: Object,
+    required: true,
+    validator: (axis) => POPULATION_BASES.includes(axis?.basis) && axis.top > 0
   },
   /** The bucket picked, as the server spelled its start, or empty for none. */
   selected: {
@@ -191,10 +204,12 @@ const starts = computed(() => props.buckets.map((bucket) => new Date(bucket.star
 
 // The declared population, and not the tallest bar. Height is coverage only
 // if the top never moves: two readers screenshotting one node on two days
-// have to be able to lay the images side by side. The floor of 1 is for a
-// centre that declares nothing, which still gets a real axis to draw zero
-// against.
-const yTop = computed(() => Math.max(1, props.declared))
+// have to be able to lay the images side by side. Where the registry declares
+// nothing there is no such population, and the axis falls back to the one
+// this centre has been heard transmitting for -- which is a shape rather than
+// a coverage, and the panel says so instead of letting the bars imply it.
+const yTop = computed(() => props.axis.top)
+const isCoverage = computed(() => props.axis.basis === POPULATION_DECLARED)
 
 // A centre transmitting for more stations than anything declares reports over
 // full coverage, and that hour draws at the top rather than off the panel.
@@ -221,7 +236,8 @@ const {index, focused, pickedAt, isPicked, onPointerMove, onClick, clear, onFocu
 
 const axisLabel = computed(
     () => `Stations reporting per hour, over the last ${props.hourly.length} whole UTC` +
-        ` hours.${props.selectable ? ` ${SELECT_HINT}` : ''}`
+        ` hours.${isCoverage.value ? '' : ` ${observedAxisNote(yTop.value)}`}` +
+        `${props.selectable ? ` ${SELECT_HINT}` : ''}`
 )
 
 function bucketDomId(bucket) {
@@ -257,8 +273,8 @@ function describe(bucket) {
     return `${at}: silent. This centre published nothing in this hour.`
   }
 
-  const reporting = props.declared > 0
-      ? `${formatCount(hour.stations)} of ${formatCount(props.declared)} stations reported`
+  const reporting = isCoverage.value
+      ? `${formatCount(hour.stations)} of ${formatCount(yTop.value)} stations reported`
       : `${formatCount(hour.stations)} stations reported`
   const nameless = hour.unattributed_messages > 0
       ? `, ${formatCount(hour.unattributed_messages)} of them naming no station`
