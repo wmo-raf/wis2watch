@@ -400,8 +400,13 @@ export function displayName(station) {
  * @returns {string} the span, or "never" where there is nothing to measure.
  */
 export function formatQuiet(hours) {
+    // A dash rather than words. "Never heard from" is a *standing*, and it is
+    // already said in the standing column beside every surface that shows
+    // this figure -- so spelling it again here is one fact in two places, in
+    // the narrowest column on the table, where it is also the only value that
+    // wraps. The dash says what it has to: there is no elapsed time to give.
     if (hours === null || hours === undefined) {
-        return 'never heard'
+        return '—'
     }
 
     if (hours < 48) {

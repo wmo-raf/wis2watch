@@ -91,6 +91,12 @@
        a colour, so it reads over a bar and over bare ground alike. */
     --stat-hover: var(--p-text-color);
     --stat-focus: var(--p-primary-color);
+
+    /* The ground of the two bands that head the page. A surface rather than a
+       mark: it says "everything under here shares one clock", and it has to
+       stay quiet enough that the charts beneath it are still the loudest
+       thing in the panel. */
+    --stat-band: var(--p-surface-100);
 }
 
 /* The dark values, written twice on purpose. Wagtail's explicit choice is a
@@ -108,6 +114,7 @@
     --stat-empty: var(--p-surface-800);
     --stat-hatch-ground: var(--p-surface-900);
     --stat-hatch-line: var(--p-surface-500);
+    --stat-band: var(--p-surface-800);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -120,6 +127,7 @@
         --stat-empty: var(--p-surface-800);
         --stat-hatch-ground: var(--p-surface-900);
         --stat-hatch-line: var(--p-surface-500);
+        --stat-band: var(--p-surface-800);
     }
 }
 
@@ -148,6 +156,16 @@
 .node-statistics .stat-plot {
     display: block;
     width: 100%;
+}
+
+/* Where the keyboard is, and only the keyboard. The plots take focus on a
+   click because they are `tabindex="0"` listboxes, and the admin around them
+   rings anything focused -- which puts a box around a whole chart for the
+   ordinary gesture of picking a bucket in it. The ring is kept for the
+   keyboard route, where it is the only thing saying which chart the arrow
+   keys are in, and taken back for the pointer, which already knows. */
+.node-statistics .stat-plot:focus {
+    outline: none;
 }
 
 .node-statistics .stat-plot:focus-visible {

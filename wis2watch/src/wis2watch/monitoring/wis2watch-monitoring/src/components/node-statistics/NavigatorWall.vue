@@ -236,6 +236,7 @@ watch(
   border: 1px solid var(--w-color-border-furniture);
   border-radius: 0.2rem;
   overflow: hidden;
+  margin-top: 2rem;
   margin-bottom: 0.5rem;
 }
 
