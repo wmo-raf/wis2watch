@@ -33,6 +33,16 @@
         <div class="node-statistics__standing">
           <p class="node-statistics__eyebrow">
             Right now &mdash; does not move with the window
+            <InfoNote label="How standing right now is counted">
+              Standing is flat {{ summary.stale_after_hours }}h, whatever
+              window is chosen: a station is transmitting if this centre has
+              been heard publishing for it within
+              {{ summary.stale_after_hours }} hours. The headline counts only
+              stations the registry declares; the figures cover every station,
+              declared or not, so a station that was never declared and has
+              since stopped is counted as gone quiet rather than as
+              undeclared.
+            </InfoNote>
           </p>
 
           <p class="node-statistics__headline">
@@ -56,24 +66,24 @@
             </div>
           </dl>
 
-          <p class="node-statistics__caveats">
-            Standing is flat {{ summary.stale_after_hours }}h, whatever window is
-            chosen: a station is transmitting if this centre has been heard
-            publishing for it within {{ summary.stale_after_hours }} hours.
-            The headline counts only stations the registry declares; the figures
-            above cover every station, declared or not, so a station that was
-            never declared and has since stopped is counted as gone quiet rather
-            than as undeclared.
-            <template v-if="counts.unlocated_station_count">
-              {{ counts.unlocated_station_count }} of them carry no coordinates
-              and cannot be put on a map.
-            </template>
+          <p
+              v-if="counts.unlocated_station_count"
+              class="node-statistics__caveats"
+          >
+            {{ counts.unlocated_station_count }} of them carry no coordinates
+            and cannot be put on a map.
           </p>
         </div>
 
         <div class="node-statistics__window">
           <p class="node-statistics__eyebrow">
             {{ summary.window.label }} &mdash; moves with the window
+            <InfoNote label="What counts as reporting inside the window">
+              A station counts here if this centre was heard publishing for it
+              once, at any vantage point, so a station the registry never
+              declared can be counted into this figure but not into the
+              {{ windowStats.declared_station_count }} beside it.
+            </InfoNote>
           </p>
 
           <p class="node-statistics__headline">
@@ -97,10 +107,6 @@
               Every station that reported inside this window is still
               transmitting.
             </template>
-            A station counts here if this centre was heard publishing for it
-            once, at any vantage point, so a station the registry never
-            declared can be counted into this figure but not into the
-            {{ windowStats.declared_station_count }} beside it.
           </p>
         </div>
       </div>
@@ -108,12 +114,15 @@
       <section class="node-statistics__panel">
         <h3 class="node-statistics__panel-heading">
           Stations reporting, hour by hour
+          <InfoNote label="How the hour-by-hour chart is read">
+            Flat 24 hours, whatever window is chosen. Message volume is in the
+            words below the chart.
+          </InfoNote>
         </h3>
         <p class="node-statistics__panel-note">
           One bar per whole UTC hour, against every station the registry
           declares &mdash; so the height of a bar is how much of this centre
-          was reporting, not how busy it was. Flat 24 hours, whatever window is
-          chosen. Message volume is in the words below the chart.
+          was reporting, not how busy it was.
         </p>
 
         <HourlyChart
@@ -129,16 +138,21 @@
       <section class="node-statistics__panel">
         <h3 class="node-statistics__panel-heading">
           Stations reporting, day by day
+          <InfoNote
+              v-if="windowStats.daily"
+              label="Why today's bar is drawn open"
+          >
+            Today is included and drawn <em>open</em> &mdash; dashed, unclosed
+            on its right &mdash; because it is still being counted: it is
+            short every morning, and that is not a collapse.
+          </InfoNote>
         </h3>
 
         <template v-if="windowStats.daily">
           <p class="node-statistics__panel-note">
             One bar per UTC day, on the same axis as the hours above, so a
             node-wide outage is a gap the whole width of the panel rather than
-            something to be found station by station. Today is included and
-            drawn <em>open</em> &mdash; dashed, unclosed on its right &mdash;
-            because it is still being counted: it is short every morning, and
-            that is not a collapse.
+            something to be found station by station.
           </p>
 
           <DailyChart
@@ -162,17 +176,22 @@
       <section class="node-statistics__panel">
         <h3 class="node-statistics__panel-heading">
           Messages per active station
+          <InfoNote
+              v-if="windowStats.daily"
+              label="How messages per active station is read"
+          >
+            Read against the chart above it: a centre whose station count
+            holds steady while this climbs is publishing more from the same
+            network, which is a different thing from a network that has grown.
+            The line <em>breaks</em> where no station reported &mdash; there is
+            no per-station figure for a day like that, and a zero would read as
+            "every station said nothing".
+          </InfoNote>
         </h3>
 
         <template v-if="windowStats.daily">
           <p class="node-statistics__panel-note">
             How much each station that reported was heard saying, per UTC day.
-            Read against the chart above it: a centre whose station count holds
-            steady while this climbs is publishing more from the same network,
-            which is a different thing from a network that has grown. The line
-            <em>breaks</em> where no station reported &mdash; there is no
-            per-station figure for a day like that, and a zero would read as
-            "every station said nothing".
           </p>
 
           <RatioChart
@@ -195,17 +214,23 @@
       <section class="node-statistics__panel">
         <h3 class="node-statistics__panel-heading">
           Message volume by hour of day, UTC
+          <InfoNote
+              v-if="windowStats.hour_of_day"
+              label="How the hour-of-day profile is read"
+          >
+            Peaks on the synoptic hours are a centre reporting to schedule; a
+            flat profile is one publishing whenever observations happen to
+            arrive. Today's hours so far are in the sum, so over a short
+            window the hours already past today are summed over one day more
+            than the hours still to come.
+          </InfoNote>
         </h3>
 
         <template v-if="windowStats.hour_of_day">
           <p class="node-statistics__panel-note">
             Every 00Z of the window added together, every 01Z, and so on: the
             centre's daily rhythm, and the one chart here that plots messages
-            rather than stations. Peaks on the synoptic hours are a centre
-            reporting to schedule; a flat profile is one publishing whenever
-            observations happen to arrive. Today's hours so far are in the sum,
-            so over a short window the hours already past today are summed over
-            one day more than the hours still to come.
+            rather than stations.
           </p>
 
           <HourOfDayChart
@@ -229,16 +254,19 @@
     <section v-if="rows" class="node-statistics__panel">
       <h3 class="node-statistics__panel-heading">
         Where the stations are, and which of them are silent
+        <InfoNote label="What the map can say that the table cannot">
+          Spatial correlation is the one thing a map can say that the table
+          cannot &mdash; a contiguous block of red is a regional outage, where
+          the same count scattered across the country is stations failing one
+          at a time. Standing here is <em>now</em>, flat
+          {{ rows.stale_after_hours }}h, so this is the one panel on the page
+          the window control does not move.
+        </InfoNote>
       </h3>
       <p class="node-statistics__panel-note">
         The same stations as the rows below, placed where they stand, in two
-        colours: transmitting, and silent. Spatial correlation is the one
-        thing a map can say that the table cannot &mdash; a contiguous block
-        of red is a regional outage, where the same count scattered across the
-        country is stations failing one at a time. Standing here is
-        <em>now</em>, flat {{ rows.stale_after_hours }}h, so this is the one
-        panel on the page the window control does not move. Click a station
-        for its full standing, and to find it in the rows below.
+        colours: transmitting, and silent. Click a station for its full
+        standing, and to find it in the rows below.
       </p>
 
       <StationMap
@@ -271,17 +299,20 @@
     <section v-if="rows || stationsError" class="node-statistics__panel">
       <h3 class="node-statistics__panel-heading">
         Stations, what is broken first
+        <InfoNote label="Whose observation the rows are">
+          Everything here is this centre's own observation: a station may
+          transmit under more than one centre's topics, and what another
+          centre heard is not on this page. The cells are the rows themselves
+          rather than a second view of them.
+        </InfoNote>
       </h3>
       <p class="node-statistics__panel-note">
         Every station this centre declares or has been heard transmitting for,
         sorted so that what has stopped is at the top &mdash; the default sort
-        is a filter that hides nothing. Everything here is this centre's own
-        observation: a station may transmit under more than one centre's
-        topics, and what another centre heard is not on this page.
-        The cells trailing each row are that station's availability over the
-        window, and they are the rows themselves rather than a second view:
-        read across one for when a station stopped, and down a column for
-        whether the same stations keep stopping together.
+        is a filter that hides nothing. The cells trailing each row are that
+        station's availability over the window: read across one for when a
+        station stopped, and down a column for whether the same stations keep
+        stopping together.
       </p>
 
       <StationTable
@@ -389,6 +420,7 @@ import Message from 'primevue/message'
 import DailyChart from './DailyChart.vue'
 import HourlyChart from './HourlyChart.vue'
 import HourOfDayChart from './HourOfDayChart.vue'
+import InfoNote from './InfoNote.vue'
 import RatioChart from './RatioChart.vue'
 import StationDrilldown from './StationDrilldown.vue'
 import StationMap from './StationMap.vue'
