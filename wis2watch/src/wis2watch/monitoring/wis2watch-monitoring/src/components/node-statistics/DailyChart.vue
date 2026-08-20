@@ -156,6 +156,7 @@ import ChartHatch from './charts/ChartHatch.vue'
 import {
   PAD_BOTTOM,
   PAD_LEFT,
+  POPULATION_BASES,
   POPULATION_DECLARED,
   STUB_HEIGHT,
   bandScale,
@@ -189,7 +190,8 @@ const props = defineProps({
    */
   axis: {
     type: Object,
-    required: true
+    required: true,
+    validator: (axis) => POPULATION_BASES.includes(axis?.basis) && axis.top > 0
   },
   /** When the server computed this, which is how far the open day has got. */
   asOf: {

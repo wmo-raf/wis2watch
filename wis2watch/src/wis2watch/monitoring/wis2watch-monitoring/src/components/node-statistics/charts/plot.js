@@ -123,7 +123,10 @@ const NICE_STEPS = [1, 1.5, 2, 2.5, 3, 4, 5, 7.5, 10]
  *
  * Only for the axes whose top is not a population. Coverage charts top out at
  * the declared station count and must never be scaled to their own data --
- * the height of a bar there *is* the finding. A ratio and a message volume
+ * the height of a bar there *is* the finding; where nothing is declared they
+ * fall back to an observed population rather than to this, because a top
+ * rounded off the tallest bar moves with the window and differs between two
+ * charts of the same centre (`populationAxis`). A ratio and a message volume
  * have no such ceiling, so the alternative to rounding up is an axis topped
  * by an arbitrary number like 8,432.
  *
@@ -147,6 +150,11 @@ export function niceTop(max) {
 //: every surface drawing this axis has to say which one it is on.
 export const POPULATION_DECLARED = 'declared'
 export const POPULATION_OBSERVED = 'observed'
+
+//: The two of them, so that a chart handed an axis can say at its own
+//: boundary that it was handed one -- the object crosses a prop, where a
+//: shape is otherwise only checked by whether it renders.
+export const POPULATION_BASES = [POPULATION_DECLARED, POPULATION_OBSERVED]
 
 /**
  * The top of an axis whose unit is stations, and what that top means.

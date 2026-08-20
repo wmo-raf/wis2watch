@@ -37,20 +37,22 @@
               Standing is flat {{ summary.stale_after_hours }}h, whatever
               window is chosen: a station is transmitting if this centre has
               been heard publishing for it within
-              {{ summary.stale_after_hours }} hours. The headline counts only
-              stations the registry declares; the figures cover every station,
-              declared or not, so a station that was never declared and has
-              since stopped is counted as gone quiet rather than as
-              undeclared.
+              {{ summary.stale_after_hours }} hours.
+              <template v-if="declares">The headline counts only stations the
+              registry declares; the</template><template v-else>The</template>
+              figures cover every station, declared or not, so a station that
+              was never declared and has since stopped is counted as gone
+              quiet rather than as undeclared.
             </InfoNote>
           </p>
 
           <p class="node-statistics__headline">
-            <strong>{{ counts.transmitting }}</strong>
             <template v-if="declares">
+              <strong>{{ counts.transmitting }}</strong>
               of {{ counts.declared_station_count }} declared stations transmitting
             </template>
             <template v-else>
+              <strong>{{ live }}</strong>
               of {{ population }} stations transmitting
             </template>
           </p>
@@ -99,12 +101,6 @@
               station the registry never declared can be counted into this
               figure but not into the
               {{ windowStats.declared_station_count }} beside it</template>.
-              <template v-if="!declares">
-                The registry declares nothing for this centre, so the figure
-                beside it is the whole population that has ever been heard
-                transmitting under its topics, and a full count here is not
-                full coverage.
-              </template>
             </InfoNote>
           </p>
 
@@ -641,6 +637,17 @@ const population = computed(() =>
 // against instead.
 const declares = computed(() => counts.value.declared_station_count > 0)
 
+// What is transmitting right now, counted the way the headline beside it is
+// read. `TRANSMITTING` is declared-only by construction -- an undeclared
+// station heard a minute ago is `UNDECLARED`, not transmitting -- so on a
+// centre that declares nothing the standing figure is 0 however much traffic
+// is arriving, and a headline of "0 of 57" would be the page's most confident
+// wrong sentence. The two standings are disjoint, so this is a sum rather
+// than a wider query.
+const live = computed(() =>
+    counts.value.transmitting + counts.value.undeclared_transmitting
+)
+
 // The axis the two coverage charts are drawn on, derived once here rather
 // than twice in them. They sit above each other on one page and are read
 // against each other, so a second derivation is not a duplication but a way
@@ -650,13 +657,15 @@ const axis = computed(() =>
 )
 
 // The gap the two blocks exist to show, stated rather than left to be worked
-// out by subtracting one headline from the other. Never negative: at the
+// out by subtracting one headline from the other -- from `live` rather than
+// from `transmitting`, or a centre declaring nothing reports its whole
+// population as having stopped. Never negative: at the
 // default window the two count the same day and the coverage can be the
 // smaller of the pair, which is not a finding about anything.
 const stoppedSince = computed(() =>
     Math.max(
         0,
-        windowStats.value.reported_station_count - counts.value.transmitting
+        windowStats.value.reported_station_count - live.value
     )
 )
 
