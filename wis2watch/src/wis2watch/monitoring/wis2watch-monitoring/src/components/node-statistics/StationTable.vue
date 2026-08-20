@@ -267,14 +267,11 @@
       </p>
     </div>
 
-    <!-- Words beside every colour, because the three cell states are the one
-         thing on this page that cannot be read off a number. -->
-    <ul v-if="buckets.length" class="stations__legend">
-      <li v-for="state in legend" :key="state.key" class="stations__key">
-        <span class="stations__swatch" :class="`stations__swatch--${state.key}`"/>
-        {{ state.label }}
-      </li>
-    </ul>
+    <!-- Words beside every colour, because the cell states are the one thing
+         on this page that cannot be read off a number. The same legend the
+         drilldown carries, so one colour cannot come to be described two
+         ways on two panels of one tab. -->
+    <PresenceLegend v-if="buckets.length" :grain="grain"/>
 
     <p class="stations__caveats">
       Quiet is judged against a flat {{ staleAfterHours }} hours, the same
@@ -364,9 +361,10 @@ import {computed, nextTick, onMounted, watch} from 'vue'
 import BucketHeads from './BucketHeads.vue'
 import NavigatorWall from './NavigatorWall.vue'
 import PresenceCells from './PresenceCells.vue'
+import PresenceLegend from './PresenceLegend.vue'
 import Sparkline from './Sparkline.vue'
 import {displayName, formatCount, formatInstant, formatQuiet} from './charts/plot.js'
-import {bucketCeilings, cellWidthFor, grainOf} from './presence.js'
+import {axisEnds, bucketCeilings, cellWidthFor, grainOf} from './presence.js'
 import {bucketIndexOf, bucketName, darkIn, isPickedStation} from './selection.js'
 import {STANDINGS, STANDING_LABEL, STANDING_RANK} from './standings.js'
 import {useVirtualRows} from './useVirtualRows.js'
@@ -689,29 +687,12 @@ const openBucket = computed(() => props.buckets.some((bucket) => bucket.partial)
 //: map the cells and their tooltips are drawn from.
 const grainWords = computed(() => grainOf(props.grain))
 
-function axisLabel(bucket) {
-  if (!bucket) {
-    return ''
-  }
-
-  // On the partial bucket, the word rather than the date: it is the bucket a
-  // reader looks for first, and "today" is what the charts' own axis calls it.
-  return bucket.partial ? 'today' : grainWords.value.short(new Date(bucket.start))
-}
-
-const axisStart = computed(() => axisLabel(props.buckets[0]))
-const axisEnd = computed(() => axisLabel(props.buckets[props.buckets.length - 1]))
-
-//: The three states in words. They say what the middle state is measured
-//: against rather than what the threshold is, because "under 30%" is a number
-//: a reader would then have to convert, and because a day and an hour are not
-//: measured against the same thing at all -- the tooltip on each cell carries
-//: the figures either way.
-const legend = computed(() => [
-  {key: 'full', label: grainWords.value.legend.full},
-  {key: 'thin', label: grainWords.value.legend.thin},
-  {key: 'silent', label: 'Silent — nothing heard at all'},
-])
+//: The two ends of the matrix's axis, worded by the one place that words
+//: them: the drilldown's strip names its own ends too, and the newest column
+//: being "today" on one surface and a date on the other is two axes to read.
+const ends = computed(() => axisEnds(props.buckets, props.grain))
+const axisStart = computed(() => ends.value.start)
+const axisEnd = computed(() => ends.value.end)
 
 function label(standing) {
   return STANDING_LABEL[standing] || standing
@@ -1095,44 +1076,6 @@ function arrow(key) {
   box-shadow: inset 0 0 0 2px var(--stat-live);
 }
 
-.stations__legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1.25rem;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  list-style: none;
-  font-size: 0.75rem;
-  color: var(--w-color-text-meta);
-}
-
-.stations__key {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.stations__swatch {
-  display: inline-block;
-  width: 0.75rem;
-  height: 0.6rem;
-  border-radius: 1px;
-}
-
-.stations__swatch--full {
-  background: var(--stat-live);
-}
-
-.stations__swatch--thin {
-  background: var(--stat-thin);
-}
-
-/* Outlined, unlike the other two: at this size a near-ground fill on the page
-   ground is an invisible swatch beside its own label. */
-.stations__swatch--silent {
-  background: var(--stat-empty);
-  box-shadow: inset 0 0 0 1px var(--stat-grid);
-}
 
 .stations__empty {
   font-size: 0.8rem;

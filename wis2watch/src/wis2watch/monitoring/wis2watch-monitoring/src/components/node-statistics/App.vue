@@ -249,6 +249,19 @@
       />
     </section>
 
+    <!-- One station, opened. Between the map and the rows because that is
+         where the two gestures that open it are: a pin on the map and a row
+         below. It is inline rather than over the page -- everything the
+         reader chose is in the querystring, so dismissing it clears one key
+         and the sort, the filter and the picked bucket are untouched, and the
+         table is never unmounted and never loses its place. -->
+    <StationDrilldown
+        v-if="stationUrl"
+        :url="stationUrl"
+        :centre-id="centreId"
+        @dismiss="refine({station: ''})"
+    />
+
     <!-- Outside the block above, and that is the whole point of it being a
          second request: the rows arrive on their own and are drawn whether or
          not the figures did. Everything this panel needs to label itself --
@@ -352,11 +365,19 @@
  * endpoint of its own, because a second source for the same stations is a
  * second population to disagree with the table.
  *
- * The station a reader picks is one piece of state for both surfaces: picked
+ * The station a reader picks is one piece of state for three surfaces: picked
  * on the map, it is highlighted in the rows; picked in the rows, it is ringed
- * on the map. It is not a filter -- it hides nothing on either -- and where
- * the filters above the rows have hidden the station it names, the table says
- * so rather than quietly widening itself.
+ * on the map; and either way it opens the drilldown above them, which is the
+ * last step of the journey the tab exists for -- the reader has found *which*
+ * station stopped, and now opens it. It is not a filter -- it hides nothing on
+ * either surface -- and where the filters above the rows have hidden the
+ * station it names, the table says so rather than quietly widening itself.
+ *
+ * The drilldown is a third request and is reached by adding an id to the
+ * stations URL rather than by a path of its own, so that everything this
+ * bundle asks for was reversed on the Django side. It arrives and fails on its
+ * own, like the rows: a station whose drilldown cannot be read leaves the
+ * figures and the table standing.
  *
  * Both URLs are handed in as props rather than assembled here. The bundle is
  * built ahead of time, so a path composed inside it is a path nobody can
@@ -369,10 +390,12 @@ import DailyChart from './DailyChart.vue'
 import HourlyChart from './HourlyChart.vue'
 import HourOfDayChart from './HourOfDayChart.vue'
 import RatioChart from './RatioChart.vue'
+import StationDrilldown from './StationDrilldown.vue'
 import StationMap from './StationMap.vue'
 import StationTable from './StationTable.vue'
 import WindowControl from './WindowControl.vue'
 import {readParam, writeParams} from './querystring.js'
+import {pickedStationId} from './selection.js'
 import {STANDING_LABEL} from './standings.js'
 // The tab's colour vocabulary, loaded once for the island. Unscoped on
 // purpose: a role is not one component's styling, and every surface added
@@ -471,6 +494,41 @@ const windows = ref([])
 //: because the axis being asked about is theirs: with no rows on the page
 //: there is nothing for a pick to filter either.
 const hourlyIsTheWindow = computed(() => rows.value?.window.grain === 'hour')
+
+//: The picked station's own endpoint, over the window on screen. Derived
+//: from the stations URL rather than composed out of a path of its own: that
+//: URL was reversed on the Django side, and the drilldown is the same
+//: collection with an id on the end -- which is what keeps this bundle from
+//: carrying a path nobody can rename from Python. Empty where nothing is
+//: picked, and where the address bar carries something that is not an id.
+//:
+//: The window is the one the rows settled on where they have arrived, and
+//: the control's before that. Deliberately not gated on the rows: a link
+//: carrying a station is the case this panel exists for, and one that drew
+//: nothing until a thousand rows had crossed the wire -- and nothing at all
+//: if they failed -- would be a link that does not stand on its own, which is
+//: the whole point of putting the station in the address bar.
+//:
+//: The cost is one extra read, and only on a link that names a station and no
+//: window: the control is empty until the summary answers, so the first ask
+//: takes the server's default and the second names it. Asking the server what
+//: its default is, is cheaper than a panel that waits for the rows.
+const stationUrl = computed(() => {
+  const id = pickedStationId(view.value.station)
+
+  if (id === null) {
+    return ''
+  }
+
+  const url = new URL(`${props.stationsUrl}${id}/`, window.location.origin)
+  const key = rows.value?.window.key || windowKey.value
+
+  if (key) {
+    url.searchParams.set(WINDOW_PARAM, key)
+  }
+
+  return String(url)
+})
 
 const counts = computed(() => summary.value.now)
 const windowStats = computed(() => summary.value.window_stats)

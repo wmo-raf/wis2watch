@@ -346,6 +346,28 @@ export function formatQuiet(hours) {
 }
 
 /**
+ * Which hours a chart of whole UTC hours is showing, in words.
+ *
+ * Under every hourly axis on the tab, because the window is a rolling one:
+ * "the last 24 hours" is not a date anybody can work out from the page. Here
+ * rather than in each chart, since two charts stacked on one page over the
+ * same hours must not name them two ways.
+ *
+ * @param {Date[]} starts - the bucket starts, oldest first.
+ * @returns {string} the range, or empty for an axis with no buckets.
+ */
+export function hourRangeReadout(starts) {
+    if (!starts.length) {
+        return ''
+    }
+
+    return (
+        `${formatHourLong(starts[0])} to ` +
+        `${formatHourLong(starts[starts.length - 1])}, in whole UTC hours.`
+    )
+}
+
+/**
  * The measured width of an element, live, in real pixels.
  *
  * Panelled charts measure rather than scale a viewBox, so that a 10px label

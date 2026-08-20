@@ -94,6 +94,13 @@ export const GRAINS = {
         },
         heard: (value, ceiling) => `heard in ${value} of ${ceiling} hours`,
         silent: 'silent all day: nothing heard from this station',
+        //: The sentence for a bucket the centre published in and named
+        //: nobody in. Here rather than at the two surfaces that say it,
+        //: because a tooltip and a legend saying it differently are two
+        //: claims about one mark.
+        stationLess:
+            'this centre published on this day, and none of it named any'
+            + ' station at all',
     },
     hour: {
         period: 'hours',
@@ -114,6 +121,9 @@ export const GRAINS = {
         ceiling: null,
         heard: (value) => `${formatCount(value)} messages`,
         silent: 'silent: no messages this hour',
+        stationLess:
+            'this centre published in this hour, and none of it named any'
+            + ' station at all',
     },
 }
 
@@ -206,6 +216,35 @@ export function presenceStates(values, ceilings, count) {
         {length: count},
         (_, at) => presenceState(values[at] || 0, against[at])
     )
+}
+
+/**
+ * The two ends of an axis of cells, in the words its own grain uses.
+ *
+ * Both surfaces that draw these cells name their ends -- a run of them says
+ * *when* something stopped only if the axis is named -- and this is what stops
+ * the matrix calling the newest column "today" while the drilldown's strip
+ * calls it a date.
+ *
+ * The word rather than the date on the unfinished bucket, because that is the
+ * one a reader looks for first and is what the charts' own axes call it.
+ *
+ * @param {{start: string, partial: boolean}[]} buckets - the axis.
+ * @param {string} grain - `day` or `hour`, the server's own spelling.
+ * @returns {{start: string, end: string}} the two ends, named.
+ */
+export function axisEnds(buckets, grain) {
+    const words = grainOf(grain)
+
+    const name = (bucket) => {
+        if (!bucket) {
+            return ''
+        }
+
+        return bucket.partial ? 'today' : words.short(new Date(bucket.start))
+    }
+
+    return {start: name(buckets[0]), end: name(buckets[buckets.length - 1])}
 }
 
 /**
@@ -326,14 +365,20 @@ export function pixelBand(index, count, total) {
  * @param {number} value - what the station was heard doing in it.
  * @param {number} ceiling - the most that bucket could have carried.
  * @param {string} grain - `day` or `hour`.
+ * @param {boolean} stationLess - whether the centre published in this bucket
+ *     and named no station at all in it.
  * @returns {string} the sentence.
  */
-export function presenceTitle(bucket, value, ceiling, grain) {
+export function presenceTitle(bucket, value, ceiling, grain, stationLess = false) {
     const words = grainOf(grain)
     // Said in the tooltip as well as drawn, because the three states are a
-    // colour, and a colour is never the only carrier of a finding here.
+    // colour, and a colour is never the only carrier of a finding here -- and
+    // the hatch least of all: "no value on this axis" is the most a mark can
+    // say, and which of the two empty cases it is is only said here.
     const thin = presenceState(value, ceiling) === 'thin' ? ', thinly' : ''
-    const heard = value ? `${words.heard(value, ceiling)}${thin}` : words.silent
+    const heard = stationLess
+        ? words.stationLess
+        : value ? `${words.heard(value, ceiling)}${thin}` : words.silent
     // Driven by the bucket rather than by the grain: an hourly axis never
     // carries an unfinished bucket, because the hour in progress is left out
     // of the window rather than served half-counted.
