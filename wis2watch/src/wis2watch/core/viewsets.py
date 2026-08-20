@@ -1,12 +1,19 @@
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
+from wagtail.admin.ui.tables import Column
 from wagtail.admin.views import generic
 from wagtail.admin.viewsets.model import ModelViewSet
 from wagtail.admin.widgets import ListingButton
 from wagtail.permission_policies.base import ModelPermissionPolicy
 from wagtail.snippets.views.snippets import SnippetViewSet
 
-from .models import Dataset, GlobalDiscoveryCatalogue, MessageSource, WIS2Node
+from .models import (
+    Dataset,
+    GlobalDiscoveryCatalogue,
+    MessageSource,
+    OutgoingEmail,
+    WIS2Node,
+)
 
 
 class SyncManagedPermissionPolicy(ModelPermissionPolicy):
@@ -21,6 +28,22 @@ class SyncManagedPermissionPolicy(ModelPermissionPolicy):
 
     def user_has_permission(self, user, action):
         if action in {"add", "delete"}:
+            return False
+
+        return super().user_has_permission(user, action)
+
+
+class ReadOnlyPermissionPolicy(ModelPermissionPolicy):
+    """What a person may do to a record of something that already happened.
+
+    Nothing. A row saying a message was sent on a morning is worth exactly as
+    much as it cannot be changed afterwards, and deleting one is the retention
+    policy this archive deliberately does not have, with a person's hand on it
+    instead of a timer. Viewing is left, which is what the inspect view needs.
+    """
+
+    def user_has_permission(self, user, action):
+        if action in {"add", "change", "delete"}:
             return False
 
         return super().user_has_permission(user, action)
@@ -128,8 +151,60 @@ class DatasetViewSet(SnippetViewSet):
         return SyncManagedPermissionPolicy(self.model)
 
 
+class OutgoingEmailViewSet(ModelViewSet):
+    """Everything this tool has tried to tell whoever runs it.
+
+    Listed by subject first, because that is what a message is remembered as
+    and because the first column is the one that opens the message itself. The
+    summary beside it is the preview -- what the run came to, from whatever
+    composed it -- and the recipients are the ones the message actually went
+    to rather than the ones configured now, which is the difference the
+    archive exists to keep.
+
+    Read-only throughout, and the whole table is reachable in one click from
+    the menu: the question it answers -- was I told, and what was I told -- is
+    one somebody arrives with, and a page they had to already suspect the
+    existence of would not answer it.
+    """
+
+    model = OutgoingEmail
+    base_url_path = "outgoing-email"
+    icon = "mail"
+    menu_label = "Outgoing email"
+    add_to_admin_menu = True
+    menu_order = 140
+    inspect_view_enabled = True
+    # Wagtail builds the add and edit views whether or not anybody may reach
+    # them, and refuses to start without being told what their form holds.
+    # Nothing here is a person's to set, so the answer is only ever read by
+    # the check that insists on asking.
+    exclude_form_fields = []
+    list_display = [
+        "subject",
+        Column("kind", label=_("Kind"), accessor="get_kind_display", sort_key="kind"),
+        "summary",
+        Column("recipients", label=_("Recipients"), accessor="recipient_list"),
+        Column(
+            "status",
+            label=_("Status"),
+            accessor="get_status_display",
+            sort_key="status",
+        ),
+        Column(
+            "attempted_at", label=_("Attempted at"), sort_key="attempted_at"
+        ),
+    ]
+    list_filter = ["kind", "status"]
+    search_fields = ["subject", "summary", "body"]
+
+    @property
+    def permission_policy(self):
+        return ReadOnlyPermissionPolicy(self.model)
+
+
 admin_viewsets = [
     WIS2NodeViewSet(),
     MessageSourceViewSet(),
     GlobalDiscoveryCatalogueViewSet(),
+    OutgoingEmailViewSet(),
 ]

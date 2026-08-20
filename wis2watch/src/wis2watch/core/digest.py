@@ -57,7 +57,7 @@ from django.utils.translation import ngettext
 
 from .analysis import GAP_REPORTS, Notice
 from .mail import admin_url, digest_recipients, notify
-from .models import ReportedFinding
+from .models import OutgoingEmail, ReportedFinding
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +271,13 @@ def send_digest(now=None):
         {"digest": digest, "gap_reports_url": admin_url("gap_reports")},
     )
 
-    if not notify(digest.subject, body, digest_recipients()):
+    if not notify(
+        digest.subject,
+        body,
+        digest_recipients(),
+        kind=OutgoingEmail.DAILY_DIGEST,
+        summary=digest.summary,
+    ):
         return digest
 
     record_digest(digest, now=now)
