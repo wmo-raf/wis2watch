@@ -30,7 +30,7 @@ one cell, not a heatmap.
 from dataclasses import dataclass
 from datetime import datetime
 
-from django.db.models import Max, Q, Sum
+from django.db.models import Max, Sum
 from django.utils import timezone as dj_timezone
 
 from ...models import HourlyRollup, MessageSource
@@ -223,13 +223,7 @@ def node_station_detail(node, station_id, *, window=None, now=None):
         centre_id=node.centre_id,
         generated_at=now,
         stale_after_hours=stale_after,
-        window=WindowBounds(
-            key=window.key,
-            label=window.label,
-            since=since,
-            until=until,
-            grain=window.grain,
-        ),
+        window=WindowBounds.of(window, since, until),
         buckets=buckets,
         station=StationIdentity(
             station_id=row.station_id,
@@ -378,17 +372,22 @@ def _datasets(node, station_id, since, until):
             node=node,
             station=station_id,
             source__source_type=MessageSource.GLOBAL_BROKER,
+            # A rollup row exists because messages were counted into it, so
+            # this ought to be redundant -- but the series above guards the
+            # same way, and it is what keeps a dataset that carried nothing
+            # off a breakdown of what this station published. It also keeps
+            # the sum below from being NULL, which would sort *first* under a
+            # descending order and head the list with an empty dataset.
+            message_count__gt=0,
             hour__gte=since,
             hour__lt=until,
         )
         .values("dataset_id", "dataset__identifier", "dataset__title")
         .annotate(
             messages=Sum("message_count"),
-            # The last hour that carried anything rather than the last row
-            # written: a rollup of zero is a bucket that was read and found
-            # empty, and calling that "last heard" would date a dead dataset
-            # to the last time somebody looked at it.
-            last_heard=Max("hour", filter=Q(message_count__gt=0)),
+            # The last hour that carried anything, which the filter above has
+            # already made of every row counted here.
+            last_heard=Max("hour"),
         )
         # The identifier is the tie-break rather than nothing at all, so two
         # datasets carrying the same volume do not swap places between two

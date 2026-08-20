@@ -67,6 +67,30 @@ class WindowBounds:
     until: datetime
     grain: str
 
+    @classmethod
+    def of(cls, window, since, until):
+        """The window a response was computed over, as the payload carries it.
+
+        Written once because every endpoint on the tab echoes this, and three
+        copies of it is how one of them comes to echo the label of a window
+        while reporting the bounds of another.
+
+        Args:
+            window: the Window that was resolved.
+            since: the start of it, as it was computed.
+            until: the exclusive end of it, likewise.
+
+        Returns:
+            WindowBounds: the echo.
+        """
+        return cls(
+            key=window.key,
+            label=window.label,
+            since=since,
+            until=until,
+            grain=window.grain,
+        )
+
 
 @dataclass(frozen=True)
 class Bucket:

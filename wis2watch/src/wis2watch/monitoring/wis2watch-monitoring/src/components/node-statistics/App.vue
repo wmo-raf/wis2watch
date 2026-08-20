@@ -502,20 +502,30 @@ const hourlyIsTheWindow = computed(() => rows.value?.window.grain === 'hour')
 //: carrying a path nobody can rename from Python. Empty where nothing is
 //: picked, and where the address bar carries something that is not an id.
 //:
-//: The window comes off the *rows'* payload rather than off the control,
-//: which is the same reasoning the matrix's axis is read from there: the
-//: control is empty until the summary answers, so a URL built from it would
-//: be built twice on a cold load and fetched twice. The rows have settled
-//: what window they were read over, and this asks for that one.
+//: The window is the one the rows settled on where they have arrived, and
+//: the control's before that. Deliberately not gated on the rows: a link
+//: carrying a station is the case this panel exists for, and one that drew
+//: nothing until a thousand rows had crossed the wire -- and nothing at all
+//: if they failed -- would be a link that does not stand on its own, which is
+//: the whole point of putting the station in the address bar.
+//:
+//: The cost is one extra read, and only on a link that names a station and no
+//: window: the control is empty until the summary answers, so the first ask
+//: takes the server's default and the second names it. Asking the server what
+//: its default is, is cheaper than a panel that waits for the rows.
 const stationUrl = computed(() => {
   const id = pickedStationId(view.value.station)
 
-  if (id === null || !rows.value) {
+  if (id === null) {
     return ''
   }
 
   const url = new URL(`${props.stationsUrl}${id}/`, window.location.origin)
-  url.searchParams.set(WINDOW_PARAM, rows.value.window.key)
+  const key = rows.value?.window.key || windowKey.value
+
+  if (key) {
+    url.searchParams.set(WINDOW_PARAM, key)
+  }
 
   return String(url)
 })

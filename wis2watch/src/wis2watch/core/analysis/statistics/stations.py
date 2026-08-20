@@ -188,13 +188,7 @@ def node_station_statistics(node, *, window=None, now=None):
         centre_id=node.centre_id,
         generated_at=now,
         stale_after_hours=stale_after,
-        window=WindowBounds(
-            key=window.key,
-            label=window.label,
-            since=since,
-            until=until,
-            grain=window.grain,
-        ),
+        window=WindowBounds.of(window, since, until),
         buckets=buckets,
         stations=[
             _row(

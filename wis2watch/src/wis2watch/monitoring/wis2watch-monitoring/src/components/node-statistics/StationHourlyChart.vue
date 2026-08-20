@@ -36,9 +36,16 @@
              has no count to plot there and was not necessarily silent, so it
              gets the mark the aggregate chart gives the same hour rather than
              a bar of zero -- which would blame the station for its centre's
-             attribution gap. -->
+             attribution gap.
+
+             The flag wins over the bar, which is the rule the day cells are
+             drawn by too: one mark, one rule. The two cannot meet here anyway
+             -- an hour whose volume named nobody cannot also carry this
+             station's volume, both being counted from the same vantage
+             point -- and one rule spelled twice is two rules waiting to
+             disagree. -->
         <rect
-            v-if="isNameless(hour)"
+            v-if="hour.station_less"
             :y="plotHeight - STUB_HEIGHT"
             :width="band.barWidth"
             :height="STUB_HEIGHT"
@@ -117,6 +124,7 @@ import {
   formatCount,
   formatHour,
   formatHourLong,
+  hourRangeReadout,
   niceTop,
   useMeasuredWidth,
   yScale,
@@ -176,11 +184,6 @@ function bucketDomId(bucket) {
   return `${hatchId}-bucket-${bucket}`
 }
 
-/** An hour the centre published in and named nobody in. */
-function isNameless(hour) {
-  return hour.messages === 0 && hour.station_less
-}
-
 /**
  * One hour in words.
  *
@@ -192,7 +195,7 @@ function describe(bucket) {
   const hour = props.hourly[bucket]
   const at = formatHourLong(starts.value[bucket])
 
-  if (isNameless(hour)) {
+  if (hour.station_less) {
     return (
         `${at}: nothing was published for this station, and what this centre ` +
         `did publish in this hour named no station at all.`
@@ -209,18 +212,7 @@ function describe(bucket) {
 // What the panel says when the reader is not on a bucket: which hours these
 // are. The window is rolling, so "the last 24 hours" is not a date anybody can
 // work out from the page.
-const readout = computed(() => {
-  if (index.value !== null) {
-    return describe(index.value)
-  }
-
-  if (!starts.value.length) {
-    return ''
-  }
-
-  return (
-      `${formatHourLong(starts.value[0])} to ` +
-      `${formatHourLong(starts.value[starts.value.length - 1])}, in whole UTC hours.`
-  )
-})
+const readout = computed(
+    () => index.value === null ? hourRangeReadout(starts.value) : describe(index.value)
+)
 </script>

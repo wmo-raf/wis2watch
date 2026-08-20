@@ -101,16 +101,14 @@
           </div>
 
           <p class="drilldown__axis">
-            <span>{{ axisStart }}</span>
-            <span>{{ axisEnd }}</span>
+            <span>{{ ends.start }}</span>
+            <span>{{ ends.end }}</span>
           </p>
 
-          <ul class="drilldown__legend">
-            <li v-for="state in legend" :key="state.key" class="drilldown__key">
-              <span class="drilldown__swatch" :class="`drilldown__swatch--${state.key}`"/>
-              {{ state.label }}
-            </li>
-          </ul>
+          <!-- The rows' own legend, with the fourth state this surface can
+               draw and they cannot. One component, so a colour cannot come to
+               be described two ways on two panels of one tab. -->
+          <PresenceLegend :grain="detail.window.grain" station-less/>
         </template>
 
         <p v-else class="drilldown__panel-empty">
@@ -219,15 +217,15 @@ import {computed, ref, watch} from 'vue'
 import Message from 'primevue/message'
 
 import PresenceCells from './PresenceCells.vue'
+import PresenceLegend from './PresenceLegend.vue'
 import StationHourlyChart from './StationHourlyChart.vue'
 import {
   displayName,
   formatCount,
-  formatDayLong,
   formatInstant,
   formatQuiet,
 } from './charts/plot.js'
-import {bucketCeilings, cellWidthFor, grainOf} from './presence.js'
+import {axisEnds, bucketCeilings, cellWidthFor, grainOf} from './presence.js'
 import {STANDING_LABEL} from './standings.js'
 
 const props = defineProps({
@@ -307,18 +305,10 @@ const cellWidth = computed(
 const datasets = computed(() => detail.value?.window_stats.datasets || [])
 
 // The strip's two ends in words, for the same reason the matrix carries them:
-// a run of cells says when something stopped only if the axis is named.
-const axisStart = computed(() => axisLabel(detail.value.buckets[0]))
-const axisEnd = computed(
-    () => axisLabel(detail.value.buckets[detail.value.buckets.length - 1])
-)
-
-const legend = computed(() => [
-  {key: 'full', label: grainWords.value.legend.full},
-  {key: 'thin', label: grainWords.value.legend.thin},
-  {key: 'silent', label: 'Silent: nothing heard from this station'},
-  {key: 'nameless', label: 'This centre published, naming no station at all'},
-])
+// a run of cells says when something stopped only if the axis is named. From
+// the same place the matrix words its own, so the newest column is not "today"
+// on one surface and a date on the other.
+const ends = computed(() => axisEnds(detail.value.buckets, detail.value.window.grain))
 
 const position = computed(() => {
   if (station.value.latitude === null || station.value.longitude === null) {
@@ -327,10 +317,6 @@ const position = computed(() => {
 
   return `${station.value.latitude.toFixed(4)}, ${station.value.longitude.toFixed(4)}`
 })
-
-function axisLabel(bucket) {
-  return bucket ? formatDayLong(new Date(bucket.start)) : ''
-}
 
 /**
  * Read this station.
@@ -474,52 +460,6 @@ watch(() => props.url, load, {immediate: true})
   font-size: 0.7rem;
   color: var(--w-color-text-meta);
   margin: 0.25rem 0 0;
-}
-
-.drilldown__legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.25rem 1.25rem;
-  margin: 0.5rem 0 0;
-  padding: 0;
-  list-style: none;
-  font-size: 0.75rem;
-  color: var(--w-color-text-meta);
-}
-
-.drilldown__key {
-  display: flex;
-  align-items: center;
-  gap: 0.35rem;
-}
-
-.drilldown__swatch {
-  display: inline-block;
-  width: 0.75rem;
-  height: 0.6rem;
-  border-radius: 1px;
-}
-
-.drilldown__swatch--full {
-  background: var(--stat-live);
-}
-
-.drilldown__swatch--thin {
-  background: var(--stat-thin);
-}
-
-.drilldown__swatch--silent {
-  background: var(--stat-empty);
-}
-
-/* The hatch as a swatch, in the same two roles the pattern is drawn from, so
-   the legend follows the theme with the cells it explains. */
-.drilldown__swatch--nameless {
-  background: repeating-linear-gradient(
-      45deg,
-      var(--stat-hatch-ground) 0 2px,
-      var(--stat-hatch-line) 2px 3.5px
-  );
 }
 
 .drilldown__datasets {

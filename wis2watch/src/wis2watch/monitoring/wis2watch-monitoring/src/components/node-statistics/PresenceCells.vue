@@ -7,7 +7,7 @@
       role="img"
       :aria-label="label"
   >
-    <!-- Only where a surface says a bucket can be nameless. A pattern per row
+    <!-- Only where a surface says a bucket can be station-less. A pattern per row
          on a table of a thousand of them is a thousand `defs`, and the rows
          do not carry the flag: it is the drilldown that asks for this. -->
     <ChartHatch v-if="stationLess" :id="hatchId"/>
@@ -20,7 +20,7 @@
         :width="cellWidth"
         :height="height - 2"
         :class="`cells__cell cells__cell--${cell.state}`"
-        :fill="cell.state === 'nameless' ? `url(#${hatchId})` : undefined"
+        :fill="cell.state === 'station-less' ? `url(#${hatchId})` : undefined"
     >
       <title>{{ cell.title }}</title>
     </rect>
@@ -147,7 +147,7 @@ const against = computed(
 
 const states = computed(() =>
     presenceStates(props.values, props.ceilings, props.buckets.length).map(
-        (state, at) => (isNameless(at) ? 'nameless' : state)
+        (state, at) => (isStationLess(at) ? 'station-less' : state)
     )
 )
 
@@ -161,13 +161,13 @@ const cells = computed(() =>
           props.values[index] || 0,
           against.value[index],
           props.grain,
-          isNameless(index)
+          isStationLess(index)
       ),
     }))
 )
 
 /** Whether the centre published in this bucket and named nobody in it. */
-function isNameless(at) {
+function isStationLess(at) {
   return Boolean(props.stationLess?.[at])
 }
 
@@ -179,12 +179,12 @@ const openAt = computed(() => props.buckets.findIndex((bucket) => bucket.partial
 const label = computed(() => {
   const station = props.name || 'This station'
   const silent = cells.value.filter((cell) => cell.state === 'silent').length
-  const nameless = cells.value.filter((cell) => cell.state === 'nameless').length
+  const unnamed = cells.value.filter((cell) => cell.state === 'station-less').length
   // Said rather than left to the hatch, and said before the count of silence
   // so that the two are not read as one number: a bucket the centre named
   // nobody in is not a bucket this station was silent in.
-  const attribution = nameless
-      ? ` In ${nameless} of them this centre published nothing naming any` +
+  const attribution = unnamed
+      ? ` In ${unnamed} of them this centre published nothing naming any` +
       ` station, so nothing can be said about this one.`
       : ''
   const period = grainOf(props.grain).period
@@ -224,7 +224,7 @@ const label = computed(() => {
   fill: var(--stat-live);
 }
 
-/* The hatched bucket has no rule at all, and that is deliberate: the pattern
+/* The station-less bucket has no rule at all, and that is deliberate: the pattern
    is bound as a presentation attribute on the rect, and any `fill` here --
    including `none` -- would beat it, because CSS wins over presentation
    attributes. The class stays as a hook for anything that is not a fill. */
