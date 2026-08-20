@@ -37,6 +37,7 @@
 .node-statistics {
     /* Axis furniture, from the surface scale the rest of the island is
        already painted with. */
+    --stat-ink: var(--p-text-color);
     --stat-ink-muted: var(--p-text-muted-color);
     --stat-grid: var(--p-surface-300);
 
@@ -208,6 +209,19 @@
     stroke: var(--stat-live);
     stroke-width: 1.4;
     fill: none;
+}
+
+/* What the axis top was taken from, on the charts whose unit is stations and
+   whose registry declares nothing. It sits between the plot and the readout
+   because it qualifies the whole chart rather than the bucket under the
+   pointer -- and it is a standing statement, so it does not move when the
+   reader does. Weighted a step above the readout: a reader who takes a bar
+   for coverage has misread the panel, not one bucket of it. */
+.node-statistics .stat-axis-note {
+    margin: 0.35rem 0 0;
+    font-size: 0.75rem;
+    line-height: 1.3;
+    color: var(--stat-ink);
 }
 
 /* Anchored under the axis rather than floating over the bars: on a plot this

@@ -141,6 +141,64 @@ export function niceTop(max) {
     return step * decade
 }
 
+//: What the top of a station axis was taken from, and so what the height of
+//: a bar on it means. Named rather than inferred from `declared > 0` at each
+//: reading site, because the two cases say different things to a reader and
+//: every surface drawing this axis has to say which one it is on.
+export const POPULATION_DECLARED = 'declared'
+export const POPULATION_OBSERVED = 'observed'
+
+/**
+ * The top of an axis whose unit is stations, and what that top means.
+ *
+ * The top is the declared population wherever there is one: height *is*
+ * coverage, and it must never be scaled to the data, or two readers
+ * screenshotting one centre on two days cannot lay the images side by side.
+ *
+ * Where the registry declares nothing the rule has no denominator to stand
+ * on, and the floor of 1 it used to fall to is not a milder version of the
+ * same chart -- every bucket with any station in it draws full height, so the
+ * panel is a solid block with no notch, no decay and no outage in it. The
+ * fallback is the population the centre has actually been *heard*
+ * transmitting for, which restores the shape; what it costs is that a full
+ * bar no longer means full coverage, and that is a debt the caller pays by
+ * saying so beside the axis rather than one this function can settle.
+ *
+ * The fallback is *now*-anchored, not read off the plotted series. A top
+ * taken from the tallest bar moves when the window does and differs between
+ * two charts stacked on one page -- an hourly peak is never a day's distinct
+ * count -- which is the comparability the fixed top exists to protect.
+ *
+ * @param {number} declared - how many stations the registry declares.
+ * @param {number} observed - the population the centre declares *or* has been
+ *     heard transmitting for.
+ * @returns {{top: number, basis: string}} the axis top, and where it came from.
+ */
+export function populationAxis(declared, observed) {
+    if (declared > 0) {
+        return {top: declared, basis: POPULATION_DECLARED}
+    }
+
+    return {top: Math.max(1, observed), basis: POPULATION_OBSERVED}
+}
+
+/**
+ * What a chart says about its axis when nothing is declared.
+ *
+ * One sentence, exported rather than written twice: the hourly chart and the
+ * daily one sit on the same axis and above each other, and two spellings of
+ * "this is not coverage" on one page is a second rule to learn.
+ *
+ * @param {number} top - the population the axis fell back to.
+ * @returns {string} the sentence to put beside the axis.
+ */
+export function observedAxisNote(top) {
+    return (
+        `This centre declares no stations, so the axis is the ${formatCount(top)} ` +
+        `it has been heard transmitting for. A full bar is not full coverage.`
+    )
+}
+
 /**
  * A number short enough to sit beside an axis, without lying about its size.
  *

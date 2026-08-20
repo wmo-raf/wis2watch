@@ -47,7 +47,22 @@
 
           <p class="node-statistics__headline">
             <strong>{{ counts.transmitting }}</strong>
-            of {{ counts.declared_station_count }} declared stations transmitting
+            <template v-if="declares">
+              of {{ counts.declared_station_count }} declared stations transmitting
+            </template>
+            <template v-else>
+              of {{ population }} stations transmitting
+            </template>
+          </p>
+
+          <!-- Said once, at the top, and the charts below repeat it on their
+               own axes: with nothing declared there is no promise to measure
+               against, so every ratio on this page is of what has been heard
+               rather than of what was undertaken. -->
+          <p v-if="!declares" class="node-statistics__caveats">
+            Nothing is declared for this centre, so the figures on this page
+            are counted against the stations it has been heard transmitting
+            for &mdash; not against a registered network.
           </p>
 
           <p class="node-statistics__population">
@@ -80,15 +95,23 @@
             {{ summary.window.label }} &mdash; moves with the window
             <InfoNote label="What counts as reporting inside the window">
               A station counts here if this centre was heard publishing for it
-              once, at any vantage point, so a station the registry never
-              declared can be counted into this figure but not into the
-              {{ windowStats.declared_station_count }} beside it.
+              once, at any vantage point<template v-if="declares">, so a
+              station the registry never declared can be counted into this
+              figure but not into the
+              {{ windowStats.declared_station_count }} beside it</template>.
+              <template v-if="!declares">
+                The registry declares nothing for this centre, so the figure
+                beside it is the whole population that has ever been heard
+                transmitting under its topics, and a full count here is not
+                full coverage.
+              </template>
             </InfoNote>
           </p>
 
           <p class="node-statistics__headline">
             <strong>{{ windowStats.reported_station_count }}</strong>
-            of {{ windowStats.declared_station_count }} reported at least once
+            of {{ declares ? windowStats.declared_station_count : population }}
+            reported at least once
           </p>
 
           <p class="node-statistics__population">
@@ -120,15 +143,17 @@
           </InfoNote>
         </h3>
         <p class="node-statistics__panel-note">
-          One bar per whole UTC hour, against every station the registry
-          declares &mdash; so the height of a bar is how much of this centre
-          was reporting, not how busy it was.
+          One bar per whole UTC hour, against every station
+          <template v-if="declares">the registry declares</template>
+          <template v-else>this centre has been heard transmitting for</template>
+          &mdash; so the height of a bar is how much of this centre was
+          reporting, not how busy it was.
         </p>
 
         <HourlyChart
             :buckets="summary.now.buckets"
             :hourly="summary.now.hourly"
-            :declared="counts.declared_station_count"
+            :axis="axis"
             :selected="view.bucket"
             :selectable="hourlyIsTheWindow"
             @select="refine({bucket: $event})"
@@ -158,7 +183,7 @@
           <DailyChart
               :buckets="summary.buckets"
               :daily="windowStats.daily"
-              :declared="counts.declared_station_count"
+              :axis="axis"
               :as-of="summary.generated_at"
               :selected="view.bucket"
               selectable
@@ -426,6 +451,7 @@ import StationDrilldown from './StationDrilldown.vue'
 import StationMap from './StationMap.vue'
 import StationTable from './StationTable.vue'
 import WindowControl from './WindowControl.vue'
+import {populationAxis} from './charts/plot.js'
 import {readParam, writeParams} from './querystring.js'
 import {pickedStationId} from './selection.js'
 import {STANDING_LABEL} from './standings.js'
@@ -606,6 +632,21 @@ const population = computed(() =>
     counts.value.gone_quiet +
     counts.value.never_transmitted +
     counts.value.undeclared_transmitting
+)
+
+// Whether there is a promise on this page at all. Where a centre declares
+// nothing -- which on this region is every centre, because the declarations
+// have never been populated -- "412 of 500" has no 500 in it, and every
+// surface that would have said one has to say which population it is counting
+// against instead.
+const declares = computed(() => counts.value.declared_station_count > 0)
+
+// The axis the two coverage charts are drawn on, derived once here rather
+// than twice in them. They sit above each other on one page and are read
+// against each other, so a second derivation is not a duplication but a way
+// for the two panels to end up on different tops.
+const axis = computed(() =>
+    populationAxis(counts.value.declared_station_count, population.value)
 )
 
 // The gap the two blocks exist to show, stated rather than left to be worked

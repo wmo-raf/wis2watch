@@ -23,13 +23,15 @@
 
       <!-- Full coverage, on the same axis the hourly chart draws it on: the
            two charts above and below each other have to be readable against
-           one line, or the day is not the hour's aggregate to a reader. -->
+           one line, or the day is not the hour's aggregate to a reader. Gone
+           where nothing is declared, for the same reason it is gone from the
+           chart above: there is no coverage to draw a line at. -->
       <line
-          v-if="declared > 0"
+          v-if="isCoverage"
           :x1="PAD_LEFT"
           :x2="width"
-          :y1="y(declared)"
-          :y2="y(declared)"
+          :y1="y(yTop)"
+          :y2="y(yTop)"
           class="stat-gridline"
       />
       <line :x1="PAD_LEFT" :x2="width" :y1="plotHeight" :y2="plotHeight" class="stat-axis"/>
@@ -117,6 +119,7 @@
       </text>
     </svg>
 
+    <p v-if="!isCoverage" class="stat-axis-note">{{ observedAxisNote(yTop) }}</p>
     <p class="stat-readout">{{ readout }}</p>
   </div>
 </template>
@@ -153,11 +156,13 @@ import ChartHatch from './charts/ChartHatch.vue'
 import {
   PAD_BOTTOM,
   PAD_LEFT,
+  POPULATION_DECLARED,
   STUB_HEIGHT,
   bandScale,
   formatCount,
   formatDay,
   formatDayLong,
+  observedAxisNote,
   spacedTicks,
   tickPlacement,
   useMeasuredWidth,
@@ -177,9 +182,13 @@ const props = defineProps({
     type: Array,
     required: true
   },
-  /** How many stations the registry declares: the top of the axis. */
-  declared: {
-    type: Number,
+  /**
+   * The top of the axis and where it came from: `{top, basis}`, as
+   * `populationAxis` derived it. The same object the hourly chart above is
+   * handed, which is what keeps the two panels on one axis.
+   */
+  axis: {
+    type: Object,
     required: true
   },
   /** When the server computed this, which is how far the open day has got. */
@@ -218,10 +227,14 @@ const plotHeight = computed(() => props.height - PAD_BOTTOM)
 
 const starts = computed(() => props.buckets.map((bucket) => new Date(bucket.start)))
 
-// The declared population, as on the hourly chart. Two charts on one page
-// drawn to two different tops would invite exactly the comparison neither of
-// them supports.
-const yTop = computed(() => Math.max(1, props.declared))
+// The declared population, as on the hourly chart -- and where there is
+// none, the observed one the hourly chart fell back to, from the same
+// derivation rather than a second one. Two charts on one page drawn to two
+// different tops would invite exactly the comparison neither of them
+// supports, and a top taken from each chart's own tallest bar is two tops by
+// construction: a day's distinct stations are never an hour's.
+const yTop = computed(() => props.axis.top)
+const isCoverage = computed(() => props.axis.basis === POPULATION_DECLARED)
 
 const drawn = (day) => Math.min(day.stations, yTop.value)
 const y = computed(() => yScale(yTop.value, plotHeight.value))
@@ -243,7 +256,9 @@ const {index, focused, pickedAt, isPicked, onPointerMove, onClick, clear, onFocu
 
 const axisLabel = computed(
     () => `Stations reporting per UTC day, over the last ${props.daily.length} days. ` +
-        `The newest day is still in progress.${props.selectable ? ` ${SELECT_HINT}` : ''}`
+        `The newest day is still in progress.` +
+        `${isCoverage.value ? '' : ` ${observedAxisNote(yTop.value)}`}` +
+        `${props.selectable ? ` ${SELECT_HINT}` : ''}`
 )
 
 /** Where one tick label goes, turned inwards at the ends of the axis. */
@@ -318,8 +333,8 @@ function describe(bucket) {
     return `${on}: silent. This centre published nothing.`
   }
 
-  const reporting = props.declared > 0
-      ? `${formatCount(day.stations)} of ${formatCount(props.declared)} stations reported`
+  const reporting = isCoverage.value
+      ? `${formatCount(day.stations)} of ${formatCount(yTop.value)} stations reported`
       : `${formatCount(day.stations)} stations reported`
   const each = day.messages_per_active_station === null
       ? ''
