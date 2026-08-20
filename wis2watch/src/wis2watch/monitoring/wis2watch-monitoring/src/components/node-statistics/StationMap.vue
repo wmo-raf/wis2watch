@@ -284,6 +284,14 @@ function start() {
   map = created
   teardownMap = destroy
 
+  //: The wheel scrolls the page, not the map. This map sits in the middle of
+  //: a long tab and a reader on their way past it should not have the page
+  //: stop under the pointer and the country jump a zoom level instead. Zoom
+  //: is still on the furniture the basemap already carries -- the +/- control
+  //: bottom-right -- and on double-click and pinch, so nothing is lost but
+  //: the gesture that was being taken by accident.
+  map.scrollZoom.disable()
+
   //: Not swallowed. MapLibre reports a style it could not fetch, a source it
   //: could not tile and a paint expression it could not compile through this
   //: event and through nothing else -- and every one of those leaves a map

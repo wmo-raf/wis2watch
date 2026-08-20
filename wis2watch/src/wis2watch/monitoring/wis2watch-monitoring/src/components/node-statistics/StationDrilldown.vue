@@ -54,21 +54,11 @@
         </div>
       </dl>
 
-      <p class="drilldown__note">
-        Everything below is <strong>{{ centreId }}</strong>'s own observation of
-        this station. A station may transmit under more than one centre's
-        topics, and what another centre heard is not on this page.
-      </p>
 
       <section class="drilldown__panel">
         <h4 class="drilldown__panel-heading">Messages, hour by hour</h4>
         <p class="drilldown__panel-note">
-          One bar per whole UTC hour, in messages this centre published for this
-          station. Flat 24 hours, whatever window is chosen &mdash; "is this
-          station working now" is a question about now. An hour drawn as
-          diagonals is one this centre published in and named no station at
-          all: nothing can be said about this station there, which is not the
-          same as its having been silent.
+          Messages this centre published for this station
         </p>
 
         <StationHourlyChart :buckets="detail.now.buckets" :hourly="detail.now.hourly"/>
@@ -82,9 +72,7 @@
         <template v-if="daily">
           <p class="drilldown__panel-note">
             One cell per UTC day over {{ detail.window.label.toLowerCase() }},
-            oldest at the left, in the same three colours the matrix beside the
-            rows uses. {{ grainWords.scale }} A day drawn as diagonals is one
-            this centre published nothing naming any station on.
+            oldest at the left.
           </p>
 
           <div class="drilldown__strip">
@@ -123,37 +111,34 @@
           What it publishes under, {{ detail.window.label.toLowerCase() }}
         </h4>
         <p class="drilldown__panel-note">
-          Which of this centre's datasets carried this station over the window,
-          busiest first, each with the last hour it was heard under that one.
-          A station that has stopped under one dataset and not another has
-          stopped in a way the row above cannot say.
+          Centre's datasets over the window.
         </p>
 
         <table v-if="datasets.length" class="drilldown__datasets">
           <thead>
-            <tr>
-              <th scope="col">Dataset</th>
-              <th scope="col" class="drilldown__number">Messages</th>
-              <th scope="col">Last heard</th>
-            </tr>
+          <tr>
+            <th scope="col">Dataset</th>
+            <th scope="col" class="drilldown__number">Messages</th>
+            <th scope="col">Last heard</th>
+          </tr>
           </thead>
           <tbody>
-            <tr v-for="entry in datasets" :key="entry.id ?? 'unclaimed'">
-              <td>
-                <template v-if="entry.id">
-                  <span class="drilldown__dataset-title">{{ entry.title }}</span>
-                  <span class="drilldown__dataset-id">{{ entry.identifier }}</span>
-                </template>
-                <!-- Kept rather than dropped: the breakdown is read as an
-                     account of the total beside it, and one that does not add
-                     up is one a reader has to reconcile by hand. -->
-                <span v-else class="drilldown__dataset-title">
-                  Traffic on a topic no dataset claims
-                </span>
-              </td>
-              <td class="drilldown__number">{{ formatCount(entry.messages) }}</td>
-              <td>{{ formatInstant(entry.last_heard) }}</td>
-            </tr>
+          <tr v-for="entry in datasets" :key="entry.id ?? 'unclaimed'">
+            <td>
+              <template v-if="entry.id">
+                <span class="drilldown__dataset-title">{{ entry.title }}</span>
+                <span class="drilldown__dataset-id">{{ entry.identifier }}</span>
+              </template>
+              <!-- Kept rather than dropped: the breakdown is read as an
+                   account of the total beside it, and one that does not add
+                   up is one a reader has to reconcile by hand. -->
+              <span v-else class="drilldown__dataset-title">
+                Traffic on a topic no dataset claims
+              </span>
+            </td>
+            <td class="drilldown__number">{{ formatCount(entry.messages) }}</td>
+            <td>{{ formatInstant(entry.last_heard) }}</td>
+          </tr>
           </tbody>
         </table>
 
@@ -170,14 +155,7 @@
              contradiction a reader has to resolve. -->
         <p class="drilldown__caveats">
           <strong>{{ formatCount(detail.window_stats.messages_total) }}</strong>
-          messages for this station reached the Global Broker over the window,
-          which is the world's view of it and the only vantage point volumes
-          are counted from &mdash; the same publication observed at this
-          centre's own broker as well is still one publication. Counting across
-          <em>every</em> vantage point instead, this centre was heard
-          publishing for it in
-          <strong>{{ formatCount(detail.window_stats.active_buckets) }}</strong>
-          of {{ formatCount(detail.buckets.length) }} {{ grainWords.period }}.
+          messages for this station reached the Global Broker over the window.
         </p>
       </section>
     </template>
@@ -219,12 +197,7 @@ import Message from 'primevue/message'
 import PresenceCells from './PresenceCells.vue'
 import PresenceLegend from './PresenceLegend.vue'
 import StationHourlyChart from './StationHourlyChart.vue'
-import {
-  displayName,
-  formatCount,
-  formatInstant,
-  formatQuiet,
-} from './charts/plot.js'
+import {displayName, formatCount, formatInstant, formatQuiet,} from './charts/plot.js'
 import {axisEnds, bucketCeilings, cellWidthFor, grainOf} from './presence.js'
 import {STANDING_LABEL} from './standings.js'
 

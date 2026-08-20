@@ -1,5 +1,5 @@
 <template>
-  <div class="stations" :style="{'--stations-row': `${ROW_HEIGHT}px`}">
+  <div ref="root" class="stations" :style="{'--stations-row': `${ROW_HEIGHT}px`}">
     <div class="stations__controls">
       <label class="stations__field">
         <span class="stations__field-label">Search</span>
@@ -34,7 +34,55 @@
       >
         Clear filter
       </button>
+
+      <!-- Both take what is on screen rather than the whole population, which
+           is the rule the wall above follows for the same reason: a file and
+           a page that disagree about which stations are in question are two
+           answers to one question. What was filtered travels inside the file,
+           because nothing else about the page does. -->
+      <span v-if="stations.length" class="stations__exports">
+        <button type="button" class="stations__export" @click="downloadCsv">
+          <svg
+              class="stations__export-glyph"
+              viewBox="0 0 16 16"
+              aria-hidden="true"
+              focusable="false"
+          >
+            <path
+                d="M8 2v7.4m0 0L5.1 6.6M8 9.4l2.9-2.8M2.6 11.4v1.4a1 1 0 0 0 1 1h8.8a1 1 0 0 0 1-1v-1.4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+            />
+          </svg>
+          CSV
+        </button>
+        <button type="button" class="stations__export" @click="downloadImage">
+          <svg
+              class="stations__export-glyph"
+              viewBox="0 0 16 16"
+              aria-hidden="true"
+              focusable="false"
+          >
+            <path
+                d="M8 2v7.4m0 0L5.1 6.6M8 9.4l2.9-2.8M2.6 11.4v1.4a1 1 0 0 0 1 1h8.8a1 1 0 0 0 1-1v-1.4"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+            />
+          </svg>
+          Image
+        </button>
+      </span>
     </div>
+
+    <p v-if="exportError" class="stations__export-error" role="status">
+      {{ exportError }}
+    </p>
 
     <!-- What the picked bucket did to this list, said out loud and on its
          own line. Its own numbers rather than the combined ones below,
@@ -102,6 +150,144 @@
       </template>
     </p>
 
+
+    <div v-if="stations.length" ref="viewport" class="stations__scroll" @scroll="onScroll">
+      <table class="stations__table">
+        <colgroup>
+          <col v-for="column in COLUMNS" :key="column.key" :style="{width: column.width}">
+          <col v-if="showsShape" :style="{width: SPARK_WIDTH}">
+          <col :style="{width: `${matrixWidth + CELL_PADDING}px`}">
+        </colgroup>
+
+        <thead ref="header">
+        <tr>
+          <th
+              v-for="column in COLUMNS"
+              :key="column.key"
+              scope="col"
+              :class="[`stations__cell--${column.align || 'text'}`]"
+              :aria-sort="ariaSort(column.key)"
+          >
+            <button
+                type="button"
+                class="stations__sort"
+                :class="{'stations__sort--on': sort === column.key}"
+                @click="sortBy(column.key)"
+            >
+              {{ column.label }}
+              <span aria-hidden="true">{{ arrow(column.key) }}</span>
+            </button>
+          </th>
+          <th v-if="showsShape" scope="col">
+            24h activity
+            <span class="stations__column-note">shape, flat 24h</span>
+          </th>
+          <!-- The matrix's own heading, and the only axis it has. Both ends
+               are placed off the same cell width the cells are drawn at, so
+               the labels cannot come to sit over the wrong column. -->
+          <th scope="col">
+            {{ windowLabel }}
+            <span class="stations__column-note stations__axis" :style="{width: `${matrixWidth}px`}">
+              <span>{{ axisStart }}</span>
+              <span>{{ axisEnd }}</span>
+            </span>
+            <!-- One head per column, and picking one filters the rows below
+                 to the stations that were dark in it. It sits in the header
+                 because that is where a reader who has just read a band down
+                 the matrix is already looking, and it is drawn at the cell
+                 width the rows use, so a head cannot come to sit over the
+                 wrong column. -->
+            <BucketHeads
+                v-if="buckets.length"
+                :buckets="buckets"
+                :grain="grain"
+                :cell-width="cellWidth"
+                :selected="bucket"
+                :window-label="windowLabel"
+                @select="choose({bucket: $event})"
+            />
+          </th>
+        </tr>
+        </thead>
+
+        <tbody>
+        <!-- The rows above the ones drawn, as height and nothing else. The
+             scrollbar measures the whole population this way, so a reader
+             is never told a thousand stations are a screenful. -->
+        <tr v-if="topPad" class="stations__spacer" :style="{height: `${topPad}px`}">
+          <td :colspan="COLUMN_COUNT"/>
+        </tr>
+
+        <tr
+            v-for="row in drawn"
+            :key="row.station_id"
+            :class="{'stations__row--picked': isPicked(row)}"
+        >
+          <td class="stations__cell--text stations__id">
+            <!-- The id is the handle rather than the whole row: a row-wide
+                 click is unreachable from a keyboard, and a station picked
+                 here is picked on the map beside it too. -->
+            <button
+                type="button"
+                class="stations__pick"
+                :aria-pressed="isPicked(row)"
+                @click="pick(row)"
+            >
+              {{ row.wigos_id }}
+            </button>
+          </td>
+          <td class="stations__cell--text" :title="displayName(row)">
+            {{ displayName(row) }}
+          </td>
+          <td class="stations__cell--text">
+            <span class="stations__standing" :class="`stations__standing--${row.standing}`">
+              {{ label(row.standing) }}
+            </span>
+          </td>
+          <td class="stations__cell--text">{{ formatInstant(row.last_heard) }}</td>
+          <td class="stations__cell--number">{{ formatQuiet(row.hours_quiet) }}</td>
+          <td class="stations__cell--number">
+            {{ formatCount(row.messages_in_window) }}
+          </td>
+          <td v-if="showsShape">
+            <Sparkline
+                :values="row.sparkline"
+                :name="displayName(row)"
+                :standing="row.standing"
+                :height="SPARK_HEIGHT"
+            />
+          </td>
+          <td>
+            <PresenceCells
+                :values="row.presence"
+                :buckets="buckets"
+                :grain="grain"
+                :ceilings="ceilings"
+                :cell-width="cellWidth"
+                :height="ROW_HEIGHT"
+                :name="displayName(row)"
+            />
+          </td>
+        </tr>
+
+        <tr v-if="bottomPad" class="stations__spacer" :style="{height: `${bottomPad}px`}">
+          <td :colspan="COLUMN_COUNT"/>
+        </tr>
+        </tbody>
+      </table>
+
+      <p v-if="!shown.length" class="stations__empty">
+        No station matches this filter. All {{ formatCount(stations.length) }} of them
+        are still here &mdash; clear the filter to see them.
+      </p>
+    </div>
+
+    <!-- Words beside every colour, because the cell states are the one thing
+         on this page that cannot be read off a number. The same legend the
+         drilldown carries, so one colour cannot come to be described two
+         ways on two panels of one tab. -->
+    <PresenceLegend v-if="buckets.length" :grain="grain"/>
+
     <!-- The whole of what is listed below, at half a pixel a station. It sits
          under the filter rather than above it because it is drawn from what
          the filter left: the rows the table is showing, in the order it is
@@ -128,174 +314,9 @@
       </p>
 
       <p class="stations__wall-note">
-        Every one of the {{ formatCount(shown.length) }} stations listed below,
-        one line each and none of them scrolled past &mdash; the same colours,
-        the same {{ grain }}s and the same order as the rows. It carries no
-        names: read a band or a gap here for <em>where</em> in the list to look,
-        and the rows for which stations they are.
       </p>
     </template>
 
-    <div v-if="stations.length" ref="viewport" class="stations__scroll" @scroll="onScroll">
-      <table class="stations__table">
-        <colgroup>
-          <col v-for="column in COLUMNS" :key="column.key" :style="{width: column.width}">
-          <col :style="{width: SPARK_WIDTH}">
-          <col :style="{width: `${matrixWidth + CELL_PADDING}px`}">
-        </colgroup>
-
-        <thead ref="header">
-          <tr>
-            <th
-                v-for="column in COLUMNS"
-                :key="column.key"
-                scope="col"
-                :class="[`stations__cell--${column.align || 'text'}`]"
-                :aria-sort="ariaSort(column.key)"
-            >
-              <button
-                  type="button"
-                  class="stations__sort"
-                  :class="{'stations__sort--on': sort === column.key}"
-                  @click="sortBy(column.key)"
-              >
-                {{ column.label }}
-                <span aria-hidden="true">{{ arrow(column.key) }}</span>
-              </button>
-            </th>
-            <th scope="col">
-              24h activity
-              <span class="stations__column-note">shape, flat 24h</span>
-            </th>
-            <!-- The matrix's own heading, and the only axis it has. Both ends
-                 are placed off the same cell width the cells are drawn at, so
-                 the labels cannot come to sit over the wrong column. -->
-            <th scope="col">
-              {{ windowLabel }} &mdash; heard, thinly, or silent
-              <span class="stations__column-note stations__axis" :style="{width: `${matrixWidth}px`}">
-                <span>{{ axisStart }}</span>
-                <span>{{ axisEnd }}</span>
-              </span>
-              <!-- One head per column, and picking one filters the rows below
-                   to the stations that were dark in it. It sits in the header
-                   because that is where a reader who has just read a band down
-                   the matrix is already looking, and it is drawn at the cell
-                   width the rows use, so a head cannot come to sit over the
-                   wrong column. -->
-              <BucketHeads
-                  v-if="buckets.length"
-                  :buckets="buckets"
-                  :grain="grain"
-                  :cell-width="cellWidth"
-                  :selected="bucket"
-                  :window-label="windowLabel"
-                  @select="choose({bucket: $event})"
-              />
-            </th>
-          </tr>
-        </thead>
-
-        <tbody>
-          <!-- The rows above the ones drawn, as height and nothing else. The
-               scrollbar measures the whole population this way, so a reader
-               is never told a thousand stations are a screenful. -->
-          <tr v-if="topPad" class="stations__spacer" :style="{height: `${topPad}px`}">
-            <td :colspan="COLUMN_COUNT"/>
-          </tr>
-
-          <tr
-              v-for="row in drawn"
-              :key="row.station_id"
-              :class="{'stations__row--picked': isPicked(row)}"
-          >
-            <td class="stations__cell--text stations__id">
-              <!-- The id is the handle rather than the whole row: a row-wide
-                   click is unreachable from a keyboard, and a station picked
-                   here is picked on the map beside it too. -->
-              <button
-                  type="button"
-                  class="stations__pick"
-                  :aria-pressed="isPicked(row)"
-                  @click="pick(row)"
-              >
-                {{ row.wigos_id }}
-              </button>
-            </td>
-            <td class="stations__cell--text" :title="displayName(row)">
-              {{ displayName(row) }}
-            </td>
-            <td class="stations__cell--text">
-              <span class="stations__standing" :class="`stations__standing--${row.standing}`">
-                {{ label(row.standing) }}
-              </span>
-            </td>
-            <td class="stations__cell--text">{{ formatInstant(row.last_heard) }}</td>
-            <td class="stations__cell--number">{{ formatQuiet(row.hours_quiet) }}</td>
-            <td class="stations__cell--number">
-              {{ formatCount(row.messages_in_window) }}
-            </td>
-            <td>
-              <Sparkline
-                  :values="row.sparkline"
-                  :name="displayName(row)"
-                  :standing="row.standing"
-                  :height="SPARK_HEIGHT"
-              />
-            </td>
-            <td>
-              <PresenceCells
-                  :values="row.presence"
-                  :buckets="buckets"
-                  :grain="grain"
-                  :ceilings="ceilings"
-                  :cell-width="cellWidth"
-                  :height="ROW_HEIGHT"
-                  :name="displayName(row)"
-              />
-            </td>
-          </tr>
-
-          <tr v-if="bottomPad" class="stations__spacer" :style="{height: `${bottomPad}px`}">
-            <td :colspan="COLUMN_COUNT"/>
-          </tr>
-        </tbody>
-      </table>
-
-      <p v-if="!shown.length" class="stations__empty">
-        No station matches this filter. All {{ formatCount(stations.length) }} of them
-        are still here &mdash; clear the filter to see them.
-      </p>
-    </div>
-
-    <!-- Words beside every colour, because the cell states are the one thing
-         on this page that cannot be read off a number. The same legend the
-         drilldown carries, so one colour cannot come to be described two
-         ways on two panels of one tab. -->
-    <PresenceLegend v-if="buckets.length" :grain="grain"/>
-
-    <p class="stations__caveats">
-      Quiet is judged against a flat {{ staleAfterHours }} hours, the same
-      threshold the figures above use. The message column counts
-      {{ windowLabel.toLowerCase() }} and moves with the window; the activity
-      column is always the last 24 whole hours, and is drawn for shape rather
-      than volume &mdash; a row's trace is scaled to its own busiest hour, so
-      the comparable number is the message column beside it. A flat line on the
-      baseline is a station the world heard nothing from.
-      <template v-if="buckets.length">
-        The cells on the right are one {{ grain }} each, oldest at the left, and
-        are read across a row for when a station stopped and down the column for
-        whether the same stations stop together. Pick a column head above them
-        &mdash; or a bar on any chart drawn over this window &mdash; to keep only
-        the stations that were dark in that {{ grain }}, which is the one way to
-        a cohort that has since recovered: every sort here describes where a
-        station stands now. {{ grainWords.scale }}
-        <template v-if="openBucket">
-          The newest column is the UTC day still being counted, marked with the
-          same open edge the charts above use, and it is judged against the
-          hours of it that have passed rather than against a whole day.
-        </template>
-      </template>
-    </p>
   </div>
 </template>
 
@@ -356,7 +377,7 @@
  * matching everything has hidden nothing, and looks identical to no filter at
  * all unless the page says so.
  */
-import {computed, nextTick, onMounted, watch} from 'vue'
+import {computed, nextTick, onMounted, ref, watch} from 'vue'
 
 import BucketHeads from './BucketHeads.vue'
 import NavigatorWall from './NavigatorWall.vue'
@@ -366,8 +387,16 @@ import Sparkline from './Sparkline.vue'
 import {displayName, formatCount, formatInstant, formatQuiet} from './charts/plot.js'
 import {axisEnds, bucketCeilings, cellWidthFor, grainOf} from './presence.js'
 import {bucketIndexOf, bucketName, darkIn, isPickedStation} from './selection.js'
-import {STANDINGS, STANDING_LABEL, STANDING_RANK} from './standings.js'
+import {STANDING_LABEL, STANDING_RANK, STANDINGS} from './standings.js'
 import {useVirtualRows} from './useVirtualRows.js'
+import {useRoles} from './charts/useRoles.js'
+import {
+  filenameFor,
+  handOver,
+  provenance,
+  stationsCsv,
+  stationsImage,
+} from './exports.js'
 
 const props = defineProps({
   /** The rows, as the server ordered them. */
@@ -432,6 +461,20 @@ const props = defineProps({
   windowLabel: {
     type: String,
     default: 'the window'
+  },
+  /**
+   * What this centre is called, carried for one reason: a file that leaves
+   * the page has to name the centre it is about, and nothing else in this
+   * component ever says it.
+   */
+  centreName: {
+    type: String,
+    default: 'This centre'
+  },
+  /** The window's own key, for naming the file after it. */
+  windowKey: {
+    type: String,
+    default: ''
   },
   /** How many hours of quiet is too many, echoed by the server. */
   staleAfterHours: {
@@ -512,9 +555,21 @@ const COLUMNS = [
 
 const COLUMN_BY_KEY = Object.fromEntries(COLUMNS.map((column) => [column.key, column]))
 
-//: Every column including the two shapes, for the spacers that stand in for
-//: the rows not drawn.
-const COLUMN_COUNT = COLUMNS.length + 2
+//: Every column the table is actually drawing, for the spacers that stand in
+//: for the rows not drawn. The matrix always, the 24h shape only where it is
+//: on the same clock as the matrix beside it -- a spacer counting a column
+//: that is not there pads the wrong width and the scroll comes apart.
+const COLUMN_COUNT = computed(() => COLUMNS.length + (showsShape.value ? 2 : 1))
+
+//: Whether the 24h shape is drawn at all.
+//:
+//: It is a flat 24 hours whatever else is on screen, so it belongs beside a
+//: matrix of 24 hourly buckets and nowhere else: over a window of days it
+//: would be the one column in the row reading a different clock, which is the
+//: thing the page's two tabs exist to stop. Read off the grain the rows
+//: themselves were drawn at rather than off a prop, because that grain *is*
+//: which tab this is.
+const showsShape = computed(() => props.grain === 'hour')
 
 //: Whether the two fields above the table are narrowing anything, which is
 //: what their own clear button is offered for. The picked bucket is not among
@@ -694,6 +749,133 @@ const ends = computed(() => axisEnds(props.buckets, props.grain))
 const axisStart = computed(() => ends.value.start)
 const axisEnd = computed(() => ends.value.end)
 
+//: The element the image's colours are inherited through. A canvas cannot
+//: read a custom property, so the roles are resolved to strings the same way
+//: the navigator wall resolves its three -- and against the island, because
+//: outside it every one of them is the empty string.
+const root = ref(null)
+
+const exportRoles = useRoles(root, [
+  'live', 'thin', 'empty', 'silent', 'ink', 'ink-muted', 'grid', 'band',
+  'hatch-ground',
+])
+
+//: The palette the picture is painted with, named for what each role *is* in
+//: the drawing rather than for what it is on the page. The export follows
+//: the reader's theme rather than forcing one: a dark page exporting a white
+//: sheet would hand back an image in colours the reader has never seen and
+//: cannot check against what is on screen.
+const imageRoles = computed(() => ({
+  page: exportRoles.value['hatch-ground'],
+  zebra: exportRoles.value.band,
+  ink: exportRoles.value.ink,
+  meta: exportRoles.value['ink-muted'],
+  grid: exportRoles.value.grid,
+  //: The standing dot's two fills. `live` is the same colour the matrix's
+  //: `full` is painted in and is deliberately not a second role: the table
+  //: paints the dot and the cells from one token, and so does this.
+  live: exportRoles.value.live,
+  alarm: exportRoles.value.silent,
+  full: exportRoles.value.live,
+  thin: exportRoles.value.thin,
+  silent: exportRoles.value.empty,
+  empty: exportRoles.value.empty,
+}))
+
+//: Said above where it happened rather than in an alert: the one refusal
+//: here is a population too tall to draw, and the answer to it is a filter or
+//: the other button, both of which are on this line.
+const exportError = ref('')
+
+//: Every narrowing in force, in the words the file will carry. The picked
+//: bucket is described rather than named: it filters *rows* -- to the
+//: stations that were dark in it -- and a file saying "bucket: 2026-08-14"
+//: would read as a matrix cropped to one day, which is not what happened.
+const activeFilters = computed(() => {
+  const said = []
+
+  if (props.search.trim()) {
+    said.push(`search "${props.search.trim()}"`)
+  }
+
+  if (props.standing) {
+    said.push(`standing = ${label(props.standing)}`)
+  }
+
+  if (picked.value) {
+    said.push(`only stations dark ${grainWords.value.preposition} ${pickedName.value}`)
+  }
+
+  return said
+})
+
+const sortLabel = computed(() => {
+  const column = COLUMN_BY_KEY[props.sort]
+
+  return column
+      ? `${column.label} (${props.direction === 'desc' ? 'desc' : 'asc'})`
+      : ''
+})
+
+/** What both files say about themselves. */
+function exportLines() {
+  return provenance({
+    centreName: props.centreName,
+    windowLabel: props.windowLabel,
+    generatedAt: props.asOf,
+    filters: activeFilters.value,
+    showing: formatCount(shown.value.length),
+    total: formatCount(props.stations.length),
+    sortLabel: sortLabel.value,
+  })
+}
+
+function downloadCsv() {
+  exportError.value = ''
+
+  const text = stationsCsv({
+    rows: shown.value,
+    buckets: props.buckets,
+    lines: exportLines(),
+  })
+
+  handOver(
+      // The BOM, and it is not decoration: Excel reads a CSV without one as
+      // the local codepage, and a station name with an accent in it arrives
+      // mangled on exactly the desks this file is for.
+      new Blob([`\ufeff${text}`], {type: 'text/csv;charset=utf-8'}),
+      filenameFor(props.centreName, props.windowKey, 'csv')
+  )
+}
+
+function downloadImage() {
+  exportError.value = ''
+
+  const canvas = stationsImage({
+    rows: shown.value,
+    buckets: props.buckets,
+    ceilings: ceilings.value,
+    roles: imageRoles.value,
+    lines: exportLines(),
+    axis: {start: axisStart.value, end: axisEnd.value},
+  })
+
+  if (!canvas) {
+    exportError.value =
+        `An image of ${formatCount(shown.value.length)} stations is taller than`
+        + ` a browser will draw. Narrow the list with the filters above, or`
+        + ` download the CSV, which has no limit.`
+
+    return
+  }
+
+  canvas.toBlob((blob) => {
+    if (blob) {
+      handOver(blob, filenameFor(props.centreName, props.windowKey, 'png'))
+    }
+  }, 'image/png')
+}
+
 function label(standing) {
   return STANDING_LABEL[standing] || standing
 }
@@ -763,7 +945,7 @@ function arrow(key) {
 .stations__controls {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: flex-end;
   gap: 0.75rem;
   margin-bottom: 0.5rem;
 }
@@ -772,6 +954,20 @@ function arrow(key) {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+}
+
+/* One height for both, stated rather than inherited. The admin styles a
+   search input and a select from two different rules with two different
+   min-heights and two different line-heights, so a pair that shares a class
+   here still arrives on the page as two boxes of different sizes sitting on
+   different baselines. Scoped under `.stations` for the specificity to beat
+   them, and `border-box` so the height is the height rather than the height
+   plus whatever padding each control brought with it. */
+.stations .stations__input {
+  box-sizing: border-box;
+  height: 2rem;
+  min-height: 0;
+  line-height: 1.2;
 }
 
 .stations__field-label {
@@ -784,7 +980,7 @@ function arrow(key) {
 .stations__input {
   font: inherit;
   font-size: 0.8rem;
-  padding: 0.2rem 0.4rem;
+  padding: 0 0.45rem;
   border: 1px solid var(--w-color-border-furniture);
   border-radius: 3px;
   background: transparent;
@@ -795,10 +991,12 @@ function arrow(key) {
    button at the top of the row sits beside their labels rather than beside
    the controls it belongs with. */
 .stations__clear {
+  box-sizing: border-box;
   align-self: flex-end;
+  height: 2rem;
   font: inherit;
   font-size: 0.78rem;
-  padding: 0.25rem 0.6rem;
+  padding: 0 0.6rem;
   border: 1px solid var(--w-color-border-furniture);
   border-radius: 3px;
   background: transparent;
@@ -823,6 +1021,8 @@ function arrow(key) {
    has no field labels above it for it to clear. */
 .stations__picked .stations__clear {
   align-self: auto;
+  height: auto;
+  padding: 0.25rem 0.6rem;
 }
 
 .stations__picked-what {
@@ -845,6 +1045,62 @@ function arrow(key) {
 
 .stations__station .stations__clear {
   align-self: auto;
+  height: auto;
+  padding: 0.25rem 0.6rem;
+}
+
+/* Pushed to the far end of the controls: they act on what the fields to
+   their left have left, and reading them in that order is the whole of what
+   a reader needs to know about what comes out. */
+.stations__exports {
+  display: flex;
+  gap: 0.4rem;
+  margin-left: auto;
+}
+
+/* Filled rather than outlined, and that is the whole of what separates them
+   from `Clear filter` sitting a few pixels to their left. Every other button
+   on this line *narrows what is on screen*; these two take a copy of it away
+   with the reader. Two gestures that different should not be one shape --
+   and the arrow says which way the thing is going before the word does. */
+.stations__export {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: 2rem;
+  gap: 0.35rem;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0 0.7rem;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: var(--stat-band);
+  color: var(--w-color-text-label);
+  cursor: pointer;
+}
+
+.stations__export:hover {
+  border-color: var(--w-color-border-furniture);
+}
+
+.stations__export-glyph {
+  display: block;
+  width: 0.95rem;
+  height: 0.95rem;
+  color: var(--stat-live);
+}
+
+.stations__export:focus-visible {
+  outline: 2px solid var(--stat-focus);
+  outline-offset: 1px;
+}
+
+.stations__export-error {
+  font-size: 0.8rem;
+  color: var(--w-color-text-error, var(--w-color-text-label));
+  margin: 0 0 0.5rem;
+  max-width: 70ch;
 }
 
 .stations__population {
@@ -1040,12 +1296,11 @@ function arrow(key) {
 }
 
 .stations__row--picked td:first-child {
-  background:
-      linear-gradient(
-          color-mix(in srgb, var(--stat-focus) 14%, transparent),
-          color-mix(in srgb, var(--stat-focus) 14%, transparent)
-      ),
-      var(--w-color-surface-page);
+  background: linear-gradient(
+      color-mix(in srgb, var(--stat-focus) 14%, transparent),
+      color-mix(in srgb, var(--stat-focus) 14%, transparent)
+  ),
+  var(--w-color-surface-page);
   box-shadow: inset 2px 0 0 var(--stat-focus), inset 0 -1px 0 var(--w-color-border-furniture);
 }
 

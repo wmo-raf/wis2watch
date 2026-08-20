@@ -8,302 +8,302 @@
       {{ error }}
     </Message>
 
-    <div v-if="windows.length" class="node-statistics__bar">
-      <WindowControl
-          :model-value="windowKey"
-          :windows="windows"
-          :busy="loading"
-          @update:model-value="choose"
-      />
-    </div>
+    <Message
+        v-if="summary && !summary.vantage.active"
+        severity="warn"
+        :closable="false"
+        class="node-statistics__vantage"
+    >
+      No Global Broker connection is switched on, so nothing here has been
+      counted from the world's view of this centre.
+    </Message>
 
-    <template v-if="summary">
+    <!-- The page's spine, and the reason it is furniture rather than a note:
+         the window buttons govern four of the seven panels and nothing here
+         used to say which four. Under two headed bands the layout carries the
+         claim -- everything below the second band moves when the buttons do,
+         and everything below the first one does not. -->
+    <!-- Two readings rather than one control with a hole in it. `24h` was
+         never a window among four: the server has no daily series for a
+         single day, which is why three panels used to empty themselves when
+         it was picked. Under tabs it is not a window at all -- it is the
+         first tab -- and the switcher on the second governs everything under
+         it, which is the only arrangement in which a reader can see what the
+         buttons are for. -->
+    <Tabs v-if="summary || rows" :value="tab" @update:value="chooseTab">
+      <TabList>
+        <Tab value="now">Current State</Tab>
+        <Tab value="past">Previous Days</Tab>
+      </TabList>
 
-      <Message
-          v-if="!summary.vantage.active"
-          severity="warn"
-          :closable="false"
-          class="node-statistics__vantage"
-      >
-        No Global Broker connection is switched on, so nothing here has been
-        counted from the world's view of this centre.
-      </Message>
-
-      <div class="node-statistics__blocks">
-        <div class="node-statistics__standing">
-          <p class="node-statistics__eyebrow">
-            Right now &mdash; does not move with the window
-            <InfoNote label="How standing right now is counted">
-              Standing is flat {{ summary.stale_after_hours }}h, whatever
-              window is chosen: a station is transmitting if this centre has
-              been heard publishing for it within
-              {{ summary.stale_after_hours }} hours.
-              <template v-if="declares">The headline counts only stations the
-              registry declares; the</template><template v-else>The</template>
-              figures cover every station, declared or not, so a station that
-              was never declared and has since stopped is counted as gone
-              quiet rather than as undeclared.
-            </InfoNote>
+      <TabPanels>
+        <TabPanel value="now">
+          <p class="node-statistics__strip">
+            <span class="node-statistics__strip-title">Last 24 hours</span>
           </p>
 
-          <p class="node-statistics__headline">
-            <template v-if="declares">
-              <strong>{{ counts.transmitting }}</strong>
-              of {{ counts.declared_station_count }} declared stations transmitting
-            </template>
-            <template v-else>
-              <strong>{{ live }}</strong>
-              of {{ population }} stations transmitting
-            </template>
-          </p>
+          <div v-if="summary" class="node-statistics__standing">
+            <p class="node-statistics__eyebrow">
+              Standing
+              <InfoNote label="How standing right now is counted">
+                Standing is judged over a flat {{ summary.stale_after_hours }}h,
+                whatever window you choose: a station is transmitting if this
+                centre published for it within the last
+                {{ summary.stale_after_hours }} hours.
+                <template v-if="declares">The headline counts only stations the
+                  registry declares. The
+                </template>
+                <template v-else>The</template>
+                figures cover every station, declared or not, so a station that was
+                never declared and has since stopped counts as gone quiet rather
+                than as undeclared.
+              </InfoNote>
+            </p>
 
-          <!-- Said once, at the top, and the charts below repeat it on their
-               own axes: with nothing declared there is no promise to measure
-               against, so every ratio on this page is of what has been heard
-               rather than of what was undertaken. -->
-          <p v-if="!declares" class="node-statistics__caveats">
-            Nothing is declared for this centre, so the figures on this page
-            are counted against the stations it has been heard transmitting
-            for &mdash; not against a registered network.
-          </p>
+            <p class="node-statistics__headline">
+              <template v-if="declares">
+                <strong>{{ counts.transmitting }}</strong>
+                of {{ counts.declared_station_count }} declared stations transmitting
+              </template>
+              <template v-else>
+                <strong>{{ live }}</strong>
+                of {{ population }} stations transmitting
+              </template>
+            </p>
 
-          <p class="node-statistics__population">
-            Of all {{ population }} stations this centre declares or has been
-            heard transmitting for:
-          </p>
+            <!-- Said once, at the top, and the charts below repeat it on their
+                 own axes: with nothing declared there is no promise to measure
+                 against, so every ratio on this page is of what has been heard
+                 rather than of what was undertaken. -->
+            <p v-if="!declares" class="node-statistics__caveats">
+              Nothing is declared for this centre, so the figures on this page
+              are counted against the stations it has been heard transmitting
+              for &mdash; not against a registered network.
+            </p>
 
-          <dl class="node-statistics__counts">
-            <div
-                v-for="figure in figures"
-                :key="figure.key"
-                class="node-statistics__count"
+            <p class="node-statistics__population">
+              Of all {{ population }} stations this centre declares or has been
+              heard transmitting for:
+            </p>
+
+            <dl class="node-statistics__counts">
+              <div
+                  v-for="figure in figures"
+                  :key="figure.key"
+                  class="node-statistics__count"
+              >
+                <dt>{{ figure.label }}</dt>
+                <dd>{{ figure.value }}</dd>
+              </div>
+            </dl>
+
+            <p
+                v-if="counts.unlocated_station_count"
+                class="node-statistics__caveats"
             >
-              <dt>{{ figure.label }}</dt>
-              <dd>{{ figure.value }}</dd>
-            </div>
-          </dl>
+              {{ counts.unlocated_station_count }} of them carry no coordinates
+              and cannot be put on a map.
+            </p>
+          </div>
 
-          <p
-              v-if="counts.unlocated_station_count"
-              class="node-statistics__caveats"
+          <section v-if="summary" class="node-statistics__panel">
+            <h3 class="node-statistics__panel-heading">
+              Hourly Stations Reporting
+              <InfoNote label="How the hour-by-hour chart is read">
+                This chart always shows the last 24 whole hours, whatever window
+                you choose &mdash; a shorter span than the standing figures above,
+                which are judged over a flat {{ summary.stale_after_hours }}h.
+                Message counts are in the words below the chart.
+              </InfoNote>
+            </h3>
+            <p class="node-statistics__panel-note">
+              Stations reporting in a given hour.
+            </p>
+
+            <HourlyChart
+                :buckets="summary.now.buckets"
+                :hourly="summary.now.hourly"
+                :axis="axis"
+                :selected="view.bucket"
+                :selectable="hourlyIsTheWindow"
+                @select="refine({bucket: $event})"
+            />
+          </section>
+
+          <!-- The rows again, on the ground. Above the band rather than beside
+               the table, because standing here is the flat threshold and not the
+               window: this panel answers the same question the headline above it
+               does, in a different projection. -->
+          <section v-if="rows" class="node-statistics__panel">
+            <h3 class="node-statistics__panel-heading">
+              Stations
+              <InfoNote label="What the map can say that the table cannot">
+                Standing here is right now, a flat {{ rows.stale_after_hours }}h.
+                A block of silent pins close together is a regional outage, where
+                the same number scattered across the country is stations failing
+                one at a time.
+              </InfoNote>
+            </h3>
+            <p class="node-statistics__panel-note">
+              Click a station to show details
+            </p>
+
+            <StationMap
+                :stations="rows.stations"
+                :selected="view.station"
+                :stale-after-hours="rows.stale_after_hours"
+                @choose="refine"
+            />
+          </section>
+        </TabPanel>
+
+        <TabPanel value="past">
+          <p class="node-statistics__strip">
+            <span class="node-statistics__strip-title">
+              Over {{ bandLabel.toLowerCase() }}
+            </span>
+            <span v-if="pastWindows.length" class="node-statistics__strip-control">
+              <WindowControl
+                  label="Period"
+                  :model-value="windowKey"
+                  :windows="pastWindows"
+                  :busy="loading"
+                  @update:model-value="choose"
+              />
+            </span>
+          </p>
+
+          <div v-if="summary" class="node-statistics__window">
+            <p class="node-statistics__eyebrow">
+              Coverage
+              <InfoNote label="What counts as reporting inside the window">
+                A station counts here if this centre published for it at least
+                once during the window
+                <template v-if="declares">. A station the
+                  registry never declared can count here, but not in the
+                  {{ windowStats.declared_station_count }} beside it
+                </template>
+                .
+              </InfoNote>
+            </p>
+
+            <p class="node-statistics__headline">
+              <strong>{{ windowStats.reported_station_count }}</strong>
+              of {{ declares ? windowStats.declared_station_count : population }}
+              reported at least once
+            </p>
+
+            <p class="node-statistics__population">
+              {{ count(windowStats.messages_total) }} messages,
+              {{ count(windowStats.unattributed_messages_total) }} of them naming
+              no station.
+            </p>
+
+            <!-- The gap between the two bands, said here in full rather than left
+                 to be found by comparing this figure with one a screen above it:
+                 the bands are what separated them, so the sentence has to carry
+                 both numbers itself. -->
+            <p class="node-statistics__caveats">
+              <template v-if="stoppedSince">
+                <strong>{{ stoppedSince }}</strong> more stations reported inside
+                this window than the {{ live }} transmitting now: they reported and
+                have since stopped.
+              </template>
+              <template v-else>
+                Every station that reported inside this window is still
+                transmitting.
+              </template>
+            </p>
+          </div>
+
+          <template v-if="summary && windowStats.daily">
+            <section class="node-statistics__panel">
+              <h3 class="node-statistics__panel-heading">
+                Stations reporting, day by day
+                <InfoNote label="Why today's bar is drawn open">
+                  Today's bar is dashed and open on the right because the day is
+                  still being counted. It will look short in the morning. That is
+                  not an outage.
+                </InfoNote>
+              </h3>
+
+              <p class="node-statistics__panel-note">
+                One bar per UTC day, on the same scale as the hours above. The
+                height is how many stations reported that day.
+              </p>
+
+              <DailyChart
+                  :buckets="summary.buckets"
+                  :daily="windowStats.daily"
+                  :axis="axis"
+                  :as-of="summary.generated_at"
+                  :selected="view.bucket"
+                  selectable
+                  @select="refine({bucket: $event})"
+              />
+            </section>
+
+            <section class="node-statistics__panel">
+              <h3 class="node-statistics__panel-heading">
+                Messages per active station
+                <InfoNote label="How messages per active station is read">
+                  The line breaks on days when no station reported. There is no
+                  per-station figure for a day like that, and a zero would wrongly
+                  say every station was silent.
+                </InfoNote>
+              </h3>
+
+              <p class="node-statistics__panel-note">
+                One point per UTC day. The height is the average number of messages
+                from each station that reported.
+              </p>
+
+              <RatioChart
+                  :buckets="summary.buckets"
+                  :daily="windowStats.daily"
+                  :as-of="summary.generated_at"
+                  :selected="view.bucket"
+                  selectable
+                  @select="refine({bucket: $event})"
+              />
+            </section>
+          </template>
+
+          <section
+              v-if="summary && windowStats.hour_of_day"
+              class="node-statistics__panel"
           >
-            {{ counts.unlocated_station_count }} of them carry no coordinates
-            and cannot be put on a map.
-          </p>
-        </div>
+            <h3 class="node-statistics__panel-heading">
+              Message volume by hour of day, UTC
+              <InfoNote label="How the hour-of-day profile is read">
+                A flat profile is a centre publishing whenever observations happen
+                to arrive. Today's hours so far are included, so over a short window
+                the hours already past today are summed over one more day than the
+                hours still to come.
+              </InfoNote>
+            </h3>
 
-        <div class="node-statistics__window">
-          <p class="node-statistics__eyebrow">
-            {{ summary.window.label }} &mdash; moves with the window
-            <InfoNote label="What counts as reporting inside the window">
-              A station counts here if this centre was heard publishing for it
-              once, at any vantage point<template v-if="declares">, so a
-              station the registry never declared can be counted into this
-              figure but not into the
-              {{ windowStats.declared_station_count }} beside it</template>.
-            </InfoNote>
-          </p>
+            <p class="node-statistics__panel-note">
+              Messages received in each hour of the day, summed over the window.
+            </p>
 
-          <p class="node-statistics__headline">
-            <strong>{{ windowStats.reported_station_count }}</strong>
-            of {{ declares ? windowStats.declared_station_count : population }}
-            reported at least once
-          </p>
+            <HourOfDayChart
+                :hour-of-day="windowStats.hour_of_day"
+                :window-label="summary.window.label"
+            />
+          </section>
 
-          <p class="node-statistics__population">
-            {{ count(windowStats.messages_total) }} messages,
-            {{ count(windowStats.unattributed_messages_total) }} of them naming
-            no station.
-          </p>
+        </TabPanel>
+      </TabPanels>
+    </Tabs>
 
-          <p class="node-statistics__caveats">
-            <template v-if="stoppedSince">
-              <strong>{{ stoppedSince }}</strong> more stations reported inside
-              this window than are transmitting now: they reported and have
-              since stopped.
-            </template>
-            <template v-else>
-              Every station that reported inside this window is still
-              transmitting.
-            </template>
-          </p>
-        </div>
-      </div>
-
-      <section class="node-statistics__panel">
-        <h3 class="node-statistics__panel-heading">
-          Stations reporting, hour by hour
-          <InfoNote label="How the hour-by-hour chart is read">
-            Flat 24 hours, whatever window is chosen. Message volume is in the
-            words below the chart.
-          </InfoNote>
-        </h3>
-        <p class="node-statistics__panel-note">
-          One bar per whole UTC hour, against every station
-          <template v-if="declares">the registry declares</template>
-          <template v-else>this centre has been heard transmitting for</template>
-          &mdash; so the height of a bar is how much of this centre was
-          reporting, not how busy it was.
-        </p>
-
-        <HourlyChart
-            :buckets="summary.now.buckets"
-            :hourly="summary.now.hourly"
-            :axis="axis"
-            :selected="view.bucket"
-            :selectable="hourlyIsTheWindow"
-            @select="refine({bucket: $event})"
-        />
-      </section>
-
-      <section class="node-statistics__panel">
-        <h3 class="node-statistics__panel-heading">
-          Stations reporting, day by day
-          <InfoNote
-              v-if="windowStats.daily"
-              label="Why today's bar is drawn open"
-          >
-            Today is included and drawn <em>open</em> &mdash; dashed, unclosed
-            on its right &mdash; because it is still being counted: it is
-            short every morning, and that is not a collapse.
-          </InfoNote>
-        </h3>
-
-        <template v-if="windowStats.daily">
-          <p class="node-statistics__panel-note">
-            One bar per UTC day, on the same axis as the hours above, so a
-            node-wide outage is a gap the whole width of the panel rather than
-            something to be found station by station.
-          </p>
-
-          <DailyChart
-              :buckets="summary.buckets"
-              :daily="windowStats.daily"
-              :axis="axis"
-              :as-of="summary.generated_at"
-              :selected="view.bucket"
-              selectable
-              @select="refine({bucket: $event})"
-          />
-        </template>
-
-        <p v-else class="node-statistics__panel-empty">
-          One day is one bar, so there is no series to draw over
-          {{ summary.window.label.toLowerCase() }}. Choose a longer window
-          above.
-        </p>
-      </section>
-
-      <section class="node-statistics__panel">
-        <h3 class="node-statistics__panel-heading">
-          Messages per active station
-          <InfoNote
-              v-if="windowStats.daily"
-              label="How messages per active station is read"
-          >
-            Read against the chart above it: a centre whose station count
-            holds steady while this climbs is publishing more from the same
-            network, which is a different thing from a network that has grown.
-            The line <em>breaks</em> where no station reported &mdash; there is
-            no per-station figure for a day like that, and a zero would read as
-            "every station said nothing".
-          </InfoNote>
-        </h3>
-
-        <template v-if="windowStats.daily">
-          <p class="node-statistics__panel-note">
-            How much each station that reported was heard saying, per UTC day.
-          </p>
-
-          <RatioChart
-              :buckets="summary.buckets"
-              :daily="windowStats.daily"
-              :as-of="summary.generated_at"
-              :selected="view.bucket"
-              selectable
-              @select="refine({bucket: $event})"
-          />
-        </template>
-
-        <p v-else class="node-statistics__panel-empty">
-          One day is one point, so there is no line to draw over
-          {{ summary.window.label.toLowerCase() }}. Choose a longer window
-          above.
-        </p>
-      </section>
-
-      <section class="node-statistics__panel">
-        <h3 class="node-statistics__panel-heading">
-          Message volume by hour of day, UTC
-          <InfoNote
-              v-if="windowStats.hour_of_day"
-              label="How the hour-of-day profile is read"
-          >
-            Peaks on the synoptic hours are a centre reporting to schedule; a
-            flat profile is one publishing whenever observations happen to
-            arrive. Today's hours so far are in the sum, so over a short
-            window the hours already past today are summed over one day more
-            than the hours still to come.
-          </InfoNote>
-        </h3>
-
-        <template v-if="windowStats.hour_of_day">
-          <p class="node-statistics__panel-note">
-            Every 00Z of the window added together, every 01Z, and so on: the
-            centre's daily rhythm, and the one chart here that plots messages
-            rather than stations.
-          </p>
-
-          <HourOfDayChart
-              :hour-of-day="windowStats.hour_of_day"
-              :window-label="summary.window.label"
-          />
-        </template>
-
-        <p v-else class="node-statistics__panel-empty">
-          Over {{ summary.window.label.toLowerCase() }} this would be the hourly
-          chart above, drawn again in messages rather than stations. Choose a
-          longer window above to see the rhythm across days.
-        </p>
-      </section>
-
-    </template>
-
-    <!-- The rows again, on the ground. Its own panel above the table because
-         it is the same population read a different way, and because what it
-         can say is only worth reading beside what the rows say. -->
-    <section v-if="rows" class="node-statistics__panel">
-      <h3 class="node-statistics__panel-heading">
-        Where the stations are, and which of them are silent
-        <InfoNote label="What the map can say that the table cannot">
-          Spatial correlation is the one thing a map can say that the table
-          cannot &mdash; a contiguous block of red is a regional outage, where
-          the same count scattered across the country is stations failing one
-          at a time. Standing here is <em>now</em>, flat
-          {{ rows.stale_after_hours }}h, so this is the one panel on the page
-          the window control does not move.
-        </InfoNote>
-      </h3>
-      <p class="node-statistics__panel-note">
-        The same stations as the rows below, placed where they stand, in two
-        colours: transmitting, and silent. Click a station for its full
-        standing, and to find it in the rows below.
-      </p>
-
-      <StationMap
-          :stations="rows.stations"
-          :selected="view.station"
-          :stale-after-hours="rows.stale_after_hours"
-          @choose="refine"
-      />
-    </section>
-
-    <!-- One station, opened. Between the map and the rows because that is
-         where the two gestures that open it are: a pin on the map and a row
-         below. It is inline rather than over the page -- everything the
-         reader chose is in the querystring, so dismissing it clears one key
-         and the sort, the filter and the picked bucket are untouched, and the
-         table is never unmounted and never loses its place. -->
+    <!-- One station, opened. Below the tabs with the rows, because that is
+         where one of the two gestures that open it is -- the other, a pin, is
+         on the current-state tab. Inline rather than over the page:
+         everything the reader chose is in the querystring, so dismissing it
+         clears one key and the sort, the filter and the picked bucket are
+         untouched, and the table is never unmounted and never loses its
+         place. -->
     <StationDrilldown
         v-if="stationUrl"
         :url="stationUrl"
@@ -311,29 +311,26 @@
         @dismiss="refine({station: ''})"
     />
 
-    <!-- Outside the block above, and that is the whole point of it being a
-         second request: the rows arrive on their own and are drawn whether or
-         not the figures did. Everything this panel needs to label itself --
-         the window it was read over, the threshold quiet is judged by -- is
-         echoed on the rows' own payload, so it never reaches into the
-         summary and cannot be taken down with it. -->
+    <!-- The rows, under both tabs rather than inside either. They are the same
+         stations whichever tab is open; only the grain of the matrix moves,
+         which is the window's doing and not the tab's. Kept out of the panels
+         so that switching tabs does not unmount a thousand rows and lose the
+         reader's sort, filter and place in them.
+
+         Drawn off `rows` rather than off the summary, and that is the whole
+         point of it being a second request: the rows arrive on their own and
+         are drawn whether or not the figures did. Everything this panel needs
+         to label itself is echoed on the rows' own payload, so it never
+         reaches into the summary and cannot be taken down with it. -->
     <section v-if="rows || stationsError" class="node-statistics__panel">
       <h3 class="node-statistics__panel-heading">
         Stations, what is broken first
         <InfoNote label="Whose observation the rows are">
-          Everything here is this centre's own observation: a station may
-          transmit under more than one centre's topics, and what another
-          centre heard is not on this page. The cells are the rows themselves
-          rather than a second view of them.
+          Everything here is what this centre published.
         </InfoNote>
       </h3>
       <p class="node-statistics__panel-note">
-        Every station this centre declares or has been heard transmitting for,
-        sorted so that what has stopped is at the top &mdash; the default sort
-        is a filter that hides nothing. The cells trailing each row are that
-        station's availability over the window: read across one for when a
-        station stopped, and down a column for whether the same stations keep
-        stopping together.
+        One row per station this centre declares or has been heard transmitting for.
       </p>
 
       <StationTable
@@ -349,6 +346,8 @@
           :sort="view.sort"
           :direction="view.direction"
           :window-label="rows.window.label"
+          :window-key="rows.window.key"
+          :centre-name="nodeName"
           :stale-after-hours="rows.stale_after_hours"
           @choose="refine"
       />
@@ -437,6 +436,11 @@
  */
 import {computed, onMounted, ref} from 'vue'
 import Message from 'primevue/message'
+import Tab from 'primevue/tab'
+import TabList from 'primevue/tablist'
+import TabPanel from 'primevue/tabpanel'
+import TabPanels from 'primevue/tabpanels'
+import Tabs from 'primevue/tabs'
 
 import DailyChart from './DailyChart.vue'
 import HourlyChart from './HourlyChart.vue'
@@ -648,6 +652,51 @@ const live = computed(() =>
     counts.value.transmitting + counts.value.undeclared_transmitting
 )
 
+//: The two readings the page offers, and they are spelled here rather than
+//: read off anything: they are this component's own vocabulary and the API
+//: has never heard of them.
+const CURRENT = 'now'
+const PAST = 'past'
+
+//: The hourly window, which is the current-state tab rather than an option in
+//: the switcher. Found by its grain rather than by its key, for the reason
+//: every other window fact here is read off the server: the page must not be
+//: the second place that knows what the windows are called.
+const hourWindow = computed(
+    () => windows.value.find((option) => option.grain !== 'day') || null
+)
+
+//: The windows the switcher offers, which is every window that is not the
+//: hourly one. A control that still offered `24h` would be offering the tab
+//: the reader is not on.
+const pastWindows = computed(
+    () => windows.value.filter((option) => option.grain === 'day')
+)
+
+//: Which tab is open, derived from the window rather than stored beside it.
+//: The window is already in the address bar and already the thing the two
+//: tabs differ by, so a second key saying the same thing is a link that can
+//: contradict itself: `window=90d` on the current-state tab is a state with
+//: no meaning and no way to draw it.
+const tab = computed(
+    () => (summary.value?.window.grain === 'day' ? PAST : CURRENT)
+)
+
+//: The period to come back to. A reader who was reading 90 days, looked at
+//: the current state and went back should find 90 days rather than the
+//: default -- and on a first visit there is nothing to remember, so the
+//: switcher's own first option stands in.
+const lastPast = ref(readParam(WINDOW_PARAM))
+
+// What the switcher's band is headed with. Off the summary where there is one
+// and off the rows otherwise, because the rows arrive on their own and the
+// band has to name its window even on a page whose figures failed.
+const bandLabel = computed(() => {
+  const chosen = pastWindows.value.find((option) => option.key === windowKey.value)
+
+  return chosen?.label || pastWindows.value[0]?.label || 'the window'
+})
+
 // The axis the two coverage charts are drawn on, derived once here rather
 // than twice in them. They sit above each other on one page and are read
 // against each other, so a second derivation is not a duplication but a way
@@ -669,12 +718,33 @@ const stoppedSince = computed(() =>
     )
 )
 
-/** Read the tab over a window, and say so in the address bar. */
+/** Read the page over a window, and say so in the address bar. */
 async function choose(key) {
   windowKey.value = key
   writeParams({[WINDOW_PARAM]: key})
 
   await load()
+}
+
+/**
+ * Open a tab, which is to say: read the page over that tab's window.
+ *
+ * The switch is a window change and nothing else, which is what keeps the two
+ * tabs from needing state of their own -- and what makes a tab a link. The
+ * period tab comes back to whatever period was last read rather than to a
+ * default, because a reader who stepped away from 90 days to check the
+ * current state did not thereby ask for 7.
+ */
+async function chooseTab(key) {
+  const wanted = key === CURRENT
+      ? hourWindow.value?.key
+      : (pastWindows.value.some((option) => option.key === lastPast.value)
+          ? lastPast.value
+          : pastWindows.value[0]?.key)
+
+  if (wanted && wanted !== windowKey.value) {
+    await choose(wanted)
+  }
 }
 
 /**
@@ -738,6 +808,12 @@ async function loadSummary() {
     // resolves the window, and a page labelling its charts from the request
     // is a page that can disagree with the numbers on them.
     windowKey.value = summary.value.window.key
+
+    // Remembered here rather than in `choose`, because this is where the
+    // window is *settled*: a stale link and a refused key both land here.
+    if (summary.value.window.grain === 'day') {
+      lastPast.value = summary.value.window.key
+    }
   } catch (failure) {
     // Said on the page rather than only in the console: a tab that renders
     // nothing at all is indistinguishable from a centre with no stations,
@@ -854,10 +930,39 @@ onMounted(load)
   color: var(--w-color-text-meta);
 }
 
-.node-statistics__bar {
+/* Each tab's own band, and the whole of what says which clock the panels
+   under it are on. A heading with a ground rather than a control in a corner:
+   the reader has to be able to see, without reading anything, that the
+   buttons belong to what is beneath them. */
+.node-statistics__strip {
   display: flex;
-  justify-content: flex-end;
-  margin-bottom: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.85rem;
+  margin: 0 0 1rem;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--w-color-border-furniture);
+  border-radius: 0.3rem;
+  background: var(--stat-band);
+}
+
+.node-statistics__strip-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--w-color-text-label);
+}
+
+.node-statistics__strip-note {
+  font-size: 0.75rem;
+  color: var(--w-color-text-meta);
+}
+
+/* Hard right, so the buttons are in the same place on both bands' worth of
+   scrolling and are never mistaken for part of the heading's words. */
+.node-statistics__strip-control {
+  margin-left: auto;
 }
 
 .node-statistics__error,
@@ -865,18 +970,12 @@ onMounted(load)
   margin-bottom: 1rem;
 }
 
-/* Side by side where there is room, because the pair is the finding: the
-   standing and the window coverage are read against each other or not at
-   all. They stack on a narrow page rather than shrinking. */
-.node-statistics__blocks {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(22rem, 1fr));
-  gap: 1rem;
-  margin-bottom: 1rem;
-}
-
+/* One under each band rather than side by side. The pair used to be read
+   against each other in the layout; the bands separated them, so the
+   comparison is carried in the coverage block's own words instead. */
 .node-statistics__standing,
 .node-statistics__window {
+  margin-bottom: 1rem;
   border: 1px solid var(--w-color-border-furniture);
   border-radius: 0.3rem;
   padding: 1rem 1.25rem;
