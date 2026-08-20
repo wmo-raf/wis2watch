@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    node_statistics_station_api,
     node_statistics_stations_api,
     node_statistics_summary_api,
     nodes_api,
@@ -25,5 +26,14 @@ urlpatterns = [
         "nodes/<int:node_id>/statistics/stations/",
         node_statistics_stations_api,
         name="node_statistics_stations",
+    ),
+    # Under the stations rather than beside them, so the island can reach one
+    # station by adding an id to the URL it was already handed rather than
+    # being given a second path -- which is the whole of what keeps a path
+    # from being assembled in a bundle nobody can rename from here.
+    path(
+        "nodes/<int:node_id>/statistics/stations/<int:station_id>/",
+        node_statistics_station_api,
+        name="node_statistics_station",
     ),
 ]

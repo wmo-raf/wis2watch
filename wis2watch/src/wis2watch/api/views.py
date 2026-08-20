@@ -2,6 +2,7 @@ import logging
 from dataclasses import asdict
 from time import perf_counter
 
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
@@ -9,8 +10,10 @@ from rest_framework.response import Response
 from rest_framework.status import HTTP_400_BAD_REQUEST
 
 from wis2watch.core.analysis import (
+    UnknownStation,
     UnknownWindow,
     Window,
+    node_station_detail,
     node_station_statistics,
     node_statistics_summary,
 )
@@ -99,6 +102,46 @@ def node_statistics_stations_api(request, node_id):
         centre nothing knows about.
     """
     return _statistics(request, node_id, node_station_statistics, "stations")
+
+
+@api_view()
+@permission_classes(ADMIN_READER)
+def node_statistics_station_api(request, node_id, station_id):
+    """One station of one centre, in full.
+
+    The last step of the journey the tab exists for: the reader has found
+    *which* station stopped, and this is what opening it answers. Its identity
+    and standing are repeated rather than assumed from the table it was opened
+    from, because ``?station=<id>`` on the page is a shareable link and a link
+    that only makes sense to somebody still holding the table is not one.
+
+    **Node-scoped, strictly.** A station may transmit under more than one
+    centre's topics, and a station this centre neither declares nor has been
+    heard transmitting for is a 404 rather than an empty page: zeros here
+    would read as "declared, and never once heard from", which is a different
+    and far more serious finding. The cross-node view is a product surface of
+    its own and is not this.
+
+    Args:
+        request: HTTP request object.
+        node_id (int): ID of the WIS2 Node.
+        station_id (int): ID of the station to open.
+
+    Returns:
+        Response: the station in full, 400 for a window nothing offers, or 404
+        for a centre nothing knows about or a station that is not this
+        centre's.
+    """
+
+    def finding(node, *, window):
+        try:
+            return node_station_detail(node, station_id, window=window)
+        except UnknownStation as unknown:
+            # Turned into the HTTP refusal here rather than raised as one from
+            # the analysis, which reads no request and returns no response.
+            raise Http404(str(unknown)) from unknown
+
+    return _statistics(request, node_id, finding, f"station {station_id}")
 
 
 def _statistics(request, node_id, finding, name):

@@ -7,6 +7,11 @@
       role="img"
       :aria-label="label"
   >
+    <!-- Only where a surface says a bucket can be nameless. A pattern per row
+         on a table of a thousand of them is a thousand `defs`, and the rows
+         do not carry the flag: it is the drilldown that asks for this. -->
+    <ChartHatch v-if="stationLess" :id="hatchId"/>
+
     <rect
         v-for="cell in cells"
         :key="cell.index"
@@ -15,6 +20,7 @@
         :width="cellWidth"
         :height="height - 2"
         :class="`cells__cell cells__cell--${cell.state}`"
+        :fill="cell.state === 'nameless' ? `url(#${hatchId})` : undefined"
     >
       <title>{{ cell.title }}</title>
     </rect>
@@ -54,9 +60,18 @@
  * the open-bucket mark on the day still being counted. Native tooltips rather
  * than the charts' shared hover card, because a screen of these carries
  * thousands of cells and a card is a component per cell.
+ *
+ * A fourth state exists where a surface hands one in, and it is not a state
+ * of the *station*: a bucket the centre published in and named nobody in gets
+ * the tab's hatch -- "no value on this axis" -- rather than the silent
+ * colour, because painting it as silence would blame a station for its
+ * centre's attribution gap. It wins over whatever the station's own vector
+ * says for that bucket, which is what "uniformly hatched" means: the bucket
+ * is one the matrix cannot speak about.
  */
-import {computed} from 'vue'
+import {computed, useId} from 'vue'
 
+import ChartHatch from './charts/ChartHatch.vue'
 import {grainOf, presenceStates, presenceTitle, rowCeilings} from './presence.js'
 
 const props = defineProps({
@@ -103,7 +118,21 @@ const props = defineProps({
     type: String,
     default: ''
   },
+  /**
+   * Which buckets the centre published in and named no station at all in, or
+   * null where the surface has no way to know. The station rows do not carry
+   * it; the drilldown does.
+   */
+  stationLess: {
+    type: Array,
+    default: null
+  },
 })
+
+// One per component instance, because two of these on a page each render
+// their own `defs` and a repeated id is a pattern that silently resolves to
+// whichever one happened to render first.
+const hatchId = useId()
 
 const width = computed(() => props.cellWidth * props.buckets.length)
 
@@ -116,8 +145,10 @@ const against = computed(
     () => rowCeilings(props.values, props.ceilings, props.buckets.length)
 )
 
-const states = computed(
-    () => presenceStates(props.values, props.ceilings, props.buckets.length)
+const states = computed(() =>
+    presenceStates(props.values, props.ceilings, props.buckets.length).map(
+        (state, at) => (isNameless(at) ? 'nameless' : state)
+    )
 )
 
 const cells = computed(() =>
@@ -126,10 +157,19 @@ const cells = computed(() =>
       x: index * props.cellWidth,
       state: states.value[index],
       title: presenceTitle(
-          bucket, props.values[index] || 0, against.value[index], props.grain
+          bucket,
+          props.values[index] || 0,
+          against.value[index],
+          props.grain,
+          isNameless(index)
       ),
     }))
 )
+
+/** Whether the centre published in this bucket and named nobody in it. */
+function isNameless(at) {
+  return Boolean(props.stationLess?.[at])
+}
 
 // Where the finished part of the window ends. An hourly axis never carries
 // one -- the hour in progress is left out of the window rather than served
@@ -139,15 +179,23 @@ const openAt = computed(() => props.buckets.findIndex((bucket) => bucket.partial
 const label = computed(() => {
   const station = props.name || 'This station'
   const silent = cells.value.filter((cell) => cell.state === 'silent').length
+  const nameless = cells.value.filter((cell) => cell.state === 'nameless').length
+  // Said rather than left to the hatch, and said before the count of silence
+  // so that the two are not read as one number: a bucket the centre named
+  // nobody in is not a bucket this station was silent in.
+  const attribution = nameless
+      ? ` In ${nameless} of them this centre published nothing naming any` +
+      ` station, so nothing can be said about this one.`
+      : ''
   const period = grainOf(props.grain).period
 
   if (!silent) {
-    return `${station}: heard in every one of ${cells.value.length} ${period}`
+    return `${station}: heard in every one of ${cells.value.length} ${period}.${attribution}`
   }
 
   return (
       `${station}: silent in ${silent} of ${cells.value.length} ${period}, ` +
-      `heard in the other ${cells.value.length - silent}`
+      `heard in the other ${cells.value.length - silent}.${attribution}`
   )
 })
 </script>
@@ -175,4 +223,9 @@ const label = computed(() => {
 .cells__cell--full {
   fill: var(--stat-live);
 }
+
+/* The hatched bucket has no rule at all, and that is deliberate: the pattern
+   is bound as a presentation attribute on the rect, and any `fill` here --
+   including `none` -- would beat it, because CSS wins over presentation
+   attributes. The class stays as a hook for anything that is not a fill. */
 </style>

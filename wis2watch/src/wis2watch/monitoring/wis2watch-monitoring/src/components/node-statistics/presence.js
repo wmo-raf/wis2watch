@@ -94,6 +94,9 @@ export const GRAINS = {
         },
         heard: (value, ceiling) => `heard in ${value} of ${ceiling} hours`,
         silent: 'silent all day: nothing heard from this station',
+        nameless:
+            'this centre published on this day, and none of it named any'
+            + ' station at all',
     },
     hour: {
         period: 'hours',
@@ -114,6 +117,9 @@ export const GRAINS = {
         ceiling: null,
         heard: (value) => `${formatCount(value)} messages`,
         silent: 'silent: no messages this hour',
+        nameless:
+            'this centre published in this hour, and none of it named any'
+            + ' station at all',
     },
 }
 
@@ -326,14 +332,20 @@ export function pixelBand(index, count, total) {
  * @param {number} value - what the station was heard doing in it.
  * @param {number} ceiling - the most that bucket could have carried.
  * @param {string} grain - `day` or `hour`.
+ * @param {boolean} stationLess - whether the centre published in this bucket
+ *     and named no station at all in it.
  * @returns {string} the sentence.
  */
-export function presenceTitle(bucket, value, ceiling, grain) {
+export function presenceTitle(bucket, value, ceiling, grain, stationLess = false) {
     const words = grainOf(grain)
     // Said in the tooltip as well as drawn, because the three states are a
-    // colour, and a colour is never the only carrier of a finding here.
+    // colour, and a colour is never the only carrier of a finding here -- and
+    // the hatch least of all: "no value on this axis" is the most a mark can
+    // say, and which of the two empty cases it is is only said here.
     const thin = presenceState(value, ceiling) === 'thin' ? ', thinly' : ''
-    const heard = value ? `${words.heard(value, ceiling)}${thin}` : words.silent
+    const heard = stationLess
+        ? words.nameless
+        : value ? `${words.heard(value, ceiling)}${thin}` : words.silent
     // Driven by the bucket rather than by the grain: an hourly axis never
     // carries an unfinished bucket, because the hour in progress is left out
     // of the window rather than served half-counted.

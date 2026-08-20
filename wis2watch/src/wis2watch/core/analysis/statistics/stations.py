@@ -175,8 +175,13 @@ def node_station_statistics(node, *, window=None, now=None):
     hours = bucket_axis(*fixed.bounds(now), Grain.HOUR, now=now)
 
     heard = _sparklines(node, hours)
-    counted = _over_window(node, buckets, window.grain)
-    silent = _Heard(presence=[0] * len(buckets), messages=0, active_buckets=0)
+    counted = over_window(node, buckets, window.grain)
+    silent = Heard(
+        presence=[0] * len(buckets),
+        volumes=[0] * len(buckets),
+        messages=0,
+        active_buckets=0,
+    )
 
     return NodeStationStatistics(
         node_id=node.pk,
@@ -266,15 +271,23 @@ def _sparklines(node, hours):
 
 
 @dataclass(frozen=True)
-class _Heard:
-    """What one station was heard doing over the window, before a row names it."""
+class Heard:
+    """What one station was heard doing over the window, before a row names it.
+
+    ``presence`` is the unit the grain names -- messages in the hour, hours of
+    the day -- and ``volumes`` is message count per bucket at either grain.
+    The table's rows read only the first; the single-station drilldown reads
+    both, because a day's cell is drawn from how much of the day was heard and
+    labelled with how much was published in it.
+    """
 
     presence: list[int]
+    volumes: list[int]
     messages: int
     active_buckets: int
 
 
-def _over_window(node, buckets, grain):
+def over_window(node, buckets, grain, *, station=None):
     """Each station's window, bucket by bucket, from the table the grain names.
 
     One query, and the two scalars fall out of the same rows the vector is
@@ -289,13 +302,20 @@ def _over_window(node, buckets, grain):
     filtered to the Global Broker; the hours of a day and whether a bucket was
     reported in at all are read across every vantage point.
 
+    ``station`` narrows the same pass to one row's worth, for the drilldown.
+    Sharing the query rather than writing a second one is the point: a
+    drilldown that counted a station's window its own way would eventually
+    disagree with the row it was opened from, and nothing on either page would
+    say which of them was right.
+
     Args:
         node: the centre to count for.
         buckets: the window's axis, dense and oldest first.
         grain: the size of one bucket, which decides the table.
+        station: the one station to count for, or None for the population.
 
     Returns:
-        dict[int, _Heard]: what each station heard from was heard doing.
+        dict[int, Heard]: what each station heard from was heard doing.
     """
     if not buckets:
         return {}
@@ -315,11 +335,17 @@ def _over_window(node, buckets, grain):
     }
 
     counted = defaultdict(dict)
+    # ``station__isnull=False`` rather than nothing at all, because the
+    # station-less bucket is a real row in both tables and it belongs to no
+    # station: rolled into this it would become a phantom row of its own.
+    narrowed = (
+        {"station": station} if station is not None else {"station__isnull": False}
+    )
 
     for row in (
         model.objects.filter(
             node=node,
-            station__isnull=False,
+            **narrowed,
             **{
                 f"{column}__gte": buckets[0].start,
                 f"{column}__lt": buckets[-1].start + BUCKET_LENGTH[grain],
@@ -331,14 +357,15 @@ def _over_window(node, buckets, grain):
         counted[row["station_id"]][row[column]] = row
 
     return {
-        station_id: _Heard(
+        station_id: Heard(
             presence=[
-                _presence(over_window.get(bucket.start), unit) for bucket in buckets
+                _presence(within.get(bucket.start), unit) for bucket in buckets
             ],
-            messages=sum(row["messages"] or 0 for row in over_window.values()),
-            active_buckets=sum(1 for row in over_window.values() if row["anywhere"]),
+            volumes=[_volume(within.get(bucket.start)) for bucket in buckets],
+            messages=sum(row["messages"] or 0 for row in within.values()),
+            active_buckets=sum(1 for row in within.values() if row["anywhere"]),
         )
-        for station_id, over_window in counted.items()
+        for station_id, within in counted.items()
     }
 
 
@@ -352,3 +379,16 @@ def _presence(row, unit):
         return 0
 
     return row[unit.column] or 0
+
+
+def _volume(row):
+    """How much one bucket carried, or nothing.
+
+    Zero rather than an absent entry for the reason the presence vector is
+    dense: it is read positionally against the axis, and a bucket the station
+    published nothing in is the finding.
+    """
+    if row is None:
+        return 0
+
+    return row["messages"] or 0

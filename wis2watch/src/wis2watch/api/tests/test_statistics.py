@@ -594,3 +594,218 @@ class StationRowsWindowTests(StationRowsEndpointTestCase):
 
     def test_an_empty_window_parameter_is_the_default_rather_than_a_refusal(self):
         self.assertEqual(self.payload(window="")["window"]["key"], "24h")
+
+
+class StationDrilldownEndpointTestCase(StatisticsEndpointTestCase):
+    """One station of one centre, as the drilldown reaches it."""
+
+    def drilldown_url(self, station, node=None):
+        return reverse(
+            "node_statistics_station",
+            args=[(node or self.kenya).pk, getattr(station, "pk", station)],
+        )
+
+    def payload(self, station, **params):
+        response = self.client.get(self.drilldown_url(station), params)
+
+        self.assertEqual(response.status_code, 200)
+
+        return response.json()
+
+    def heard(self, wigos_id="0-20000-0-63708", *, hours_ago=1):
+        """A station this centre both declares and has just been heard for."""
+        station = self.declare(wigos_id)
+        self.transmitted(wigos_id, hours_ago=hours_ago)
+
+        return station
+
+
+class StationDrilldownAccessTests(StationDrilldownEndpointTestCase):
+    """The same door as everything else on this tab."""
+
+    def test_a_reader_who_is_not_signed_in_is_refused(self):
+        station = self.heard()
+        self.client.logout()
+
+        self.assertEqual(
+            self.client.get(self.drilldown_url(station)).status_code, 403
+        )
+
+    def test_a_signed_in_account_with_no_admin_access_is_refused(self):
+        station = self.heard()
+        self.client.force_login(
+            get_user_model().objects.create_user("outsider", password="s3cret")
+        )
+
+        self.assertEqual(
+            self.client.get(self.drilldown_url(station)).status_code, 403
+        )
+
+
+class StationDrilldownScopeTests(StationDrilldownEndpointTestCase):
+    """Which stations this centre's drilldown will open at all."""
+
+    def test_a_station_this_centre_has_heard_from_opens(self):
+        station = self.heard()
+
+        self.assertEqual(
+            self.payload(station)["station"]["wigos_id"], "0-20000-0-63708"
+        )
+
+    def test_a_station_of_another_centre_is_not_found_here(self):
+        """An empty page here would read as 'declared, and never heard from'."""
+        djibouti = WIS2Node.objects.create(centre_id="dj-anm", name="Djibouti")
+        theirs = declare_station(djibouti, "0-20000-0-63125")
+
+        self.assertEqual(
+            self.client.get(self.drilldown_url(theirs)).status_code, 404
+        )
+
+    def test_an_id_naming_no_station_is_not_found(self):
+        self.assertEqual(self.client.get(self.drilldown_url(9999)).status_code, 404)
+
+    def test_a_centre_that_does_not_exist_is_not_found(self):
+        station = self.heard()
+        missing = reverse("node_statistics_station", args=[9999, station.pk])
+
+        self.assertEqual(self.client.get(missing).status_code, 404)
+
+
+class StationDrilldownResponseTests(StationDrilldownEndpointTestCase):
+    """The shape the drilldown binds to."""
+
+    def test_the_response_carries_exactly_what_the_contract_says_it_does(self):
+        payload = self.payload(self.heard())
+
+        self.assertEqual(
+            set(payload),
+            {
+                "node_id",
+                "centre_id",
+                "generated_at",
+                "stale_after_hours",
+                "window",
+                "buckets",
+                "station",
+                "now",
+                "window_stats",
+            },
+        )
+
+    def test_the_identity_and_the_standing_are_repeated_rather_than_assumed(self):
+        """The link stands on its own or it is a link to a number."""
+        station = self.heard()
+
+        identity = self.payload(station)["station"]
+
+        self.assertEqual(
+            set(identity),
+            {
+                "station_id",
+                "wigos_id",
+                "name",
+                "local_name",
+                "standing",
+                "last_heard",
+                "hours_quiet",
+                "latitude",
+                "longitude",
+            },
+        )
+        self.assertEqual(identity["station_id"], station.pk)
+        self.assertEqual(identity["standing"], "transmitting")
+
+    def test_the_fixed_block_is_kept_apart_from_the_moving_one(self):
+        payload = self.payload(self.heard())
+
+        self.assertEqual(set(payload["now"]), {"buckets", "hourly"})
+        self.assertEqual(
+            set(payload["window_stats"]),
+            {"messages_total", "active_buckets", "daily", "datasets"},
+        )
+
+    def test_the_fixed_block_is_twenty_four_hours_at_every_window(self):
+        station = self.heard()
+
+        for key in ("24h", "90d"):
+            with self.subTest(window=key):
+                now = self.payload(station, window=key)["now"]
+
+                self.assertEqual(len(now["buckets"]), 24)
+                self.assertEqual(len(now["hourly"]), 24)
+                self.assertEqual(
+                    set(now["hourly"][0]), {"messages", "station_less"}
+                )
+
+    def test_the_window_moves_the_axis_the_heatmap_is_read_against(self):
+        payload = self.payload(self.heard(), window="7d")
+
+        self.assertEqual(payload["window"]["grain"], "day")
+        self.assertEqual(len(payload["buckets"]), 7)
+        self.assertEqual(len(payload["window_stats"]["daily"]), 7)
+        self.assertEqual(
+            set(payload["window_stats"]["daily"][0]),
+            {"messages", "active_hours", "station_less"},
+        )
+
+    def test_there_is_no_daily_series_at_the_default_window(self):
+        self.assertIsNone(self.payload(self.heard())["window_stats"]["daily"])
+
+    def test_a_station_with_no_traffic_at_all_is_answered_with_zeros(self):
+        """A real zero chart, rather than a panel with nothing in it."""
+        stats = self.payload(self.declare("0-20000-0-63709"))["window_stats"]
+
+        self.assertEqual(stats["messages_total"], 0)
+        self.assertEqual(stats["active_buckets"], 0)
+        self.assertEqual(stats["datasets"], [])
+
+    def test_the_dataset_breakdown_crosses_the_wire_whole(self):
+        station = self.heard()
+        published(
+            self.kenya,
+            source=self.global_broker,
+            hour=dj_timezone.now() - timedelta(hours=1),
+            messages=3,
+            station=station,
+        )
+
+        breakdown = self.payload(station)["window_stats"]["datasets"]
+
+        self.assertEqual(
+            set(breakdown[0]),
+            {"id", "identifier", "title", "messages", "last_heard"},
+        )
+        self.assertEqual(breakdown[0]["messages"], 3)
+
+    def test_a_window_nobody_offers_is_refused_with_the_ones_that_exist(self):
+        response = self.client.get(
+            self.drilldown_url(self.heard()), {"window": "6h"}
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["valid_windows"], ["24h", "7d", "30d", "90d"])
+
+    def test_the_endpoint_logs_what_it_cost(self):
+        with self.assertLogs("wis2watch.api.views", level="DEBUG") as logged:
+            self.payload(self.heard(), window="90d")
+
+        self.assertTrue(
+            any("90d" in line and "took=" in line for line in logged.output),
+            logged.output,
+        )
+
+
+class StationDrilldownMountPointTests(MountPointTests):
+    """What the page hands the island before it can open one station."""
+
+    def test_the_island_is_given_no_second_path_for_the_drilldown(self):
+        """It adds an id to the stations URL rather than assembling a path."""
+        response = self.client.get(reverse("node_statistics", args=[self.kenya.pk]))
+
+        self.assertNotContains(response, "data-station-url")
+
+    def test_the_drilldown_url_is_the_stations_url_plus_the_id(self):
+        stations_url = reverse("node_statistics_stations", args=[self.kenya.pk])
+        drilldown = reverse("node_statistics_station", args=[self.kenya.pk, 12])
+
+        self.assertEqual(drilldown, f"{stations_url}12/")

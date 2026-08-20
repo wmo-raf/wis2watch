@@ -233,6 +233,35 @@ def daily_activity(node, buckets):
     ]
 
 
+def station_less_buckets(node, buckets, grain):
+    """Which buckets of an axis the centre published in and named nobody in.
+
+    The mark the hourly chart already draws as a hatched stub, said as a
+    vector so that a single station's drilldown can draw the same finding
+    without the station counts the chart plots. A day where the centre
+    published only messages carrying no WIGOS identifier is not a day the
+    station was silent -- there was traffic and none of it was attributable --
+    and a drilldown that painted it as silence would blame a station for its
+    centre's attribution gap.
+
+    Read from ``_bucketed`` rather than counted here, which is what stops the
+    stub over the aggregate chart and the hatch over the drilldown's cells
+    coming to mean two different things.
+
+    Args:
+        node: the centre to count for.
+        buckets: the axis to read against, dense and oldest first.
+        grain: the size of one bucket, which decides the table.
+
+    Returns:
+        list[bool]: one flag per bucket, in the same order.
+    """
+    return [
+        counted.stations == 0 and counted.unattributed_messages > 0
+        for counted in _bucketed(node, buckets, grain)
+    ]
+
+
 def window_totals(node, since, until, grain):
     """What a centre published over a whole window, without bucketing it.
 
