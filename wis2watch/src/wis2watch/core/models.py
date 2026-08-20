@@ -1849,3 +1849,120 @@ class HardFailure(models.Model):
 
     def __str__(self):
         return f"{self.get_kind_display()} since {self.started_at}"
+
+
+class OutgoingEmail(models.Model):
+    """One attempt to put something in front of whoever runs this installation.
+
+    Everything else this tool records is a finding about the region. This is
+    the record of the tool having spoken: what was said, who it was addressed
+    to, when, and whether it got there. Nothing kept it before -- a digest was
+    a template rendered, sent and discarded, and the only trace it left was
+    the findings it marked as reported, which say what was carried without
+    saying that anybody was carried it.
+
+    A row per attempt rather than per delivery, because the two attempts that
+    are not deliveries are the ones worth having. An installation that has
+    never set ``WIS2WATCH_DIGEST_RECIPIENTS`` goes on finding everything it
+    would have said and telling nobody, and today that leaves a warning in a
+    log; a mail host refusing leaves an exception in a worker. An archive that
+    went blank in exactly the cases where the operator was not told would read
+    "no mail yesterday" for a quiet morning and for a week of silent failure
+    alike, which is the one thing it must not do.
+
+    The summary is stored rather than taken from the body, because the body
+    cannot yield it. Every digest opens with the same sentence about what the
+    digest is, so a preview cut from the front of one would be a preview of
+    the boilerplate; what a run came to is known to whatever composed it, and
+    is written down here instead of only into a log.
+
+    Nothing expires. Everything this tool drops on a schedule is dropped
+    because it grows with the region's traffic, which nobody controls. This
+    grows with the events an operator is told about -- one digest a day at
+    most, and an alert per outage rather than per check -- so a retention
+    setting here would be a control whose only possible effect is to destroy
+    the record it was built to keep, quietly, on a timer. For the same reason
+    the admin refuses every write: a row that can be edited is a record of
+    what somebody is prepared to say was sent.
+    """
+
+    DAILY_DIGEST = "daily_digest"
+    HARD_FAILURE = "hard_failure"
+
+    KIND_CHOICES = [
+        (DAILY_DIGEST, _("Daily digest")),
+        (HARD_FAILURE, _("Hard failure alert")),
+    ]
+
+    SENT = "sent"
+    NO_RECIPIENTS = "no_recipients"
+    FAILED = "failed"
+
+    STATUS_CHOICES = [
+        (SENT, _("Sent")),
+        (NO_RECIPIENTS, _("Nobody to send it to")),
+        (FAILED, _("Failed")),
+    ]
+
+    kind = models.CharField(
+        max_length=50,
+        choices=KIND_CHOICES,
+        help_text=_("Which of the things this tool sends this message was"),
+    )
+
+    subject = models.CharField(
+        max_length=500,
+        help_text=_("The subject as it was sent, prefix and all"),
+    )
+    summary = models.CharField(
+        max_length=1000,
+        blank=True,
+        help_text=_(
+            "What the message was about, in one line, from whatever composed it"
+        ),
+    )
+    body = models.TextField(
+        blank=True,
+        help_text=_("The message itself, as it was rendered"),
+    )
+    recipients = ArrayField(
+        models.EmailField(max_length=254),
+        default=list,
+        blank=True,
+        help_text=_("Who it was addressed to, as configured at the time"),
+    )
+
+    status = models.CharField(
+        max_length=20,
+        choices=STATUS_CHOICES,
+        help_text=_("How the attempt ended"),
+    )
+    error_message = models.TextField(
+        blank=True,
+        help_text=_("Why it did not get there, where it did not"),
+    )
+
+    attempted_at = models.DateTimeField(
+        default=dj_timezone.now,
+        help_text=_("When the message was composed and handed to the mail backend"),
+    )
+
+    class Meta:
+        ordering = ["-attempted_at"]
+        indexes = [
+            models.Index(fields=["kind", "-attempted_at"]),
+        ]
+        verbose_name = _("Outgoing Email")
+        verbose_name_plural = _("Outgoing Email")
+
+    def __str__(self):
+        return f"{self.subject} ({self.get_status_display()})"
+
+    @property
+    def recipient_list(self):
+        """Who it was addressed to, for a column in a table.
+
+        Empty where nobody was configured to receive it, which is the whole
+        content of that row: the message was composed and had nowhere to go.
+        """
+        return ", ".join(self.recipients)

@@ -101,7 +101,9 @@ can turn debug on while that module is selected.
 `dev.py` gives you `DEBUG = True`, `ALLOWED_HOSTS = ["*"]`, an insecure
 built-in `SECRET_KEY`, the console email backend -- so the daily digest and the
 alert mails print into the worker's logs instead of needing an SMTP host -- and
-plain static files storage rather than the hashed manifest.
+plain static files storage rather than the hashed manifest. Either way they are
+archived: "Outgoing email" in the admin holds every message the tool has
+composed, which is usually easier to read than the worker's logs.
 
 The consequence to keep in mind: local development does not exercise
 `production.py`. A bug that lives only there -- in the manifest storage, in

@@ -43,7 +43,7 @@ from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext as _
 
 from .mail import admin_url, alert_recipients, notify
-from .models import HardFailure, MessageSource, NotificationMessage
+from .models import HardFailure, MessageSource, NotificationMessage, OutgoingEmail
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +226,13 @@ def _send(failure, *, now, recovered):
         },
     )
 
-    return notify(subject, body, alert_recipients())
+    return notify(
+        subject,
+        body,
+        alert_recipients(),
+        kind=OutgoingEmail.HARD_FAILURE,
+        summary=failure.detail,
+    )
 
 
 def _global_broker_symptom(*, now):
