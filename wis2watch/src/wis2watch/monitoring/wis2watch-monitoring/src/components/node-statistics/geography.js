@@ -12,12 +12,10 @@
  *
  * **A drawn feature carries what is drawn and nothing else** -- an id and
  * whether the station is silent. Everything the popup says is looked up on
- * the row at the moment it is clicked, which is what keeps the source stable
- * while the reader moves the window control: `hours_quiet` is re-derived
- * against the clock on every request and would make the feature collection
- * different every time while the picture on screen is identical. The map is
- * the one panel a reader can move a control past without it changing, and
- * that promise is kept here rather than by hoping nothing re-renders.
+ * the row at the moment it is clicked, and that is what lets `StationMap.vue`
+ * keep the promise it makes about the window control: `hours_quiet` is
+ * re-derived against the clock on every request, and a feature carrying it
+ * would be different on every read while the picture on screen is identical.
  *
  * The residue matters as much as the plot. A station with no coordinates
  * inside an outage region is silent for exactly the same reason as the ones
@@ -88,8 +86,12 @@ export function boundsOf(collection) {
         return null
     }
 
-    const longitudes = collection.features.map((f) => f.geometry.coordinates[0])
-    const latitudes = collection.features.map((f) => f.geometry.coordinates[1])
+    const longitudes = collection.features.map(
+        (feature) => feature.geometry.coordinates[0]
+    )
+    const latitudes = collection.features.map(
+        (feature) => feature.geometry.coordinates[1]
+    )
 
     return [
         [Math.min(...longitudes), Math.min(...latitudes)],

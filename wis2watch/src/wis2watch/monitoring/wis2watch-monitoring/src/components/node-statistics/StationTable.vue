@@ -365,9 +365,9 @@ import BucketHeads from './BucketHeads.vue'
 import NavigatorWall from './NavigatorWall.vue'
 import PresenceCells from './PresenceCells.vue'
 import Sparkline from './Sparkline.vue'
-import {formatCount, formatInstant, formatQuiet} from './charts/plot.js'
+import {displayName, formatCount, formatInstant, formatQuiet} from './charts/plot.js'
 import {bucketCeilings, cellWidthFor, grainOf} from './presence.js'
-import {bucketIndexOf, bucketName, darkIn} from './selection.js'
+import {bucketIndexOf, bucketName, darkIn, isPickedStation} from './selection.js'
 import {STANDINGS, STANDING_LABEL, STANDING_RANK} from './standings.js'
 import {useVirtualRows} from './useVirtualRows.js'
 
@@ -717,18 +717,13 @@ function label(standing) {
   return STANDING_LABEL[standing] || standing
 }
 
-/** What to call the station: the operator's own name, where there is one. */
-function displayName(row) {
-  return row.local_name || row.name || row.wigos_id
-}
-
 function choose(chosen) {
   emit('choose', chosen)
 }
 
 /** Whether this row is the station the reader picked. */
 function isPicked(row) {
-  return Boolean(props.station) && String(row.station_id) === props.station
+  return isPickedStation(row, props.station)
 }
 
 /**

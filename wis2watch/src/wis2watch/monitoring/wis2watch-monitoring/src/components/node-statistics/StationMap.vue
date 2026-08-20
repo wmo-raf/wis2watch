@@ -11,14 +11,19 @@
           <p class="station-map__legend-title">
             Standing &mdash; flat {{ staleAfterHours }}h
           </p>
+          <!-- With the counts, because they are the finding and a colour is
+               not a route to it for everybody. The map itself is a canvas
+               nothing can read out; these two numbers say what is on it, and
+               they count what is *plotted* rather than the population, which
+               the unplottable line below makes up the rest of. -->
           <ul class="station-map__keys">
             <li class="station-map__key">
               <span class="station-map__swatch station-map__swatch--live"/>
-              Transmitting
+              {{ formatCount(plotted.transmitting) }} transmitting
             </li>
             <li class="station-map__key">
               <span class="station-map__swatch station-map__swatch--silent"/>
-              Silent
+              {{ formatCount(plotted.silent) }} silent
             </li>
           </ul>
           <p class="station-map__legend-note">
@@ -129,8 +134,9 @@ import maplibregl from 'maplibre-gl'
 import Message from 'primevue/message'
 
 import {createBaseMap} from '@/basemap.js'
-import {formatCount, formatInstant, formatQuiet} from './charts/plot.js'
+import {displayName, formatCount, formatInstant, formatQuiet} from './charts/plot.js'
 import {boundsOf, stationFeatures, unplottable} from './geography.js'
+import {pickedStationId} from './selection.js'
 import {STANDING_LABEL} from './standings.js'
 import {useRoles} from './charts/useRoles.js'
 
@@ -173,6 +179,11 @@ const RADIUS = ['interpolate', ['linear'], ['zoom'], 2, 2.2, 5, 3.6, 8, 5.5, 12,
 //: The ring on the picked station, a step clear of the dot underneath it.
 const PICKED_RADIUS = ['interpolate', ['linear'], ['zoom'], 2, 5.5, 5, 7.5, 8, 10, 12, 13]
 
+//: How far off a station a click still counts, in pixels. Roughly the radius
+//: a station is drawn at when a whole country is on screen, so the gesture is
+//: about as forgiving as the dot is small.
+const PICK_SLOP = 5
+
 //: The halo separating one dot from the next where they crowd. It is the
 //: page's ground rather than a colour of its own, so the tab spends no third
 //: colour on a mark that means nothing.
@@ -198,19 +209,25 @@ const collection = computed(() => stationFeatures(props.stations))
 
 const missing = computed(() => unplottable(props.stations))
 
+//: What the two layers are carrying, for the legend to say out loud. Counted
+//: off the features rather than off the rows, so the numbers are the map's
+//: own and not the population's.
+const plotted = computed(() => {
+  const silent = collection.value.features
+      .filter((feature) => feature.properties.silent).length
+
+  return {silent, transmitting: collection.value.features.length - silent}
+})
+
 //: The rows by id, for a popup that is opened long after the source was set.
 const byId = computed(
     () => new Map(props.stations.map((station) => [station.station_id, station]))
 )
 
-//: The picked station as MapLibre will match it. The address bar carries a
-//: string and the feature carries the number the server sent, so the
-//: conversion happens once, here.
-const pickedId = computed(() => {
-  const id = Number(props.selected)
-
-  return props.selected && Number.isFinite(id) ? id : null
-})
+//: The picked station as MapLibre will match it, through the same conversion
+//: the rows compare against: the address bar carries a string and a feature
+//: carries the number the server sent.
+const pickedId = computed(() => pickedStationId(props.selected))
 
 let teardownMap = null
 let map = null
@@ -388,13 +405,18 @@ function refresh() {
     return
   }
 
-  drawn = next
-
   const source = map.getSource(SOURCE)
 
-  if (source) {
-    source.setData(collection.value)
+  if (!source) {
+    //: Before `draw` has run, or in the window a style change opens. The
+    //: comparison above is left untouched, so the next attempt still sees
+    //: these stations as new -- marking them drawn here would drop them for
+    //: good and every later change with them.
+    return
   }
+
+  source.setData(collection.value)
+  drawn = next
 }
 
 /** The picked layer, filtered to one station or to none. */
@@ -471,11 +493,25 @@ function fit() {
   })
 }
 
-/** Which station is under the pointer, if any. */
+/**
+ * Which station is under the pointer, if any.
+ *
+ * Asked over a small box rather than the bare pixel. A station is 2.2px
+ * across at the zoom the whole country fits in, and a gesture that demands
+ * the reader land inside that is not the drilldown this map kept clustering
+ * out of the way for.
+ *
+ * MapLibre answers in render order, so the first hit is the topmost -- which
+ * is the silent layer wherever the two overlap, and therefore the station the
+ * reader can actually see.
+ */
 function stationAt(point) {
-  //: Silent first, because it is the layer on top: a click where the two
-  //: overlap picks the one the reader can see.
-  const found = map.queryRenderedFeatures(point, {
+  const box = [
+    [point.x - PICK_SLOP, point.y - PICK_SLOP],
+    [point.x + PICK_SLOP, point.y + PICK_SLOP],
+  ]
+
+  const found = map.queryRenderedFeatures(box, {
     layers: [SILENT_LAYER, LIVE_LAYER].filter((layer) => map.getLayer(layer)),
   })
 
@@ -539,11 +575,6 @@ function show(station) {
 
 function choose(station) {
   emit('choose', {station})
-}
-
-/** What to call the station: the operator's own name, where there is one. */
-function displayName(station) {
-  return station.local_name || station.name || station.wigos_id
 }
 
 /**
