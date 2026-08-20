@@ -120,7 +120,7 @@
             :buckets="summary.now.buckets"
             :hourly="summary.now.hourly"
             :declared="counts.declared_station_count"
-            :selected="table.bucket"
+            :selected="view.bucket"
             :selectable="hourlyIsTheWindow"
             @select="refine({bucket: $event})"
         />
@@ -146,7 +146,7 @@
               :daily="windowStats.daily"
               :declared="counts.declared_station_count"
               :as-of="summary.generated_at"
-              :selected="table.bucket"
+              :selected="view.bucket"
               selectable
               @select="refine({bucket: $event})"
           />
@@ -179,7 +179,7 @@
               :buckets="summary.buckets"
               :daily="windowStats.daily"
               :as-of="summary.generated_at"
-              :selected="table.bucket"
+              :selected="view.bucket"
               selectable
               @select="refine({bucket: $event})"
           />
@@ -223,6 +223,32 @@
 
     </template>
 
+    <!-- The rows again, on the ground. Its own panel above the table because
+         it is the same population read a different way, and because what it
+         can say is only worth reading beside what the rows say. -->
+    <section v-if="rows" class="node-statistics__panel">
+      <h3 class="node-statistics__panel-heading">
+        Where the stations are, and which of them are silent
+      </h3>
+      <p class="node-statistics__panel-note">
+        The same stations as the rows below, placed where they stand, in two
+        colours: transmitting, and silent. Spatial correlation is the one
+        thing a map can say that the table cannot &mdash; a contiguous block
+        of red is a regional outage, where the same count scattered across the
+        country is stations failing one at a time. Standing here is
+        <em>now</em>, flat {{ rows.stale_after_hours }}h, so this is the one
+        panel on the page the window control does not move. Click a station
+        for its full standing, and to find it in the rows below.
+      </p>
+
+      <StationMap
+          :stations="rows.stations"
+          :selected="view.station"
+          :stale-after-hours="rows.stale_after_hours"
+          @choose="refine"
+      />
+    </section>
+
     <!-- Outside the block above, and that is the whole point of it being a
          second request: the rows arrive on their own and are drawn whether or
          not the figures did. Everything this panel needs to label itself --
@@ -251,11 +277,12 @@
           :buckets="rows.buckets"
           :grain="rows.window.grain"
           :as-of="rows.generated_at"
-          :bucket="table.bucket"
-          :search="table.search"
-          :standing="table.standing"
-          :sort="table.sort"
-          :direction="table.direction"
+          :bucket="view.bucket"
+          :station="view.station"
+          :search="view.search"
+          :standing="view.standing"
+          :sort="view.sort"
+          :direction="view.direction"
           :window-label="rows.window.label"
           :stale-after-hours="rows.stale_after_hours"
           @choose="refine"
@@ -272,10 +299,6 @@
     <p v-else-if="loading && summary" class="node-statistics__state">
       Reading {{ nodeName }}'s stations one row at a time&hellip;
     </p>
-
-    <Message v-if="summary" severity="secondary" :closable="false">
-      The map is not drawn yet.
-    </Message>
   </div>
 </template>
 
@@ -320,6 +343,21 @@
  * holding", and the two lists are not always the same length. A bucket the
  * rows' axis does not carry is dropped rather than guessed at.
  *
+ * **The map above the rows is the same population placed on the ground**, and
+ * it is bound to the *standing* rather than to the window: "reported in the
+ * window" is degenerate at both ends of the range, drawing the identical
+ * picture at 24 hours and painting a block dead for weeks green at 90 days.
+ * So it is the one panel here a reader can move the control past without it
+ * changing, and it says so on its legend. It reads the rows rather than a map
+ * endpoint of its own, because a second source for the same stations is a
+ * second population to disagree with the table.
+ *
+ * The station a reader picks is one piece of state for both surfaces: picked
+ * on the map, it is highlighted in the rows; picked in the rows, it is ringed
+ * on the map. It is not a filter -- it hides nothing on either -- and where
+ * the filters above the rows have hidden the station it names, the table says
+ * so rather than quietly widening itself.
+ *
  * Both URLs are handed in as props rather than assembled here. The bundle is
  * built ahead of time, so a path composed inside it is a path nobody can
  * rename from the Django side.
@@ -331,6 +369,7 @@ import DailyChart from './DailyChart.vue'
 import HourlyChart from './HourlyChart.vue'
 import HourOfDayChart from './HourOfDayChart.vue'
 import RatioChart from './RatioChart.vue'
+import StationMap from './StationMap.vue'
 import StationTable from './StationTable.vue'
 import WindowControl from './WindowControl.vue'
 import {readParam, writeParams} from './querystring.js'
@@ -393,17 +432,26 @@ const stationsError = ref('')
 // side is a page that can offer a window the API would refuse.
 const windowKey = ref(readParam(WINDOW_PARAM))
 
-//: What the table is showing, under the same rule the window is: in the
-//: address bar, so the link a reader copies reproduces the rows they were
-//: looking at and not merely the node they were on. Read off the URL cold,
-//: before any request is made.
-const table = ref({
+//: What the reader has narrowed the stations to, under the same rule the
+//: window is: in the address bar, so the link a reader copies reproduces the
+//: rows they were looking at and not merely the node they were on. Read off
+//: the URL cold, before any request is made.
+//:
+//: The rows and the map read one of these rather than one each. A station
+//: picked on the map is the station highlighted in the rows, and two pieces
+//: of state saying so is how the two panels come to disagree about which
+//: station the reader is looking at.
+const view = ref({
   search: readParam('q'),
   standing: readParam('standing'),
   // The bucket a reader picked on a chart or a column head, as the server
   // spelled its start. Read off the URL cold like the rest of them, which is
   // what makes a filtered view a link somebody can send.
   bucket: readParam('bucket'),
+  // The one station the reader picked, on the map or in the rows. Not a
+  // filter: it hides nothing on either surface, and the rows say so where
+  // the filters above them have hidden the station it names.
+  station: readParam('station'),
   sort: readParam('sort'),
   direction: readParam('dir') || 'asc',
 })
@@ -499,16 +547,17 @@ async function choose(key) {
  * querystring under the same rule the window does.
  */
 function refine(chosen) {
-  table.value = {...table.value, ...chosen}
+  view.value = {...view.value, ...chosen}
 
   writeParams({
-    q: table.value.search,
-    standing: table.value.standing,
-    bucket: table.value.bucket,
-    sort: table.value.sort,
+    q: view.value.search,
+    standing: view.value.standing,
+    bucket: view.value.bucket,
+    station: view.value.station,
+    sort: view.value.sort,
     // Never on its own: a direction with nothing sorted by it is a link that
     // says something about a sort that is not happening.
-    dir: table.value.sort ? table.value.direction : '',
+    dir: view.value.sort ? view.value.direction : '',
   })
 
   dropSelectionOffTheAxis()
@@ -599,12 +648,12 @@ async function loadStations() {
  * check returns immediately.
  */
 function dropSelectionOffTheAxis() {
-  if (!table.value.bucket || !rows.value) {
+  if (!view.value.bucket || !rows.value) {
     return
   }
 
   const carried = rows.value.buckets.some(
-      (bucket) => bucket.start === table.value.bucket
+      (bucket) => bucket.start === view.value.bucket
   )
 
   if (!carried) {

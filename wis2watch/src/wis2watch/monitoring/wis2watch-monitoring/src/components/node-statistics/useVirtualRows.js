@@ -29,8 +29,9 @@ import {computed, onBeforeUnmount, onMounted, ref} from 'vue'
  * @param {number} rowHeight - how tall every one of them is, in pixels.
  * @param {number} overscan - how many rows to draw beyond each edge.
  * @returns {{viewport: object, header: object, first: object, end: object,
- *     onScroll: function, reset: function, topPad: object, bottomPad: object}}
- *     the element refs to bind, the slice to draw, and the two spacers.
+ *     onScroll: function, reset: function, scrollToRow: function,
+ *     topPad: object, bottomPad: object}} the element refs to bind, the slice
+ *     to draw, the two spacers, and a way to bring one row into view.
  */
 export function useVirtualRows(count, rowHeight, overscan = 8) {
     //: The scrolling box, and the header inside it whose height the rows
@@ -63,6 +64,42 @@ export function useVirtualRows(count, rowHeight, overscan = 8) {
             queued = false
             scrollTop.value = viewport.value?.scrollTop || 0
         })
+    }
+
+    /**
+     * Bring one row into view, and move no further than that.
+     *
+     * The map beside this table can pick a station that is four hundred rows
+     * down, and a highlight nobody can see is not a highlight. Nothing moves
+     * where the row is already on screen: a reader who picked a dot next to
+     * the row they were reading should not have the list jump under them.
+     *
+     * The sticky header covers the top of the scrolling box, so the row has
+     * to clear it as well as the box's own edge -- a row scrolled to the very
+     * top of the viewport is a row underneath the column headings.
+     *
+     * @param {number} index - which row, in the order they are drawn.
+     */
+    function scrollToRow(index) {
+        const box = viewport.value
+
+        if (!box || index < 0) {
+            return
+        }
+
+        //: The furthest down the box can be scrolled with this row still
+        //: clear of the header, and the least it can be scrolled with the row
+        //: still above the bottom edge.
+        const highest = index * rowHeight
+        const lowest = headerHeight.value + (index + 1) * rowHeight - box.clientHeight
+
+        if (box.scrollTop > highest) {
+            box.scrollTop = highest
+        } else if (box.scrollTop < lowest) {
+            box.scrollTop = lowest
+        }
+
+        scrollTop.value = box.scrollTop
     }
 
     /** Back to the top, for when the rows underneath have changed. */
@@ -118,6 +155,7 @@ export function useVirtualRows(count, rowHeight, overscan = 8) {
         end,
         onScroll,
         reset,
+        scrollToRow,
         //: The height of everything above the drawn rows, and below them.
         //: Held open by a spacer each, so the scrollbar measures the whole
         //: population rather than the handful of rows on screen.

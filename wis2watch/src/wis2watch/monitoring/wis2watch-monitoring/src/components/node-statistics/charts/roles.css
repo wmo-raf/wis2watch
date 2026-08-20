@@ -40,9 +40,10 @@
     --stat-ink-muted: var(--p-text-muted-color);
     --stat-grid: var(--p-surface-300);
 
-    /* The two standings the whole tab is bound by. The map will be the third
-       caller of the silent one; it is declared here rather than where the
-       first chart happened to need it. */
+    /* The two standings the whole tab is bound by, and the map is the third
+       caller of the silent one -- its two colours are these, resolved to
+       strings through `useRoles.js` because MapLibre's paint properties
+       cannot read a custom property. */
     --stat-live: var(--p-teal-600);
     --stat-silent: var(--p-red-500);
 
@@ -70,7 +71,12 @@
     /* What is legible *on* the live colour, for the one surface that fills a
        whole control with it. A role rather than white, because live is a dark
        teal on light and a bright one on dark, and white survives only one of
-       those. */
+       those.
+
+       The map reads it as the halo around a station, which is the same
+       question asked from the other side: what separates a mark from what is
+       behind it, in whichever lighting the page is in. A halo is not a
+       finding, so it spends no colour of its own. */
     --stat-on-live: var(--p-surface-0);
 
     /* Hatch: "no value on this axis", and nothing else. It carries the hour

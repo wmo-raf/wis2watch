@@ -61,6 +61,24 @@
       </button>
     </p>
 
+    <!-- The station the reader picked, on the map or in these rows. It is
+         said in words as well as drawn, because the row carrying the
+         highlight can be anywhere in a thousand of them -- and because the
+         filter above can hide it altogether, which is a state a highlight
+         alone cannot report. -->
+    <p v-if="pickedStation" class="stations__station" role="status">
+      <span class="stations__picked-what">{{ displayName(pickedStation) }}</span>
+      <template v-if="pickedRow !== -1">
+        &mdash; picked, and highlighted in the rows below.
+      </template>
+      <template v-else>
+        &mdash; picked, and hidden here by the filter above.
+      </template>
+      <button type="button" class="stations__clear" @click="choose({station: ''})">
+        Clear station
+      </button>
+    </p>
+
     <!-- The population header. Whatever is on screen, this says what the whole
          of it is -- and where a filter is on, what it took away. A count of
          rows with nothing saying how many there were is the number a reader
@@ -185,8 +203,24 @@
             <td :colspan="COLUMN_COUNT"/>
           </tr>
 
-          <tr v-for="row in drawn" :key="row.station_id">
-            <td class="stations__cell--text stations__id">{{ row.wigos_id }}</td>
+          <tr
+              v-for="row in drawn"
+              :key="row.station_id"
+              :class="{'stations__row--picked': isPicked(row)}"
+          >
+            <td class="stations__cell--text stations__id">
+              <!-- The id is the handle rather than the whole row: a row-wide
+                   click is unreachable from a keyboard, and a station picked
+                   here is picked on the map beside it too. -->
+              <button
+                  type="button"
+                  class="stations__pick"
+                  :aria-pressed="isPicked(row)"
+                  @click="pick(row)"
+              >
+                {{ row.wigos_id }}
+              </button>
+            </td>
             <td class="stations__cell--text" :title="displayName(row)">
               {{ displayName(row) }}
             </td>
@@ -325,7 +359,7 @@
  * matching everything has hidden nothing, and looks identical to no filter at
  * all unless the page says so.
  */
-import {computed, watch} from 'vue'
+import {computed, nextTick, onMounted, watch} from 'vue'
 
 import BucketHeads from './BucketHeads.vue'
 import NavigatorWall from './NavigatorWall.vue'
@@ -386,6 +420,15 @@ const props = defineProps({
   direction: {
     type: String,
     default: 'asc'
+  },
+  /**
+   * The station the reader picked, as a string because it arrives from the
+   * address bar, or empty for none. The map beside these rows is filtered to
+   * the same one.
+   */
+  station: {
+    type: String,
+    default: ''
   },
   /** What the message column counts, from the server's own label. */
   windowLabel: {
@@ -570,8 +613,42 @@ const shown = computed(() => {
 
 const hidden = computed(() => props.stations.length - shown.value.length)
 
-const {viewport, header, first, end, onScroll, reset, topPad, bottomPad} =
+const {viewport, header, first, end, onScroll, reset, scrollToRow, topPad, bottomPad} =
     useVirtualRows(computed(() => shown.value.length), ROW_HEIGHT)
+
+//: The station the reader picked, as the rows spell its id. The address bar
+//: carries a string and a row carries the number the server sent, so the two
+//: are compared in one place rather than at every row.
+const pickedStation = computed(
+    () => props.stations.find((row) => isPicked(row)) || null
+)
+
+//: Where that station is in the list as it is being shown, or -1 where the
+//: filter above has hidden it. A pick made on the map is about a station
+//: rather than about the filter, so it is never allowed to widen one: the
+//: line above the rows says the row is hidden instead.
+const pickedRow = computed(() => shown.value.findIndex((row) => isPicked(row)))
+
+/**
+ * Bring the picked row into view, for the pick that was made on the map: a
+ * highlight four hundred rows down is not a highlight. Nothing moves where
+ * the row is already on screen, and nothing moves where the filter has
+ * hidden it -- `scrollToRow` is given -1 and does nothing with it.
+ *
+ * After the render, because the row it is scrolling to may not be drawn yet.
+ */
+function revealPicked() {
+  nextTick(() => scrollToRow(pickedRow.value))
+}
+
+// The pick and nothing else. A filter change resets the list to the top on
+// purpose, and scrolling back to a station picked before it would take that
+// away from the reader who just narrowed the list.
+watch(() => props.station, revealPicked)
+
+// And on the way in, for the link that arrives carrying one: the row would
+// otherwise be highlighted somewhere nobody can see.
+onMounted(revealPicked)
 
 //: The rows on screen. Keyed by station id in the template, so scrolling
 //: moves the rows that stayed rather than repainting a screenful of matrix
@@ -647,6 +724,21 @@ function displayName(row) {
 
 function choose(chosen) {
   emit('choose', chosen)
+}
+
+/** Whether this row is the station the reader picked. */
+function isPicked(row) {
+  return Boolean(props.station) && String(row.station_id) === props.station
+}
+
+/**
+ * Pick this station, or let go of it where it is already picked.
+ *
+ * The same gesture the map's own ground click makes, and it has to be here
+ * too: a reader who picked a row has no other way back out of it.
+ */
+function pick(row) {
+  choose({station: isPicked(row) ? '' : String(row.station_id)})
 }
 
 /** Sort by a column, turning it around where it is already the one sorted. */
@@ -760,6 +852,23 @@ function arrow(key) {
 .stations__picked-what {
   font-weight: 600;
   color: var(--w-color-text-label);
+}
+
+/* The picked station, on its own line for the same reason the picked bucket
+   has one: a reader who arrived on a link has to be able to see what the rows
+   in front of them are marked by. */
+.stations__station {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--w-color-text-meta);
+  margin: 0 0 0.35rem;
+}
+
+.stations__station .stations__clear {
+  align-self: auto;
 }
 
 .stations__population {
@@ -925,6 +1034,43 @@ function arrow(key) {
 
 .stations__id {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+/* The id, still reading as the id: a button here is the keyboard's way to the
+   same pick the map offers, not a second thing to look at. */
+.stations__pick {
+  font: inherit;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+.stations__pick:focus-visible {
+  outline: 2px solid var(--stat-focus);
+  outline-offset: 1px;
+}
+
+/* The picked row, in the focus colour the rest of the tab marks a pick with,
+   and as a wash rather than a fill: every other column of the row has to stay
+   readable under it. The sticky first cell is painted separately because it
+   carries its own background to cover the rows sliding under it. */
+.stations__row--picked td {
+  background: color-mix(in srgb, var(--stat-focus) 14%, transparent);
+}
+
+.stations__row--picked td:first-child {
+  background:
+      linear-gradient(
+          color-mix(in srgb, var(--stat-focus) 14%, transparent),
+          color-mix(in srgb, var(--stat-focus) 14%, transparent)
+      ),
+      var(--w-color-surface-page);
+  box-shadow: inset 2px 0 0 var(--stat-focus), inset 0 -1px 0 var(--w-color-border-furniture);
 }
 
 /* A dot rather than a coloured row: the standing is one fact about the
