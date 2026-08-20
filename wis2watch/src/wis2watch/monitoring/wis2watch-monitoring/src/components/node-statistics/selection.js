@@ -1,5 +1,6 @@
 /**
- * Which bucket the reader has picked, and what "dark in it" means.
+ * What the reader has picked -- which bucket, and which station -- and what
+ * "dark in it" means.
  *
  * Under the same rule `charts/plot.js` and `presence.js` are under:
  * ARITHMETIC AND TOKENS ONLY. Nothing here returns markup.
@@ -62,6 +63,36 @@ export function bucketIndexOf(buckets, key) {
  */
 export function darkIn(station, at) {
     return !station.presence?.[at]
+}
+
+/**
+ * The station the reader picked, as the rows spell its id.
+ *
+ * A selection reaches both surfaces through the address bar, which carries
+ * strings, and a row carries the number the server sent. The conversion is
+ * here rather than at each surface because the map matches it against a
+ * feature property and the table against a row, and two spellings of one
+ * comparison is how the ring and the highlighted row come to mark two
+ * different stations.
+ *
+ * @param {string} picked - what the address bar says, or empty for none.
+ * @returns {number|null} the station id, or null where nothing is picked.
+ */
+export function pickedStationId(picked) {
+    const id = Number(picked)
+
+    return picked && Number.isFinite(id) ? id : null
+}
+
+/**
+ * Whether one station is the picked one.
+ *
+ * @param {{station_id: number}} station - the row.
+ * @param {string} picked - what the address bar says, or empty for none.
+ * @returns {boolean} true where this is the station the reader picked.
+ */
+export function isPickedStation(station, picked) {
+    return station.station_id === pickedStationId(picked)
 }
 
 /**

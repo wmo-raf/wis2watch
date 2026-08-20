@@ -302,6 +302,27 @@ export function formatInstant(iso) {
 }
 
 /**
+ * What to call a station, preferring the operator's own name.
+ *
+ * The name a node assigns is the one its staff will recognise, and is often
+ * the only one there is: a station minted from observed traffic has no
+ * canonical name until OSCAR is read for it, and the WIGOS id is the last
+ * resort rather than the label.
+ *
+ * Spelled here and nowhere else. Three surfaces name the same station -- the
+ * rows, the line above them, and the map's popup -- and a second copy of this
+ * fallback is how one of them comes to show an id where the others show a
+ * name. The server has the same rule in `NodeStationRow.display_name`.
+ *
+ * @param {{local_name: string, name: string, wigos_id: string}} station - the
+ *     row, as the server sent it.
+ * @returns {string} what to call it.
+ */
+export function displayName(station) {
+    return station.local_name || station.name || station.wigos_id
+}
+
+/**
  * How long something has been quiet, in the largest unit that is still exact
  * enough to act on.
  *

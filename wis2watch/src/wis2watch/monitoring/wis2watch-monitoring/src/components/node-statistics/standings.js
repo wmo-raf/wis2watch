@@ -37,3 +37,25 @@ export const STANDING_LABEL = Object.fromEntries(
 export const STANDING_RANK = Object.fromEntries(
     STANDINGS.map(({key}, rank) => [key, rank])
 )
+
+/**
+ * The standings that mean nothing has been heard from the station lately.
+ *
+ * The server names these two together as `StationStanding.SILENT` because the
+ * figures count them and the rows report them, and those are decided in
+ * different places. This side has the same problem one surface later: the map
+ * paints a station red for being silent, and the table's standing dot does the
+ * same, and neither is allowed to be the place where "silent" quietly comes to
+ * mean something else.
+ *
+ * Two of the four rather than a rule about the other two, and that asymmetry
+ * is the point: `undeclared` is a station transmitting that nothing declares,
+ * which is a registry fact rather than a failure, and `transmitting` is a
+ * clean bill.
+ */
+export const SILENT = ['never_transmitted', 'gone_quiet']
+
+/** Whether nothing has been heard from a station in this standing lately. */
+export function isSilent(standing) {
+    return SILENT.includes(standing)
+}
