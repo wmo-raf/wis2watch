@@ -8,7 +8,7 @@ Issues live as GitHub issues on `wmo-raf/wis2watch`, managed via the `gh` CLI. S
 
 ### Triage labels
 
-The five canonical triage roles, each label string equal to its name. See `docs/agents/triage-labels.md`.
+The five canonical triage roles. Three exist in this tracker, under their own names; `needs-info` and `ready-for-human` do not exist at all. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
