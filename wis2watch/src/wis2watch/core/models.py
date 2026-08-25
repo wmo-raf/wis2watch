@@ -1300,6 +1300,81 @@ class CadenceBaseline(models.Model):
         return f"{self.dataset_id}: every {self.interval_hours}h"
 
 
+class StationActivityBaseline(models.Model):
+    """How much of a day a station is normally heard in, learned from its own
+    history.
+
+    The availability matrix draws a station's day pale when it was heard in
+    only a little of it. "A little" was a share of the clock's 24 hours until
+    #112, and the clock is the wrong yardstick: a station reporting three-hourly
+    is heard in 8 hours of every day and is perfectly well, while an hourly
+    station down to 8 hours has lost two thirds of its output. Both are 8 of 24,
+    and no threshold against the clock can tell them apart. Measured over six
+    days of real traffic, two thirds of every pale cell on the tab was a station
+    sitting at its own normal level.
+
+    So a station is judged against itself, which is the answer
+    ``CadenceBaseline`` above already gives for datasets, for the same reason
+    and with the same machinery.
+
+    **Node-scoped**, unlike the dataset baseline. A station may transmit under
+    more than one centre's topics, and every figure on the statistics tab is
+    one centre's own observation of it; a baseline pooled across centres would
+    judge a centre against traffic it never received.
+
+    The figure is a percentile of the station's own daily ``active_hours``,
+    taken from ``DailyStationRollup`` because that is the table the day grain
+    reads anyway. A percentile rather than a mean, which one dead day drags
+    down, or a maximum, which is whatever its best day ever was and would call
+    a station thin for any ordinary one.
+
+    Written down rather than derived when asked for, because it is a scan of
+    months of buckets for every station in the region -- far too much to run
+    behind a page -- and because how much of a day a station reports in moves
+    in weeks, not minutes.
+
+    A baseline is never removed for want of history, on the same reasoning as
+    the dataset one: a station that stops reporting eventually has too few days
+    left in the window to learn from, and that is exactly when its baseline is
+    the thing that reports it. ``learned_at`` is what says how old the answer
+    is.
+    """
+
+    node = models.ForeignKey(
+        WIS2Node,
+        on_delete=models.CASCADE,
+        related_name="station_activity_baselines",
+    )
+    station = models.ForeignKey(
+        Station,
+        on_delete=models.CASCADE,
+        related_name="activity_baselines",
+    )
+    active_hours = models.FloatField(
+        help_text=_("How many hours of a day this station is normally heard in"),
+    )
+    observations = models.PositiveIntegerField(
+        help_text=_("How many observed days the figure was learned from"),
+    )
+    learned_at = models.DateTimeField(
+        help_text=_("When the run that produced this figure read the history"),
+    )
+
+    class Meta:
+        ordering = ["node", "station"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["node", "station"],
+                name="unique_station_activity_baseline_per_node",
+            )
+        ]
+        verbose_name = _("Station Activity Baseline")
+        verbose_name_plural = _("Station Activity Baselines")
+
+    def __str__(self):
+        return f"{self.station_id} at {self.node_id}: {self.active_hours}h a day"
+
+
 class PropagationGapQuerySet(models.QuerySet):
     def open(self):
         """Gaps the world is still not known to have seen.

@@ -263,6 +263,7 @@
                 :buckets="buckets"
                 :grain="grain"
                 :ceilings="ceilings"
+                :baseline="row.baseline_hours"
                 :cell-width="cellWidth"
                 :height="ROW_HEIGHT"
                 :name="displayName(row)"
@@ -286,7 +287,7 @@
          on this page that cannot be read off a number. The same legend the
          drilldown carries, so one colour cannot come to be described two
          ways on two panels of one tab. -->
-    <PresenceLegend v-if="buckets.length" :grain="grain"/>
+    <PresenceLegend v-if="buckets.length" :grain="grain" :unjudged="anyUnjudged"/>
 
     <!-- The whole of what is listed below, at half a pixel a station. It sits
          under the filter rather than above it because it is drawn from what
@@ -736,6 +737,15 @@ const matrixWidth = computed(() => cellWidth.value * props.buckets.length)
 //: Null at hourly grain, where the scale is each row's own busiest hour.
 const ceilings = computed(() => bucketCeilings(props.buckets, props.grain, props.asOf))
 
+// Whether the hatch is on the page at all, which is what decides if the legend
+// names it. Read off the rows actually shown rather than the whole population:
+// a legend explaining a mark the current filter has hidden is a reader hunting
+// for something that is not there.
+const anyUnjudged = computed(
+    () => Boolean(ceilings.value)
+        && shown.value.some((row) => row.baseline_hours == null)
+)
+
 const openBucket = computed(() => props.buckets.some((bucket) => bucket.partial))
 
 //: What this grain calls its buckets, its scale and its legend, from the one
@@ -778,6 +788,11 @@ const imageRoles = computed(() => ({
   alarm: exportRoles.value.silent,
   full: exportRoles.value.live,
   thin: exportRoles.value.thin,
+  //: Flat, for the same reason the navigator wall paints it flat: a canvas
+  //: cell four pixels wide cannot carry the hatch the matrix draws, and what
+  //: has to survive the export is only that an unjudged cell is not a silent
+  //: one.
+  unjudged: exportRoles.value['hatch-line'],
   silent: exportRoles.value.empty,
   empty: exportRoles.value.empty,
 }))

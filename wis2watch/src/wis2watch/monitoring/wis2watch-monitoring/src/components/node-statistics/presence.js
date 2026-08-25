@@ -28,34 +28,42 @@ import {
     formatHourLong,
 } from './charts/plot.js'
 
-//: Below this much of a bucket, a station was heard *thinly* rather than
-//: fully. **Measured.** #48 set it at 0.3 against seeded data and #66 left it
-//: standing but unmeasured; #110 read it against six clean days of real
-//: Global Broker traffic -- 9,245 station-days, 2026-08-13 to 18.
+//: Below this much of what a bucket was expected to carry, a station was
+//: heard *thinly* rather than fully.
 //:
-//: The distribution is bimodal with a wide flat trough: about 27% of
-//: station-days sit at 1-8 hours, 21% across 9-18, and 47% at 19-24, and that
-//: shape holds on all six days independently. 0.3 cut between 7 and 8 hours,
-//: which is the worst place available: **67% of the station-days at exactly 8
-//: hours report at (0,3,6,9,12,15,18,21)** -- textbook three-hourly synoptic
-//: reporting, a complete day for a station on that schedule. The commonest
-//: healthy cadence on the network sat 0.8 hours above the line and crossed it
-//: by missing one of its eight slots. The two hours straddling that cut hold
-//: 8.9% of all station-days; the two straddling this one hold 4.0%.
+//: The number survived #112 unchanged; what it is a share *of* did not. It was
+//: a share of the clock's 24 hours, and #110 measured that cut at every
+//: position on the axis: the least-bad place was half the day, because the
+//: distribution of `active_hours/24` is bimodal and 0.5 falls in the trough.
+//: The reason it is bimodal is that it was measuring reporting *cadence* --
+//: two thirds of every pale cell was a station sitting at its own normal
+//: level, and the commonest healthy cadence on the network (three-hourly, 8
+//: hours of every day) sat 0.8 hours from the old 0.3 line.
 //:
-//: 0.5 is also what the legend beside it already claims: "most of the day" is
-//: a majority of it, which 8 of 24 hours is not.
+//: Against the station's own expectation the shape is different and much
+//: kinder to a threshold: one mode at 0.8-1.1 of its usual, a thin tail below
+//: 0.6, and nothing bimodal about it, because "a station against itself" is
+//: one population where "a station against the clock" was several. 0.5 sits in
+//: sparse ground there too, so the number stays where it was and now means
+//: something a reader can act on: **half of what this station normally does**.
 //:
-//: What this does not fix: at day grain the cell reads reporting *cadence* at
-//: least as much as health, and no share of 24 hours tells a healthy
-//: three-hourly station from an hourly one down to a third. That needs a
-//: per-station ceiling rather than a different number here -- #112.
+//: Measured over the same six clean days: judged this way 4.5% of station-days
+//: draw pale against 32.1% before, catching every one of the real drops the
+//: clock caught.
 export const THIN_FRACTION = 0.5
 
 //: How many hours a whole UTC day holds, and how long an hour is. The daily
 //: ceiling and the arithmetic that shortens it, each spelled once.
 const HOURS_PER_DAY = 24
 const MS_PER_HOUR = 3_600_000
+
+/** A learned figure as a number of hours, for a sentence rather than a sum. */
+function hours(value) {
+    // Rounded, and never below one: a baseline of 0.4 hours is a station heard
+    // in about one hour a day, and "against the 0 it is normally heard in" is
+    // arithmetic showing through the words.
+    return `${Math.max(1, Math.round(value))}h`
+}
 
 /**
  * Everything about a matrix cell that follows from the size of its bucket.
@@ -88,14 +96,35 @@ export const GRAINS = {
         //: the same claim at both: a day is judged against the clock, and an
         //: hour against the station's own busiest.
         legend: {
-            full: 'Heard for most of the day',
-            thin: 'Heard, but for less than half the day',
+            full: 'Heard about as much as it usually is',
+            thin: 'Heard, but for less than half its usual day',
+            unjudged: 'Heard, with too little history to say whether that is usual',
         },
         scale:
-            'A cell is judged against the 24 hours of its day, so a pale one is'
-            + ' a station that was heard in fewer than half of them.',
+            "A cell is judged against how much of a day this centre normally"
+            + ' hears this station in, not against the clock: a station'
+            + ' reporting three-hourly is heard in 8 hours of every day and is'
+            + ' perfectly well. So a pale cell is a station heard for less than'
+            + ' half of its own usual day.',
         long: formatDayLong,
         short: formatDay,
+        //: What the cell is judged against, said out loud. The figure it names
+        //: is the station's own, not the clock's, so the sentence has to carry
+        //: the comparison -- "4 of 24 hours" was true of the old ceiling and
+        //: says nothing about whether 4 is a lot for this station.
+        heard: (value, ceiling, partial) =>
+            partial
+                ? `heard in ${value}h so far, against the ${hours(ceiling)} it is`
+                  + ' normally heard in by this point of a day'
+                : `heard in ${value}h, against the ${hours(ceiling)} it is`
+                  + ' normally heard in',
+        //: The sentence for a station nothing has been learned about yet. It
+        //: says what was heard -- which is a fact, and known -- and then says
+        //: plainly that the comparison is missing, rather than leaving a
+        //: reader to work out what the hatch means.
+        unjudged: (value, partial) =>
+            `heard in ${value}h${partial ? ' so far' : ''} — too little`
+            + ' history from this station to say whether that is usual for it',
         ceiling: (bucket, now) => {
             if (!bucket.partial) {
                 return HOURS_PER_DAY
@@ -108,7 +137,6 @@ export const GRAINS = {
 
             return Math.min(HOURS_PER_DAY, Math.max(1, elapsed))
         },
-        heard: (value, ceiling) => `heard in ${value} of ${ceiling} hours`,
         silent: 'silent all day: nothing heard from this station',
         //: The sentence for a bucket the centre published in and named
         //: nobody in. Here rather than at the two surfaces that say it,
@@ -125,6 +153,11 @@ export const GRAINS = {
         legend: {
             full: "Heard at this station's own usual rate",
             thin: "Heard, but well below this station's busiest hour",
+            // Never reached at this grain -- an hourly cell is judged against
+            // the row's own busiest bucket, which every row has. Present so
+            // that one legend component can read either grain without asking
+            // which one it is holding.
+            unjudged: null,
         },
         scale:
             "A cell is judged against this station's own busiest hour \u2014 the"
@@ -136,6 +169,10 @@ export const GRAINS = {
         short: formatHour,
         ceiling: null,
         heard: (value) => `${formatCount(value)} messages`,
+        //: Never reached: an hourly cell is judged against the row's own
+        //: busiest bucket, which every row has. Null so that one tooltip
+        //: function can read either grain without asking which it holds.
+        unjudged: null,
         silent: 'silent: no messages this hour',
         stationLess:
             'this centre published in this hour, and none of it named any'
@@ -190,11 +227,26 @@ export function presenceState(value, ceiling) {
  * @param {number[]} values - what the station was heard doing per bucket.
  * @param {number[]|null} ceilings - the axis's own, or null for the row's.
  * @param {number} count - how many buckets the axis carries.
- * @returns {number[]} a ceiling per bucket.
+ * @param {number|null} baseline - how much of a whole bucket this centre
+ *     normally hears this station in, or null where too little history exists
+ *     to say. Ignored where the axis has no ceilings of its own.
+ * @returns {number[]|null} a ceiling per bucket, or null where unjudged.
  */
-export function rowCeilings(values, ceilings, count) {
+export function rowCeilings(values, ceilings, count, baseline) {
     if (ceilings) {
-        return ceilings
+        // Unjudged: nothing has been learned about this station yet, so there
+        // is no scale to draw it against and none is invented. `null` here is
+        // what `presenceStates` reads to mark the row rather than shade it.
+        if (baseline == null) {
+            return null
+        }
+
+        // The axis says how much of each bucket has *happened*; the baseline
+        // says how much of a whole one this station is normally heard in. A
+        // day in progress is judged against the share of its expectation that
+        // has come due, so a station expected eight hours a day is not called
+        // thin at 06:00 for having managed two.
+        return ceilings.map((ceiling) => baseline * (ceiling / HOURS_PER_DAY))
     }
 
     // Never zero: a row that was heard nothing from divides by one and draws
@@ -223,15 +275,25 @@ export function rowCeilings(values, ceilings, count) {
  * @param {number[]|null} ceilings - the axis's own ceilings, or null for the
  *     row's own busiest bucket.
  * @param {number} count - how many buckets the axis carries.
- * @returns {string[]} `silent`, `thin` or `full`, one per bucket.
+ * @param {number|null} baseline - what this station is normally heard for.
+ * @returns {string[]} `silent`, `thin`, `full` or `unjudged`, one per bucket.
  */
-export function presenceStates(values, ceilings, count) {
-    const against = rowCeilings(values, ceilings, count)
+export function presenceStates(values, ceilings, count, baseline) {
+    const against = rowCeilings(values, ceilings, count, baseline)
 
-    return Array.from(
-        {length: count},
-        (_, at) => presenceState(values[at] || 0, against[at])
-    )
+    return Array.from({length: count}, (_, at) => {
+        const value = values[at] || 0
+
+        // Silence needs no expectation. Whether a station was heard at all is
+        // the same fact whatever it normally does, and it is the finding the
+        // matrix exists for -- so an unjudged row keeps it and gives up only
+        // the distinction between a full day and a thin one.
+        if (!value) {
+            return 'silent'
+        }
+
+        return against ? presenceState(value, against[at]) : 'unjudged'
+    })
 }
 
 /**
@@ -387,20 +449,25 @@ export function pixelBand(index, count, total) {
  */
 export function presenceTitle(bucket, value, ceiling, grain, stationLess = false) {
     const words = grainOf(grain)
-    // Said in the tooltip as well as drawn, because the three states are a
-    // colour, and a colour is never the only carrier of a finding here -- and
-    // the hatch least of all: "no value on this axis" is the most a mark can
-    // say, and which of the two empty cases it is is only said here.
-    const thin = presenceState(value, ceiling) === 'thin' ? ', thinly' : ''
-    const heard = stationLess
-        ? words.stationLess
-        : value ? `${words.heard(value, ceiling)}${thin}` : words.silent
-    // Driven by the bucket rather than by the grain: an hourly axis never
-    // carries an unfinished bucket, because the hour in progress is left out
-    // of the window rather than served half-counted.
-    const counting = bucket.partial
-        ? ` — the day is still being counted, ${ceiling}h of it so far`
-        : ''
+    // Said in the tooltip as well as drawn, because the states are a colour,
+    // and a colour is never the only carrier of a finding here -- the hatch
+    // least of all: "no value on this axis" is the most a mark can say, and
+    // which of the cases it is is only said here.
+    const thin =
+        ceiling != null && presenceState(value, ceiling) === 'thin' ? ', thinly' : ''
 
-    return `${words.long(new Date(bucket.start))} — ${heard}${counting}`
+    let heard
+    if (stationLess) {
+        heard = words.stationLess
+    } else if (!value) {
+        // Silence needs no expectation, and says the same thing on an unjudged
+        // row as on any other.
+        heard = words.silent
+    } else if (ceiling == null) {
+        heard = words.unjudged(value, bucket.partial)
+    } else {
+        heard = `${words.heard(value, ceiling, bucket.partial)}${thin}`
+    }
+
+    return `${words.long(new Date(bucket.start))} — ${heard}`
 }
