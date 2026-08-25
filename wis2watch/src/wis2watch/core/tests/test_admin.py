@@ -2,7 +2,7 @@ from datetime import timedelta
 from unittest import mock
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone as dj_timezone
 
@@ -972,3 +972,35 @@ class NodeStatisticsViewTests(TestCase):
         self.assertEqual(
             str(crumbs[-2]["url"]), reverse("node_details", args=[self.node.id])
         )
+
+    def test_the_island_is_told_where_the_comparison_lives(self):
+        """The tab's station-less figure raises a question it does not answer.
+
+        A share is only readable against the centres carrying the identifier
+        throughout, and this tab shows one centre. So it hands the island the
+        report that does list them all, plainly -- reversed here rather than
+        assembled in the bundle, which is built ahead of time and cannot be
+        renamed from the Python side.
+        """
+        response = self.page()
+
+        self.assertContains(
+            response,
+            'data-unattributed-report-url="'
+            f'{reverse("gap_report", args=["unattributed-messages"])}"',
+        )
+
+    @override_settings(WIS2WATCH_ATTRIBUTION_WINDOW_HOURS=72)
+    def test_the_island_is_told_the_window_the_report_answers_over(self):
+        """The link names the destination's frame, which is not this tab's.
+
+        The report works its share out over a fixed window while the figure
+        beside the link moves with the reader's control, so at every setting
+        of that control but one the two surfaces quote different periods for
+        the same centre. The link says which one it is leading to. Read from
+        the setting rather than spelled in the bundle, or a server that
+        widened its window would go on advertising the old one.
+        """
+        response = self.page()
+
+        self.assertContains(response, 'data-attribution-hours="72"')

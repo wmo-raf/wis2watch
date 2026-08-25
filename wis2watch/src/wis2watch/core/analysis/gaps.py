@@ -97,6 +97,11 @@ from .silence import hours_between
 #: over a day.
 DEFAULT_ATTRIBUTION_WINDOW_HOURS = 168
 
+#: Which report answers "is this share bad?" for a centre. Named here beside
+#: the report rather than spelled again wherever a link to it is reversed: a
+#: slug that lives in two places is a link that survives the rename of one.
+UNATTRIBUTED_MESSAGES_SLUG = "unattributed-messages"
+
 #: How long a centre's registry may fail every run before the report names it,
 #: in hours. Against an hourly sync that is some fifty consecutive failures --
 #: far past a host restarting overnight or a certificate renewed badly at
@@ -1551,7 +1556,7 @@ GAP_REPORTS = (
         describe_caveat=registries_not_answering_caveat,
     ),
     GapReport(
-        slug="unattributed-messages",
+        slug=UNATTRIBUTED_MESSAGES_SLUG,
         title=_("Unattributed messages"),
         description=_(
             "How much of each centre's traffic carries no WIGOS station "
