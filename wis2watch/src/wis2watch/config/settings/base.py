@@ -573,6 +573,12 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'wis2watch.core.tasks.run_learn_cadence_baselines',
         'schedule': 86400.0,  # Daily
     },
+    # How much of a day a station reports in moves in weeks too, and the run
+    # reads ninety days of daily buckets for every station in the region.
+    'learn-station-activity-baselines': {
+        'task': 'wis2watch.core.tasks.run_learn_station_activity_baselines',
+        'schedule': 86400.0,  # Daily
+    },
     'evaluate-propagation': {
         'task': 'wis2watch.core.tasks.run_evaluate_propagation',
         'schedule': 900.0,  # Every 15 minutes

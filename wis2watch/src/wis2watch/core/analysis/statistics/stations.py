@@ -47,7 +47,7 @@ from datetime import datetime
 from django.db.models import Max, Q, Sum
 from django.utils import timezone as dj_timezone
 
-from ...models import HourlyRollup, MessageSource
+from ...models import HourlyRollup, MessageSource, StationActivityBaseline
 from ..staleness import default_stale_after_hours
 from ..stations import node_stations
 from ..windows import Grain, Window
@@ -123,6 +123,15 @@ class StationRow:
     messages_in_window: int
     active_buckets: int
     presence: list[int]
+    #: How much of a day this centre normally hears this station in, learned
+    #: from its own history, or ``None`` where too little history exists to
+    #: claim one. It is what a day-grain presence cell is judged against --
+    #: the clock was, until #112 measured two thirds of every pale cell to be
+    #: a station sitting at its own normal level. ``None`` is not a zero and
+    #: not a default: it means *unjudged*, and the matrix draws it as such
+    #: rather than guessing, which is the judgement the silence report already
+    #: makes about a dataset with no expectation.
+    baseline_hours: float | None
 
 
 @dataclass(frozen=True)
@@ -176,6 +185,7 @@ def node_station_statistics(node, *, window=None, now=None):
 
     heard = _sparklines(node, hours)
     counted = over_window(node, buckets, window.grain)
+    baselines = _baselines(node)
     silent = Heard(
         presence=[0] * len(buckets),
         volumes=[0] * len(buckets),
@@ -195,6 +205,11 @@ def node_station_statistics(node, *, window=None, now=None):
                 station,
                 sparkline=heard.get(station.station_id) or [0] * len(hours),
                 counted=counted.get(station.station_id) or silent,
+                # ``.get`` rather than a default, because absent and zero are
+                # different answers here: a station nothing has been learned
+                # about is unjudged, and a baseline of zero hours would make
+                # every cell on its row full.
+                baseline_hours=baselines.get(station.station_id),
             )
             # The shared derivation, in the shared order: RANK, then longest
             # quiet, then WIGOS id. Sorting is the client's from here on, and
@@ -205,7 +220,7 @@ def node_station_statistics(node, *, window=None, now=None):
     )
 
 
-def _row(station, *, sparkline, counted):
+def _row(station, *, sparkline, counted, baseline_hours):
     """One station of the shared derivation, with what it was heard doing."""
     return StationRow(
         station_id=station.station_id,
@@ -224,6 +239,34 @@ def _row(station, *, sparkline, counted):
         messages_in_window=counted.messages,
         active_buckets=counted.active_buckets,
         presence=counted.presence,
+        baseline_hours=baseline_hours,
+    )
+
+
+def _baselines(node):
+    """What this centre normally hears each of its stations for, in a day.
+
+    One query for the whole population, like the sparklines below, and for the
+    same reason: a per-row lookup on a centre with a thousand stations is a
+    thousand queries to answer one question.
+
+    Node-scoped, because the baseline is. A station transmitting under two
+    centres has one of these per centre, and reading another centre's would
+    judge this one against traffic it never received.
+
+    Stations with too little history are simply absent, which is what the
+    caller reads as unjudged.
+
+    Args:
+        node: the centre to read baselines for.
+
+    Returns:
+        dict[int, float]: expected daily active hours, by station id.
+    """
+    return dict(
+        StationActivityBaseline.objects.filter(node=node).values_list(
+            "station_id", "active_hours"
+        )
     )
 
 

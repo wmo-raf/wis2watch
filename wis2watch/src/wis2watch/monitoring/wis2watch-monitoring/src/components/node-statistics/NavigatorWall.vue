@@ -95,6 +95,11 @@ const props = defineProps({
 //: silent colour: that pass exists to take back the pixels the live pass
 //: covered, and on an uncompressed wall it draws nothing new.
 const PAINT_ORDER = [
+  // First, so that anything the wall can actually say wins a shared pixel over
+  // a row it has nothing to say about. Flat, where the matrix hatches: at half
+  // a pixel per station a pattern is a smudge, and the wall's job here is only
+  // to stop an unjudged row reading as a silent one.
+  {state: 'unjudged', role: 'hatch-line'},
   {state: 'full', role: 'live'},
   {state: 'thin', role: 'thin'},
   {state: 'silent', role: 'empty'},
@@ -112,7 +117,7 @@ const {el, width} = useMeasuredWidth()
 // background on purpose: the wall's ground *is* silence, and what a reader
 // hunts on it is the absence of the live colour. Resolved against the panel
 // element, which is what the roles are inherited through.
-const roles = useRoles(el, ['live', 'thin', 'empty'])
+const roles = useRoles(el, ['live', 'thin', 'empty', 'hatch-line'])
 
 const height = computed(() => wallHeightFor(props.stations.length))
 
@@ -164,7 +169,12 @@ function paint() {
 
   const columns = props.buckets.map((_, at) => pixelBand(at, props.buckets.length, canvasWidth))
   const rows = props.stations.map(
-      (station) => presenceStates(station.presence || [], props.ceilings, props.buckets.length)
+      (station) => presenceStates(
+          station.presence || [],
+          props.ceilings,
+          props.buckets.length,
+          station.baseline_hours ?? null
+      )
   )
 
   PAINT_ORDER.forEach(({state, role}) => {

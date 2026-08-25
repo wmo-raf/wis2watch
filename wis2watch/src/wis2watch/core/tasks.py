@@ -8,7 +8,7 @@ from django.core.management import call_command
 
 from wis2watch.config.celery import app
 from .alerts import check_hard_failures
-from .cadence import learn_cadence_baselines
+from .cadence import learn_cadence_baselines, learn_station_activity_baselines
 from .catalogue import sync_catalogues
 from .daily_rollups import update_daily_rollups
 from .digest import send_digest
@@ -162,6 +162,27 @@ def run_learn_cadence_baselines():
     counts = learn_cadence_baselines()
 
     logger.info("[CADENCE] %s", counts.summary)
+
+    return counts.summary
+
+
+@shared_task
+def run_learn_station_activity_baselines():
+    """Learn how much of a day each station normally reports in.
+
+    Daily, and unhurried for the same reasons the cadence run is: the figure is
+    a percentile over ninety days of buckets and moves in weeks, so a more
+    frequent run would spend a scan of the region's history arriving at the
+    same number. A missed run costs nothing -- the baselines already learned
+    stand, and the matrix keeps drawing against them.
+
+    Runs after the daily rollups it reads, which is not a scheduling
+    requirement so much as an observation: the rollups refresh every fifteen
+    minutes, so whenever this lands, yesterday is already whole.
+    """
+    counts = learn_station_activity_baselines()
+
+    logger.info("[STATION ACTIVITY] %s", counts.summary)
 
     return counts.summary
 

@@ -1,4 +1,16 @@
-"""Learning how often each dataset publishes, from its own history.
+"""Learning what normal looks like, from each thing's own history.
+
+Two rhythms are learned here, for one reason. A dataset's publishing interval
+answers "is this centre still publishing at all"; a station's daily active
+hours answer "is this station still reporting as much as it does". Both exist
+because a single number across the region is not a thing that exists, and both
+are written down on a schedule rather than computed behind a page.
+
+The dataset rhythm came first and the doctrine below is written in its terms;
+the station one, added by #112, follows every line of it. Where the two differ
+it is said at the point of difference.
+
+--- The dataset rhythm --------------------------------------------------------
 
 A single silence threshold across fifty-four countries is not a thing that
 exists. One centre publishes surface observations in hourly bursts while
@@ -47,7 +59,13 @@ from django.conf import settings
 from django.db import connection
 from django.utils import timezone as dj_timezone
 
-from .models import CadenceBaseline, HourlyRollup
+from .models import (
+    CadenceBaseline,
+    DailyStationRollup,
+    HourlyRollup,
+    StationActivityBaseline,
+)
+from .daily_rollups import floor_to_day
 from .rollups import floor_to_hour
 
 logger = logging.getLogger(__name__)
@@ -106,6 +124,64 @@ FROM gaps
 WHERE gap_hours IS NOT NULL
 GROUP BY dataset_id
 HAVING COUNT(gap_hours) >= %s
+"""
+
+
+#: How much history a station's baseline is learned from, in days. The same
+#: ninety as the dataset rhythm, and long for a sharper reason: a station
+#: sliding down over a fortnight drags a short window's answer down with it and
+#: goes on reading "normal" all the way to silence. Ninety days means sixty of
+#: healthy history are still in the window when it happens.
+DEFAULT_STATION_WINDOW_DAYS = 90
+
+#: Which percentile of a station's own daily active hours becomes its
+#: expectation. The median, where the dataset rhythm takes the ninety-fifth,
+#: and the difference is only that the two measure opposite directions: a high
+#: percentile of *gaps* is a loose expectation, and a high percentile of *hours
+#: reported* is a tight one. Both settings say the same thing -- an expectation
+#: too loose reports nothing, while one too tight reports a station that did
+#: nothing wrong, and the second is the one that teaches a reader to stop
+#: looking. Measured against six clean days: the median draws 4.4% of
+#: station-days pale where the maximum draws 6.2%, and both catch every real
+#: drop.
+DEFAULT_STATION_PERCENTILE = 50
+
+#: How many days a station must show before anything is learned from it. A
+#: week, so that a station reporting on a weekly rhythm has been round its
+#: cycle once; below this nothing is claimed and the matrix says so rather than
+#: guessing.
+DEFAULT_STATION_MIN_OBSERVATIONS = 7
+
+#: One expected daily active-hours figure per station per node.
+#:
+#: A statement rather than the ORM for the same reason as the dataset query
+#: above: ``PERCENTILE_CONT`` is an ordered-set aggregate the ORM does not
+#: express, and the alternative is reading every station-day in the region into
+#: Python to sort it there.
+#:
+#: Grouped by node as well as station because the whole tab is node-scoped: a
+#: station transmitting under two centres' topics has two baselines, one per
+#: centre's own observation of it, and pooling them would judge a centre
+#: against traffic it never received.
+#:
+#: Days with no activity at all are already absent from this table rather than
+#: present as zeros, so they neither drag the percentile down nor need
+#: excluding here. That is deliberate on both sides: a station's expectation is
+#: what it does on the days it reports, and the days it reported nothing are
+#: the finding, not the baseline.
+LEARN_STATION_ACTIVITY = """
+SELECT
+    node_id,
+    station_id,
+    PERCENTILE_CONT(%s) WITHIN GROUP (ORDER BY active_hours) AS active_hours,
+    COUNT(*) AS observations
+FROM {daily_rollups}
+WHERE station_id IS NOT NULL
+  AND active_hours > 0
+  AND day >= %s
+  AND day < %s
+GROUP BY node_id, station_id
+HAVING COUNT(*) >= %s
 """
 
 
@@ -224,6 +300,137 @@ def _learned_intervals(*, since, until, percentile, required):
         cursor.execute(
             LEARN_INTERVALS.format(rollups=HourlyRollup._meta.db_table),
             [since, until, percentile / 100, required],
+        )
+
+        return cursor.fetchall()
+
+
+# --- The station rhythm -------------------------------------------------------
+
+
+def default_station_window_days():
+    """How much history a station's baseline is learned from."""
+    return getattr(
+        settings, "WIS2WATCH_STATION_WINDOW_DAYS", DEFAULT_STATION_WINDOW_DAYS
+    )
+
+
+def default_station_percentile():
+    """Which percentile of a station's daily active hours it is expected at."""
+    return getattr(
+        settings, "WIS2WATCH_STATION_PERCENTILE", DEFAULT_STATION_PERCENTILE
+    )
+
+
+def default_station_min_observations():
+    """How many days a station must show before anything is learned from it."""
+    return getattr(
+        settings,
+        "WIS2WATCH_STATION_MIN_OBSERVATIONS",
+        DEFAULT_STATION_MIN_OBSERVATIONS,
+    )
+
+
+def station_window_start(now, window_days=None):
+    """The earliest day a station run learns from.
+
+    Taken down to a UTC midnight, because days are what this table buckets by
+    and a window starting mid-day would take in or leave out a whole bucket
+    depending on the minute the job ran at.
+    """
+    days = default_station_window_days() if window_days is None else window_days
+
+    return floor_to_day(now - timedelta(days=days))
+
+
+def station_window_end(now):
+    """The first day a station run does not learn from.
+
+    The day in progress is left out, which is where this parts company with the
+    dataset rhythm above. A dataset's most recent gap is only made wrong by
+    excluding the hour it is in; a station's active hours for today are
+    *systematically* short, because the day is not over -- at 09:00 UTC every
+    station in the region has had nine hours to report in. Learning from it
+    would drag every baseline down by however early in the day the job happens
+    to run.
+    """
+    return floor_to_day(now)
+
+
+def learn_station_activity_baselines(
+    *, now=None, window_days=None, percentile=None, min_observations=None
+):
+    """Learn how much of a day each station is normally heard in.
+
+    Args:
+        now: the instant the window is measured back from.
+        window_days: how much history to learn from.
+        percentile: which percentile of a station's days to expect.
+        min_observations: how many days a station must show first.
+
+    Returns:
+        CadenceCounts: how many station-node pairs were learned from.
+
+    A station with too little history is left without a baseline rather than
+    given a guess, and the matrix draws its cells unjudged rather than pale --
+    a mark nobody can trust is worse than no mark, which is the same judgement
+    the silence report makes about a dataset with no expectation. A station
+    that already has a baseline and has since fallen below the bar keeps it,
+    for the reason the dataset learner gives: falling below the bar is what a
+    station does when it stops reporting.
+    """
+    now = now or dj_timezone.now()
+    since = station_window_start(now, window_days)
+    required = (
+        default_station_min_observations()
+        if min_observations is None
+        else min_observations
+    )
+
+    baselines = [
+        StationActivityBaseline(
+            node_id=node_id,
+            station_id=station_id,
+            active_hours=active_hours,
+            observations=observations,
+            learned_at=now,
+        )
+        for node_id, station_id, active_hours, observations in _learned_activity(
+            since=since,
+            until=station_window_end(now),
+            percentile=(
+                default_station_percentile() if percentile is None else percentile
+            ),
+            required=required,
+        )
+    ]
+
+    if baselines:
+        StationActivityBaseline.objects.bulk_create(
+            baselines,
+            batch_size=1000,
+            update_conflicts=True,
+            unique_fields=["node", "station"],
+            update_fields=["active_hours", "observations", "learned_at"],
+        )
+
+    counts = CadenceCounts(learned=len(baselines))
+
+    logger.info(
+        "Station activity baselines learned from %s onwards: %s", since, counts.summary
+    )
+
+    return counts
+
+
+def _learned_activity(*, since, until, percentile, required):
+    """One ``(node, station, hours, observations)`` per station with a history."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            LEARN_STATION_ACTIVITY.format(
+                daily_rollups=DailyStationRollup._meta.db_table
+            ),
+            [percentile / 100, since, until, required],
         )
 
         return cursor.fetchall()

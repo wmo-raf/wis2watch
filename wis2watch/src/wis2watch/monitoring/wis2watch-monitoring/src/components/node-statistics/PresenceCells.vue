@@ -7,10 +7,12 @@
       role="img"
       :aria-label="label"
   >
-    <!-- Only where a surface says a bucket can be station-less. A pattern per row
-         on a table of a thousand of them is a thousand `defs`, and the rows
-         do not carry the flag: it is the drilldown that asks for this. -->
-    <ChartHatch v-if="stationLess" :id="hatchId"/>
+    <!-- Only where this row can actually draw a hatched cell. A pattern per row
+         on a table of a thousand of them is a thousand `defs`, so neither
+         surface pays for the other's: the drilldown carries the station-less
+         flag and no baseline, the station rows carry a baseline and no flag,
+         and a row with a baseline it can be judged against needs neither. -->
+    <ChartHatch v-if="stationLess || unjudged" :id="hatchId"/>
 
     <rect
         v-for="cell in cells"
@@ -20,7 +22,7 @@
         :width="cellWidth"
         :height="height - 2"
         :class="`cells__cell cells__cell--${cell.state}`"
-        :fill="cell.state === 'station-less' ? `url(#${hatchId})` : undefined"
+        :fill="hatched(cell) ? `url(#${hatchId})` : undefined"
     >
       <title>{{ cell.title }}</title>
     </rect>
@@ -113,6 +115,17 @@ const props = defineProps({
     type: Number,
     required: true
   },
+  /**
+   * How much of a whole bucket this centre normally hears this station in, or
+   * null where too little of its history is known to say. It is what the day
+   * grain judges a cell against -- the clock was, until #112 measured two
+   * thirds of every pale cell to be a station sitting at its own normal level.
+   * Null draws the row unjudged rather than guessing it.
+   */
+  baseline: {
+    type: Number,
+    default: null
+  },
   /** What to call the station in the label a screen reader is given. */
   name: {
     type: String,
@@ -142,13 +155,13 @@ const width = computed(() => props.cellWidth * props.buckets.length)
 // buckets were thin. The tooltip needs the ceiling as well as the state,
 // because it says the figures out loud: "heard in 4 of 24 hours".
 const against = computed(
-    () => rowCeilings(props.values, props.ceilings, props.buckets.length)
+    () => rowCeilings(props.values, props.ceilings, props.buckets.length, props.baseline)
 )
 
 const states = computed(() =>
-    presenceStates(props.values, props.ceilings, props.buckets.length).map(
-        (state, at) => (isStationLess(at) ? 'station-less' : state)
-    )
+    presenceStates(
+        props.values, props.ceilings, props.buckets.length, props.baseline
+    ).map((state, at) => (isStationLess(at) ? 'station-less' : state))
 )
 
 const cells = computed(() =>
@@ -159,7 +172,7 @@ const cells = computed(() =>
       title: presenceTitle(
           bucket,
           props.values[index] || 0,
-          against.value[index],
+          against.value?.[index],
           props.grain,
           isStationLess(index)
       ),
@@ -169,6 +182,25 @@ const cells = computed(() =>
 /** Whether the centre published in this bucket and named nobody in it. */
 function isStationLess(at) {
   return Boolean(props.stationLess?.[at])
+}
+
+/*
+ * Whether this row has no scale to be judged against at all.
+ *
+ * The hatch, on its second meaning and not a second mark. #51 fixed what the
+ * pattern says -- *no value on this axis* -- and a station nothing has been
+ * learned about has none: it was heard, and whether that is a lot for it is a
+ * question with no answer yet. The station-less cell is the same claim about a
+ * different axis, which is why one pattern serves both and why the legend
+ * names whichever of them its surface can draw.
+ */
+const unjudged = computed(
+    () => Boolean(props.ceilings) && props.baseline == null
+)
+
+/** Whether this cell is drawn as a pattern rather than a colour. */
+function hatched(cell) {
+  return cell.state === 'station-less' || cell.state === 'unjudged'
 }
 
 // Where the finished part of the window ends. An hourly axis never carries
@@ -219,6 +251,7 @@ const label = computed(() => {
 .cells__cell--thin {
   fill: var(--stat-thin);
 }
+
 
 .cells__cell--full {
   fill: var(--stat-live);

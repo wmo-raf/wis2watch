@@ -243,7 +243,9 @@ export function stationsImage({rows, buckets, ceilings, roles, lines, axis}) {
             x += column.width
         })
 
-        presenceStates(row.presence || [], ceilings, buckets.length)
+        presenceStates(
+            row.presence || [], ceilings, buckets.length, row.baseline_hours ?? null
+        )
             .forEach((state, column) => {
                 context.fillStyle = roles[state] || roles.empty
                 context.fillRect(left + column * cell, top + 2, cell - 0.5, ROW - 4)
@@ -258,7 +260,15 @@ export function stationsImage({rows, buckets, ceilings, roles, lines, axis}) {
 
     context.font = FONT_SMALL
 
-    ;[['full', 'Heard'], ['thin', 'Heard thinly'], ['silent', 'Silent']]
+    // Every state the picture can contain, named. A legend that lists three
+    // colours over a picture drawn in four is the same lie as a filtered
+    // export that does not say it was filtered.
+    ;[
+        ['full', 'Heard'],
+        ['thin', 'Heard thinly'],
+        ['silent', 'Silent'],
+        ['unjudged', 'Not enough history to judge'],
+    ]
         .forEach(([state, word]) => {
             context.fillStyle = roles[state]
             context.fillRect(x, y - 5, 16, 10)

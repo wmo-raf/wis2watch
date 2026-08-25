@@ -43,6 +43,17 @@ const props = defineProps({
     type: Boolean,
     default: false
   },
+  /**
+   * Whether any row on this surface is drawn unjudged -- heard, with too
+   * little history behind it to say whether that is usual. The same rule as
+   * `stationLess` above and for the same reason: named only where a reader can
+   * actually find one. The two share the hatch and never share a surface, so
+   * the legend can hold at most one of them.
+   */
+  unjudged: {
+    type: Boolean,
+    default: false
+  },
 })
 
 const words = computed(() => grainOf(props.grain))
@@ -53,6 +64,10 @@ const states = computed(() => {
     {key: 'thin', label: words.value.legend.thin},
     {key: 'silent', label: 'Silent — nothing heard at all'},
   ]
+
+  if (props.unjudged && words.value.legend.unjudged) {
+    return [...three, {key: 'unjudged', label: words.value.legend.unjudged}]
+  }
 
   if (!props.stationLess) {
     return three
@@ -113,6 +128,7 @@ function sentence(clause) {
    with, so the legend follows the theme along with the cells it explains. A
    gradient rather than the pattern itself, because a `<defs>` cannot be
    referenced from a CSS background. */
+.legend__swatch--unjudged,
 .legend__swatch--station-less {
   background: repeating-linear-gradient(
       45deg,
