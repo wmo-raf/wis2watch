@@ -151,13 +151,27 @@ The bundles are committed, so a frontend change is not finished until you have
 run `make frontend-build` and committed the result. See
 `docs/adr/0001-vue-islands-in-wagtail-admin-pages.md`.
 
+What the islands do to data -- reading the ingest feed's status payload,
+working out how a centre is being watched, formatting a popup -- is tested
+with vitest, in files sitting beside the module they cover:
+
+```bash
+make frontend-test
+```
+
+There is nothing here that renders a component. What broke the monitoring map
+was arithmetic on the wrong key, not markup, so the seam these tests are
+written at is the plain module: a composable or a helper, called directly. A
+component that holds no logic of its own needs no test, and one that does is
+better off handing the logic to a module beside it.
+
 ## Tests
 
 Django's own runner, inside the web container, against a throwaway copy of the
 real database:
 
 ```bash
-make test                                        # all 1242 of them, about 90s
+make test                                        # all 1373 of them, about 2 minutes
 make test T=wis2watch.core.tests.test_silence    # one module
 make test T=wis2watch.ingest                     # one app
 ```

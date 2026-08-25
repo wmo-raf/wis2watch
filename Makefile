@@ -91,6 +91,10 @@ frontend: $(FRONTEND_DIR)/node_modules ## Run the Vite dev server on :5173, with
 frontend-build: $(FRONTEND_DIR)/node_modules ## Build the Vue bundles -- commit the result
 	cd $(FRONTEND_DIR) && npm run build
 
+.PHONY: frontend-test
+frontend-test: $(FRONTEND_DIR)/node_modules ## Run the island unit tests (vitest)
+	cd $(FRONTEND_DIR) && npm test
+
 .PHONY: frontend-install
 frontend-install: ## Reinstall the frontend dependencies from the lockfile
 	cd $(FRONTEND_DIR) && npm ci

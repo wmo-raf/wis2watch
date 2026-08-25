@@ -11,7 +11,7 @@
             width: 100%;
         }
 
-        #mqtt-monitor-map {
+        #ingest-monitor-map {
             width: 100%;
             height: 100%;
         }
@@ -19,13 +19,13 @@
 {% endblock %}
 
 {% block content %}
-    <div id="mqtt-monitor-map"
-         data-nodes-api-url="{{ nodes_api_url }}"
+    <div id="ingest-monitor-map"
+         data-nodes-api-url="{% url 'nodes_api' %}"
     >
     </div>
 {% endblock %}
 
 {% block extra_js %}
     {{ block.super }}
-    <script type="module" crossorigin src="{% vue_bundle_url 'mqtt-monitor-map' %}"></script>
+    <script type="module" crossorigin src="{% vue_bundle_url 'ingest-monitor-map' %}"></script>
 {% endblock %}

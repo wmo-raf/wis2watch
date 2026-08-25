@@ -1,126 +1,163 @@
 import {computed, ref} from 'vue'
 
+import {worstReachability} from '@/reachability.js'
+
+/**
+ * The centres the map draws, and the state of the connections watching them.
+ *
+ * Two different things arrive here, and they are not the same shape. The
+ * centre listing is one row per publishing centre, and a centre is what gets
+ * a marker. The ingest feed reports one row per *message source* -- the
+ * broker connections the supervisor holds open -- and a connection is not a
+ * centre: a single Global Broker carries the whole world's traffic and stands
+ * over no country at all.
+ *
+ * So the two are joined on the centre a source names, which for a centre's
+ * own broker is the node it belongs to, and for a Global Broker is the
+ * broker's own centre, matching nothing on the map. That is the only field
+ * the two payloads have in common that means the same thing in both. Joining
+ * on a database id instead lines rows up by coincidence -- which is how the
+ * map came to render every centre as not connected while saying nothing was
+ * wrong.
+ */
 export function useMapNodes() {
     const allNodes = ref([])
-    const monitoredNodes = ref({})
-    const nodesByCountry = ref({})
-    const countryCoordinates = ref({})
-    const selectedNodeId = ref(null)
+    const connections = ref([])
+    const selectedCentreId = ref(null)
     const currentFilter = ref('all')
 
-    const stats = computed(() => ({
-        totalNodes: allNodes.value.length,
-        connectedNodes: Object.values(monitoredNodes.value).filter(n => n.is_connected).length,
-        disconnectedNodes: Object.values(monitoredNodes.value).filter(n => !n.is_connected).length,
-        inactiveNodes: allNodes.value.length - Object.keys(monitoredNodes.value).length
-    }))
+    /** The connections that name a centre, gathered under it.
+     *
+     *  A Global Broker names a centre of its own -- its operator's -- which
+     *  no node on the map publishes under, so it gathers under a key nothing
+     *  ever looks up. That is correct rather than unfortunate: the Global
+     *  Broker is not the centre it is being read for.
+     */
+    const connectionsByCentre = computed(() => {
+        const gathered = {}
 
-    const filteredNodes = computed(() => {
-        return allNodes.value
-            .map(node => {
-                // Merge node data with monitoring status
-                const monitored = monitoredNodes.value[node.id]
-                return {
-                    ...node,
-                    ...monitored,
-                    is_monitored: !!monitored
-                }
-            })
-            .filter(node => {
-                switch (currentFilter.value) {
-                    case 'connected':
-                        return node.is_monitored && node.is_connected
-                    case 'disconnected':
-                        return node.is_monitored && !node.is_connected
-                    case 'inactive':
-                        return !node.is_monitored
-                    default:
-                        return true
-                }
-            })
-    })
-
-    const fetchNodes = async () => {
-        try {
-            const response = await fetch('/api/mqtt-nodes/')
-            allNodes.value = await response.json()
-            processNodes()
-        } catch (error) {
-            console.error('Error fetching nodes:', error)
-        }
-    }
-
-    const updateMonitoredNodes = (statusData) => {
-        monitoredNodes.value = {}
-        if (statusData) {
-            const clients = Object.values(statusData)
-            clients.forEach(client => {
-                monitoredNodes.value[client.node_id] = client
-            })
-        }
-
-        processNodes()
-    }
-
-    const processNodes = () => {
-        nodesByCountry.value = {}
-        countryCoordinates.value = {}
-
-        allNodes.value.forEach(node => {
-            const monitored = monitoredNodes.value[node.id]
-            const nodeInfo = {
-                ...node,
-                ...monitored,
-                is_monitored: !!monitored
+        connections.value.forEach((connection) => {
+            if (!connection.centre_id) {
+                return
             }
 
-            // Store country center point
-            if (node.center_point && !countryCoordinates.value[node.country_code]) {
-                countryCoordinates.value[node.country_code] = node.center_point
-            }
-
-            // Group by country
-            if (!nodesByCountry.value[node.country_code]) {
-                nodesByCountry.value[node.country_code] = []
-            }
-            nodesByCountry.value[node.country_code].push(nodeInfo)
+            gathered[connection.centre_id] = gathered[connection.centre_id] || []
+            gathered[connection.centre_id].push(connection)
         })
 
+        return gathered
+    })
+
+    /** Every centre, carrying the connections that watch it. */
+    const centres = computed(() =>
+        allNodes.value.map((node) => {
+            const own = connectionsByCentre.value[node.centre_id] || []
+
+            return {
+                ...node,
+                connections: own,
+                reachability: worstReachability(own),
+            }
+        })
+    )
+
+    const filteredCentres = computed(() => {
+        if (currentFilter.value === 'all') {
+            return centres.value
+        }
+
+        return centres.value.filter(centre => centre.reachability === currentFilter.value)
+    })
+
+    /** The centres a marker is drawn for, gathered under the country they
+     *  are placed in. Follows the filter, so that narrowing the listing
+     *  narrows the map with it rather than leaving the two disagreeing. */
+    const centresByCountry = computed(() => {
+        const gathered = {}
+
+        filteredCentres.value.forEach((centre) => {
+            gathered[centre.country_code] = gathered[centre.country_code] || []
+            gathered[centre.country_code].push(centre)
+        })
+
+        return gathered
+    })
+
+    /** Where each country's markers go. One point per country: a centre is
+     *  placed by the country it publishes for, not by an address of its own. */
+    const countryCoordinates = computed(() => {
+        const points = {}
+
+        filteredCentres.value.forEach((centre) => {
+            if (centre.center_point && !points[centre.country_code]) {
+                points[centre.country_code] = centre.center_point
+            }
+        })
+
+        return points
+    })
+
+    const stats = computed(() => ({
+        totalCentres: centres.value.length,
+        totalConnections: connections.value.length,
+        reachableConnections: connections.value.filter(c => c.is_reachable === true).length,
+        unreachableConnections: connections.value.filter(c => c.is_reachable === false).length,
+    }))
+
+    /**
+     * Read the feed's status payload, which is keyed by message source id.
+     *
+     * The ids are thrown away here. They key the payload so that a later
+     * update can replace one entry, which this does not do -- every status
+     * message is the whole picture -- and keeping them would invite a lookup
+     * by a number that means nothing anywhere else on this page.
+     */
+    const updateConnections = (statusData) => {
+        connections.value = statusData ? Object.values(statusData) : []
     }
 
-    const getNodeInfo = (nodeId) => {
-        const node = allNodes.value.find(n => n.id === nodeId)
-        if (!node) return null
-
-        const monitored = monitoredNodes.value[nodeId]
-        return {
-            ...node,
-            ...monitored,
-            is_monitored: !!monitored
+    /**
+     * Load the centre listing.
+     *
+     * The address is handed in rather than assembled here, because a path
+     * spelled out inside a built bundle is a path nobody can rename from the
+     * Django side.
+     */
+    const fetchNodes = async (nodesApiUrl) => {
+        try {
+            const response = await fetch(nodesApiUrl)
+            allNodes.value = await response.json()
+        } catch (error) {
+            console.error('Error fetching centres:', error)
         }
     }
+
+    /** One centre in full, by the centre id a message or a marker names. */
+    const centreInfo = (centreId) =>
+        centres.value.find(centre => centre.centre_id === centreId) || null
 
     const setFilter = (filter) => {
         currentFilter.value = filter
     }
 
-    const selectNode = (nodeId) => {
-        selectedNodeId.value = nodeId
+    const selectCentre = (centreId) => {
+        selectedCentreId.value = centreId
     }
 
     return {
         allNodes,
-        monitoredNodes,
-        nodesByCountry,
+        connections,
+        centres,
+        centresByCountry,
         countryCoordinates,
-        selectedNodeId,
+        selectedCentreId,
         currentFilter,
         stats,
-        filteredNodes,
+        filteredCentres,
         fetchNodes,
-        updateMonitoredNodes,
-        getNodeInfo,
+        updateConnections,
+        centreInfo,
         setFilter,
-        selectNode
+        selectCentre,
     }
 }
