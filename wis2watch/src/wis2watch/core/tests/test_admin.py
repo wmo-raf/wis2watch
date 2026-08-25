@@ -44,11 +44,30 @@ class AdminSmokeTests(TestCase):
         self.assertEqual(response.status_code, 200)
 
     def test_the_monitoring_map_loads(self):
-        """The map renders a template and reverses the nodes API to feed it."""
         response = self.client.get(reverse("ingest_map"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertIn("mqtt-nodes", response.context["nodes_api_url"])
+
+    def test_the_map_is_handed_the_listing_it_reads_as_a_path_of_its_own_site(self):
+        """Reversed here, and relative on purpose.
+
+        The island fetches it from the page it is mounted in, so a full URL
+        would send the browser to whichever address this deployment calls
+        itself by -- a different origin from the one the reader is signed in
+        to, in any deployment where those differ.
+        """
+        response = self.client.get(reverse("ingest_map"))
+
+        self.assertContains(response, f'data-nodes-api-url="{reverse("nodes_api")}"')
+
+    def test_nothing_the_map_is_handed_still_says_mqtt(self):
+        """MQTT is one transport a vantage point may use, not what this watches.
+
+        The paths outlived the app that named them because the built bundle
+        asked for them by name. Rebuilding it is what let them go, and this
+        is what stops them coming back.
+        """
+        self.assertNotContains(self.client.get(reverse("ingest_map")), "mqtt")
 
     def test_the_configuration_listings_load(self):
         for viewset in (WIS2NodeViewSet(), MessageSourceViewSet(), GlobalDiscoveryCatalogueViewSet()):
@@ -876,7 +895,7 @@ class NodeStatisticsViewTests(TestCase):
         response = self.page()
 
         self.assertContains(response, "node-statistics.js")
-        self.assertNotContains(response, "mqtt-monitor-map.js")
+        self.assertNotContains(response, "ingest-monitor-map.js")
 
     def test_the_open_view_is_the_one_the_tab_strip_marks(self):
         response = self.page()

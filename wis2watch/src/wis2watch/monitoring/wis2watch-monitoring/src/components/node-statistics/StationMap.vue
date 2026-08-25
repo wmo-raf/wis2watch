@@ -103,7 +103,7 @@
  * re-set when what is drawn actually differs, so that is a property of the
  * map rather than a hope about re-renders.
  *
- * **A GeoJSON source rather than the DOM markers `MQTTMap.vue` uses**, and
+ * **A GeoJSON source rather than the DOM markers `IngestMap.vue` uses**, and
  * this is why the two maps are not one component. What they genuinely share
  * is the basemap helper and nothing else. A DOM marker is a fixed pixel size
  * at every zoom and paints in DOM order, so a thousand of them at country
@@ -134,6 +134,7 @@ import maplibregl from 'maplibre-gl'
 import Message from 'primevue/message'
 
 import {createBaseMap} from '@/basemap.js'
+import {escapeHtml} from '@/escape-html.js'
 import {displayName, formatCount, formatInstant, formatQuiet} from './charts/plot.js'
 import {boundsOf, stationFeatures, unplottable} from './geography.js'
 import {pickedStationId} from './selection.js'
@@ -585,19 +586,10 @@ function choose(station) {
   emit('choose', {station})
 }
 
-/**
- * A station's own text, as text.
- *
- * Names and ids come out of a registry and out of observed traffic, and this
- * is the one place on the tab that builds markup from them rather than
- * binding it -- MapLibre's popup takes HTML.
- */
-function asText(value) {
-  const held = document.createElement('span')
-  held.textContent = value ?? ''
-
-  return held.innerHTML
-}
+// A station's own text, as text. Names and ids come out of a registry and
+// out of observed traffic, and the popup below is the one place on this tab
+// that builds markup from them rather than binding it.
+const asText = escapeHtml
 
 /** Say on the page what MapLibre would only have said to the console. */
 function report(thrown) {

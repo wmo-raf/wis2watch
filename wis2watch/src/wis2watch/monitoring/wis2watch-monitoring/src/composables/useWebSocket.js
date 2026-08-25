@@ -1,15 +1,20 @@
 import {onMounted, onUnmounted, ref} from 'vue'
 
 /**
- * WebSocket composable for WIS2Watch MQTT monitoring
- * Connects to Django Channels WebSocket endpoint and handles real-time updates
+ * The ingest feed, as a connection that comes back.
  *
- * Backend message types:
- * - 'status': Initial status or status updates from backend
- * - 'status_update': Real-time status updates broadcast to group
- * - 'message': Message received notification from MQTT broker
- * - 'action_result': Result of start/stop/restart actions
- * - 'error': Error messages from backend
+ * The feed is read-only: it says what the ingestion process is seeing, and
+ * there is nothing on it to start or stop. A broker is connected because it
+ * is in the registry, and the way to change that is to change the registry.
+ * The one thing this end may say is `{action: 'get_status'}`, which asks for
+ * the state of the connections again.
+ *
+ * What arrives:
+ * - 'status'        the state of every broker connection, keyed by source id
+ * - 'status_update' the same, pushed rather than asked for
+ * - 'message'       a message the ingest just stored: {centre_id, topic,
+ *                   timestamp, geometry}
+ * - 'error'         something this end asked for that the feed will not do
  */
 export function useWebSocket() {
     const ws = ref(null)
@@ -36,7 +41,7 @@ export function useWebSocket() {
     const connect = () => {
         // Construct WebSocket URL based on current protocol and host
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-        const wsUrl = `${protocol}//${window.location.host}/ws/mqtt-status/`
+        const wsUrl = `${protocol}//${window.location.host}/ws/ingest-feed/`
 
         console.log(`🔌 Connecting to WebSocket: ${wsUrl}`)
         connectionStatus.value = 'connecting'
@@ -119,11 +124,8 @@ export function useWebSocket() {
      * Send a message through the WebSocket
      * @param {Object} data - Message data to send
      *
-     * Supported actions:
-     * - {action: 'start', node_id: number} - Start monitoring a node
-     * - {action: 'stop', node_id: number} - Stop monitoring a node
-     * - {action: 'restart', node_id: number} - Restart monitoring a node
-     * - {action: 'get_status'} - Request current status update
+     * The feed answers one thing: `{action: 'get_status'}`, for the state of
+     * the broker connections. Anything else comes back as an error.
      */
     const sendMessage = (data) => {
         if (ws.value && isConnected.value) {
@@ -144,21 +146,15 @@ export function useWebSocket() {
      * @param {Function} handler - Function to handle incoming messages
      *
      * Handler receives messages with the following types:
-     * - type: 'status' - Initial or requested status
-     *   data: {node_id: {node_id, status, last_update, error}}
+     * - type: 'status' / 'status_update' - the state of every broker
+     *   connection, keyed by message source id
+     *   data: {source_id: {source_id, name, source_type, centre_id,
+     *          is_reachable, last_connected_at, last_error}}
      *
-     * - type: 'status_update' - Real-time status change
-     *   data: {node_id, status, last_update, error}
+     * - type: 'message' - a message the ingest just stored
+     *   data: {centre_id, topic, timestamp, geometry}
      *
-     * - type: 'message' - MQTT message received
-     *   data: {node_id, topic, timestamp}
-     *
-     * - type: 'action_result' - Result of action request
-     *   action: 'start'|'stop'|'restart'
-     *   node_id: number
-     *   status: 'queued'
-     *
-     * - type: 'error' - Error from backend
+     * - type: 'error' - the feed refusing what this end asked for
      *   error: string
      */
     const onMessage = (handler) => {

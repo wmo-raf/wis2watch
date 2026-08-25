@@ -4,7 +4,7 @@
       <div class="w2w-sidebar-content">
         <div class="w2w-sidebar-header">
           <div class="header-top">
-            <h2>WIS2 Nodes Monitoring</h2>
+            <h2>WIS2 Ingest Monitoring</h2>
             <Button
                 :icon="isCollapsed ? 'pi pi-chevron-right' : 'pi pi-chevron-left'"
                 text
@@ -26,12 +26,15 @@
           </div>
         </div>
 
+        <ConnectionList :connections="connections"/>
+
         <div class="filter-controls">
           <SelectButton
               v-model="selectedFilter"
               :options="filters"
               optionLabel="label"
               optionValue="value"
+              :allowEmpty="false"
               @change="$emit('filter-change', selectedFilter)"
           />
         </div>
@@ -40,39 +43,41 @@
 
         <div class="node-list">
           <Card
-              v-for="node in nodes"
-              :key="node.id"
+              v-for="centre in centres"
+              :key="centre.centre_id"
               class="node-card"
-              :class="{
-              selected: node.id === selectedNodeId,
-              active: node.is_monitored && node.is_connected
-            }"
-              @click="$emit('node-select', node.id)"
+              :class="{ selected: centre.centre_id === selectedCentreId }"
+              @click="$emit('centre-select', centre.centre_id)"
           >
             <template #content>
               <div class="node-header">
                 <Badge
-                    :severity="getNodeSeverity(node)"
-                    :value="node.is_monitored ? node.state : 'inactive'"
+                    :severity="REACHABILITY[centre.reachability].severity"
+                    :value="REACHABILITY[centre.reachability].label"
                 />
                 <div class="node-info">
                   <div class="node-name">
                     <i class="pi pi-server"></i>
-                    {{ node.name }}
+                    {{ centre.name }}
                   </div>
                   <div class="node-country">
                     <i class="pi pi-globe"></i>
-                    {{ node.country }}
+                    {{ centre.country }}
+                    <span class="node-centre-id">{{ centre.centre_id }}</span>
                   </div>
                 </div>
               </div>
 
-              <div v-if="node.is_monitored" class="node-stats">
-                <Chip :label="`${node.message_count || 0} messages`" icon="pi pi-envelope"/>
-                <Chip :label="`${node.subscription_count} subs`" icon="pi pi-rss"/>
+              <div v-if="centre.connections.length" class="node-stats">
+                <Chip
+                    v-for="connection in centre.connections"
+                    :key="connection.source_id"
+                    :label="`${sourceTypeLabel(connection)} · ${formatRelativeTime(connection.last_connected_at)}`"
+                    icon="pi pi-link"
+                />
               </div>
-              <div v-else>
-                <Tag severity="secondary" value="Not monitored"/>
+              <div v-else class="node-note">
+                {{ REACHABILITY[centre.reachability].note }}
               </div>
             </template>
           </Card>
@@ -97,12 +102,19 @@ import Card from 'primevue/card'
 import SelectButton from 'primevue/selectbutton'
 import Badge from 'primevue/badge'
 import Chip from 'primevue/chip'
-import Tag from 'primevue/tag'
 import Button from 'primevue/button'
 import Divider from 'primevue/divider'
 
+import ConnectionList from './ConnectionList.vue'
+import {formatRelativeTime} from './relative-time.js'
+import {REACHABILITY, REACHABLE, UNDIALLED, UNREACHABLE, sourceTypeLabel} from '@/reachability.js'
+
 const props = defineProps({
-  nodes: {
+  centres: {
+    type: Array,
+    required: true
+  },
+  connections: {
     type: Array,
     required: true
   },
@@ -114,37 +126,37 @@ const props = defineProps({
     type: String,
     default: 'all'
   },
-  selectedNodeId: {
-    type: Number,
+  selectedCentreId: {
+    type: String,
     default: null
   }
 })
 
-defineEmits(['filter-change', 'node-select'])
+defineEmits(['filter-change', 'centre-select'])
 
 const isCollapsed = ref(false)
 const selectedFilter = ref(props.currentFilter)
 
+// Three of the four states a centre can be in, plus everything. The fourth,
+// "not yet asked", is a state a broker passes through in the minutes after a
+// catalogue sync advertises it, and a button of its own for it would sit at
+// nought all day; All is where it is found.
 const filters = [
   {value: 'all', label: 'All'},
-  {value: 'connected', label: 'Connected'},
-  {value: 'disconnected', label: 'Disconnected'},
-  {value: 'inactive', label: 'Inactive'}
+  {value: REACHABLE, label: REACHABILITY[REACHABLE].label},
+  {value: UNREACHABLE, label: REACHABILITY[UNREACHABLE].label},
+  {value: UNDIALLED, label: REACHABILITY[UNDIALLED].label},
 ]
 
+// Centres and connections are counted separately on purpose: they are not
+// the same population. One Global Broker connection can be the whole reason
+// a hundred centres are being seen at all.
 const statsData = computed(() => [
-  {label: 'Total Nodes', value: props.stats.totalNodes, color: 'var(--p-amber-500)'},
-  {label: 'Connected', value: props.stats.connectedNodes, color: 'var(--p-green-500)'},
-  {label: 'Disconnected', value: props.stats.disconnectedNodes, color: 'var(--p-red-500)'},
-  {label: 'Inactive', value: props.stats.inactiveNodes, color: 'var(--p-gray-500)'},
+  {label: 'Centres', value: props.stats.totalCentres, color: 'var(--p-amber-500)'},
+  {label: 'Connections', value: props.stats.totalConnections, color: 'var(--p-blue-500)'},
+  {label: 'Reachable', value: props.stats.reachableConnections, color: REACHABILITY[REACHABLE].colour},
+  {label: 'Unreachable', value: props.stats.unreachableConnections, color: REACHABILITY[UNREACHABLE].colour},
 ])
-
-const getNodeSeverity = (node) => {
-  if (!node.is_monitored) return 'secondary'
-  if (node.is_connected) return 'success'
-  if (node.state === 'connecting') return 'warning'
-  return 'danger'
-}
 
 const toggleSidebar = () => {
   isCollapsed.value = !isCollapsed.value
@@ -258,9 +270,18 @@ const toggleSidebar = () => {
   width: 100%;
 }
 
-.filter-controls :deep(.p-button) {
-  flex: 1;
+/* PrimeVue 4 builds a SelectButton out of ToggleButtons, so `.p-button` --
+   which is what this rule named until the strip grew a two-word label and
+   the wrap gave it away -- reaches nothing here. */
+.filter-controls :deep(.p-togglebutton) {
   font-size: 0.75rem;
+  padding: 0.5rem;
+}
+
+/* Four labels across 380px, one of them two words. Without this the longest
+   wraps and the strip grows a second line. */
+.filter-controls :deep(.p-togglebutton-label) {
+  white-space: nowrap;
 }
 
 .node-list {
@@ -282,11 +303,6 @@ const toggleSidebar = () => {
 .node-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-}
-
-.node-card.active {
-  border-color: var(--p-green-500);
-  background: var(--p-green-50);
 }
 
 .node-card.selected {
@@ -330,6 +346,17 @@ const toggleSidebar = () => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+}
+
+.node-centre-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.node-note {
+  font-size: 0.8rem;
+  color: var(--text-color-secondary);
 }
 
 .node-stats {

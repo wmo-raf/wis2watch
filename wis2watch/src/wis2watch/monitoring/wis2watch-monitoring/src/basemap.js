@@ -5,7 +5,7 @@
  * the second caller this shape was measured against.
  *
  * This is deliberately *not* a base map component. #50 extracted a shared map
- * from `MQTTMap.vue` and found that what survives extraction is about thirty
+ * from the ingest monitor's map and found that what survives extraction is about thirty
  * lines -- the style, the view, the controls, and the promise every
  * layer-adding caller needs and every caller gets wrong the first time. What
  * does not survive is everything a map does after that: markers, popups,

@@ -6,10 +6,10 @@
       <template #content>
         <div class="status-content">
           <Badge
-              :severity="statusSeverity"
-              :value="statusText"
+              :severity="feedStatus.severity"
+              :value="feedStatus.text"
           >
-            <i :class="statusIcon"></i>
+            <i :class="feedStatus.icon"></i>
           </Badge>
         </div>
       </template>
@@ -19,7 +19,7 @@
       <template #header>
         <div class="legend-title">
           <i class="pi pi-info-circle"></i>
-          Node Status
+          How each centre is watched
         </div>
       </template>
       <template #content>
@@ -49,9 +49,11 @@ import Badge from 'primevue/badge'
 import Message from 'primevue/message'
 
 import {createBaseMap} from '@/basemap.js'
+import {centrePopupHTML} from './popup-html.js'
+import {REACHABILITY, REACHABILITY_ORDER} from '@/reachability.js'
 
 const props = defineProps({
-  nodesByCountry: {
+  centresByCountry: {
     type: Object,
     required: true
   },
@@ -63,65 +65,49 @@ const props = defineProps({
     type: String,
     default: 'disconnected'
   },
-  selectedNodeId: {
-    type: Number,
+  selectedCentreId: {
+    type: String,
     default: null
   }
 })
 
-const emit = defineEmits(['node-click'])
+const emit = defineEmits(['centre-click'])
 
 const mapContainer = ref(null)
 const map = ref(null)
+
+// Keyed on the centre ID rather than on a database id, because that is what
+// arrives with a message: the feed says which centre published, and this is
+// the marker that has to pulse for it.
 const markers = ref({})
+
+// A popup is a snapshot: maplibre puts it in the DOM and Vue never touches
+// it again. Held on to so that it can be closed when the markers are rebuilt
+// -- otherwise a broker that drops leaves a popup saying "Reachable" hanging
+// over the marker that has just gone red.
+const openPopup = ref(null)
+
 const showNotification = ref(false)
 const notificationMessage = ref('')
 
-const legendItems = [
-  {label: 'Connected', severity: 'success'},
-  {label: 'Connecting', severity: 'warning'},
-  {label: 'Disconnected', severity: 'danger'},
-  {label: 'Not Monitored', severity: 'secondary'}
-]
+const legendItems = REACHABILITY_ORDER.map(state => ({
+  label: REACHABILITY[state].label,
+  severity: REACHABILITY[state].severity,
+}))
 
-const statusSeverity = computed(() => {
-  switch (props.connectionStatus) {
-    case 'connected':
-      return 'success'
-    case 'disconnected':
-      return 'danger'
-    case 'error':
-      return 'danger'
-    default:
-      return 'warning'
-  }
-})
+// How the feed's own connection is shown. One row per state rather than
+// three parallel switches over the same value, which is how a state comes to
+// be handled in two of them and forgotten in the third.
+const FEED_STATUS = {
+  connected: {severity: 'success', icon: 'pi pi-check-circle', text: 'Feed connected'},
+  disconnected: {severity: 'danger', icon: 'pi pi-times-circle', text: 'Feed disconnected'},
+  error: {severity: 'danger', icon: 'pi pi-exclamation-circle', text: 'Feed error'},
+}
 
-const statusIcon = computed(() => {
-  switch (props.connectionStatus) {
-    case 'connected':
-      return 'pi pi-check-circle'
-    case 'disconnected':
-      return 'pi pi-times-circle'
-    case 'error':
-      return 'pi pi-exclamation-circle'
-    default:
-      return 'pi pi-spinner pi-spin'
-  }
-})
+// `connecting`, and anything a reconnect leaves it in on the way there.
+const CONNECTING = {severity: 'warn', icon: 'pi pi-spinner pi-spin', text: 'Connecting...'}
 
-const statusText = computed(() => {
-  switch (props.connectionStatus) {
-    case 'connected':
-      return 'Connected'
-    case 'disconnected':
-      return 'Disconnected'
-    case 'error':
-      return 'Error'
-    default:
-      return 'Connecting...'
-  }
-})
+const feedStatus = computed(() => FEED_STATUS[props.connectionStatus] || CONNECTING)
 
 let teardownMap = null
 
@@ -134,16 +120,33 @@ onBeforeUnmount(() => {
   teardownMap = null
 })
 
-watch(() => props.nodesByCountry, (newVal) => {
+/**
+ * What the markers are actually drawn from: where each one goes and what
+ * colour it is.
+ *
+ * Watched instead of the centres themselves because the status is asked for
+ * again every half minute, and each answer is a fresh array however little
+ * has changed in it. Watching that deeply rebuilt every marker on the clock,
+ * which closed whatever popup the reader had open -- twice a minute, for
+ * nothing.
+ */
+const markerSignature = computed(() =>
+    Object.entries(props.centresByCountry)
+        .map(([countryCode, centres]) => [
+          countryCode,
+          (props.countryCoordinates[countryCode] || []).join(','),
+          centres.map(centre => `${centre.centre_id}=${centre.reachability}`).join('|'),
+        ].join(':'))
+        .join(';')
+)
+
+watch(markerSignature, () => {
   updateMarkers()
-}, {deep: true})
+})
 
-watch(() => props.countryCoordinates, (newVal) => {
-}, {deep: true})
-
-watch(() => props.selectedNodeId, (nodeId) => {
-  if (nodeId && markers.value[nodeId]) {
-    flyToNode(nodeId)
+watch(() => props.selectedCentreId, (centreId) => {
+  if (centreId && markers.value[centreId]) {
+    flyToCentre(centreId)
   }
 })
 
@@ -161,20 +164,23 @@ const initMap = () => {
   teardownMap = destroy
 
   ready.then(() => {
-    console.log('🗺️ Map loaded')
     updateMarkers()
   })
 }
 
 const updateMarkers = () => {
-  // Clear existing markers
+  openPopup.value?.remove()
+  openPopup.value = null
+
   Object.values(markers.value).forEach(({marker}) => {
     marker.remove()
   })
   markers.value = {}
 
-  // Create markers for each node at its country's center
-  Object.entries(props.nodesByCountry).forEach(([countryCode, nodes]) => {
+  // One marker per centre, placed at the centre of the country it publishes
+  // for. Several centres in one country therefore sit on the same point --
+  // which is what the sidebar listing is for.
+  Object.entries(props.centresByCountry).forEach(([countryCode, centres]) => {
     const centerPoint = props.countryCoordinates[countryCode]
 
     if (!centerPoint) {
@@ -182,14 +188,13 @@ const updateMarkers = () => {
       return
     }
 
-    // Create a marker for each node at the country center
-    nodes.forEach((node) => {
-      createMarker(node, centerPoint)
+    centres.forEach((centre) => {
+      createMarker(centre, centerPoint)
     })
   })
 }
 
-const createMarker = (node, coords) => {
+const createMarker = (centre, coords) => {
   const el = document.createElement('div')
   el.className = 'marker'
 
@@ -200,9 +205,7 @@ const createMarker = (node, coords) => {
   el.style.border = '3px solid white'
   el.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.3)'
   el.style.cursor = 'pointer'
-
-  // Don't add inline styles that will conflict with CSS
-  updateMarkerStyle(el, node)
+  el.style.backgroundColor = REACHABILITY[centre.reachability].colour
 
   const marker = new maplibregl.Marker({
     element: el,
@@ -211,140 +214,41 @@ const createMarker = (node, coords) => {
       .setLngLat(coords)
       .addTo(map.value)
 
-  // Click handler
   el.addEventListener('click', (e) => {
     e.stopPropagation()
-    showPopup(node, coords)
-    emit('node-click', node.id)
+    showPopup(centre, coords)
+    emit('centre-click', centre.centre_id)
   })
 
-  markers.value[node.id] = {marker, element: el, coords}
+  markers.value[centre.centre_id] = {marker, element: el, coords}
 }
 
-const updateMarkerStyle = (element, node) => {
-  let color
-  if (!node.is_monitored) {
-    color = '#9ca3af' // gray
-  } else if (node.is_connected) {
-    color = '#22c55e' // green
-  } else if (node.state === 'connecting') {
-    color = '#eab308' // yellow
-  } else {
-    color = '#ef4444' // red
-  }
+const showPopup = (centre, coords) => {
+  openPopup.value?.remove()
 
-  element.style.backgroundColor = color
-}
-
-const showPopup = (node, coords) => {
-  const isMonitored = node.is_monitored
-  const isConnected = node.is_connected
-
-  const severityClass = isMonitored
-      ? isConnected
-          ? 'success'
-          : 'danger'
-      : 'secondary'
-
-  // Format last message time
-  let lastMessageHTML = ''
-  if (isMonitored && node.last_message_time) {
-    const relativeTime = formatRelativeTime(node.last_message_time)
-    lastMessageHTML = `
-      <div class="info-row">
-        <i class="pi pi-clock"></i>
-        <label>Last Message:</label>
-        <span class="p-badge p-badge-info">${relativeTime}</span>
-      </div>
-    `
-  } else if (isMonitored) {
-    lastMessageHTML = `
-      <div class="info-row">
-        <i class="pi pi-clock"></i>
-        <label>Last Message:</label>
-        <span class="p-badge p-badge-secondary">No messages yet</span>
-      </div>
-    `
-  }
-
-  // Link to node base URL
-  const nodeUrlHTML = node.base_url ? `
-    <div class="popup-actions">
-      <a href="${node.base_url}" target="_blank" rel="noopener noreferrer" class="p-button p-button-outlined p-button-sm">
-        <i class="pi pi-external-link"></i>
-        <span>Visit Node</span>
-      </a>
-    </div>
-  ` : ''
-
-  const popup = new maplibregl.Popup({closeButton: true, className: 'prime-popup'})
+  openPopup.value = new maplibregl.Popup({closeButton: true, className: 'prime-popup'})
       .setLngLat(coords)
-      .setHTML(
-          `
-      <div class="p-card">
-        <div class="popup-header">
-          <span class="p-badge p-badge-${severityClass}">${isMonitored ? node.state : 'inactive'}</span>
-          <h3>${node.name}</h3>
-        </div>
-
-        <div class="popup-body">
-          <div class="info-row">
-            <i class="pi pi-globe"></i>
-            <label>Country:</label>
-            <span>${node.country}</span>
-          </div>
-          <div class="info-row">
-            <i class="pi pi-id-card"></i>
-            <label>Centre ID:</label>
-            <span>${node.centre_id || 'N/A'}</span>
-          </div>
-          ${
-              isMonitored
-                  ? `
-            <div class="info-row">
-              <i class="pi pi-info-circle"></i>
-              <label>Status:</label>
-              <span class="p-badge p-badge-${severityClass}">${node.state}</span>
-            </div>
-            <div class="info-row">
-              <i class="pi pi-envelope"></i>
-              <label>Messages:</label>
-              <span class="p-chip p-chip-sm">${node.message_count || 0}</span>
-            </div>
-            <div class="info-row">
-              <i class="pi pi-rss"></i>
-              <label>Subscriptions:</label>
-              <span class="p-chip p-chip-sm">${node.subscription_count || 0}</span>
-            </div>
-            ${lastMessageHTML}
-          `
-                  : `
-            <div class="info-row">
-              <i class="pi pi-info-circle"></i>
-              <label>Status:</label>
-              <span class="p-badge p-badge-secondary">Not monitored</span>
-            </div>
-          `
-          }
-        </div>
-
-        ${nodeUrlHTML}
-      </div>
-    `
-      )
+      .setHTML(centrePopupHTML(centre))
       .addTo(map.value)
 }
 
-const flyToNode = (nodeId) => {
-  if (markers.value[nodeId]) {
-    const {coords} = markers.value[nodeId]
+const flyToCentre = (centreId) => {
+  if (markers.value[centreId]) {
+    const {coords} = markers.value[centreId]
     map.value.flyTo({center: coords, zoom: 6})
   }
 }
 
-const pulseMarker = (nodeId) => {
-  if (markers.value[nodeId]) {
-    const {element} = markers.value[nodeId]
+/**
+ * Pulse the marker of the centre a message was published by.
+ *
+ * A centre publishing under an ID no node is registered for has no marker,
+ * and nothing happens. That is the honest outcome: there is nowhere on this
+ * map for it to happen.
+ */
+const pulseCentre = (centreId) => {
+  if (markers.value[centreId]) {
+    const {element} = markers.value[centreId]
     element.classList.add('pulse')
     setTimeout(() => element.classList.remove('pulse'), 2000)
   }
@@ -359,30 +263,26 @@ const showNotif = (message) => {
 }
 
 /**
- * Show a temporary pulsing data point at a specific location
- * Used to visualize incoming MQTT messages with geometry data
+ * Show a temporary pulsing data point at a specific location.
+ * Used to show where an incoming notification's observation was made.
  *
  * @param {Object} geometry - GeoJSON geometry object with coordinates
  * Example: {type: "Point", coordinates: [lon, lat, elevation]}
  */
 const showDataPoint = (geometry) => {
   if (!map.value) {
-    console.warn('⚠️ Map not initialized yet')
     return
   }
 
   if (!geometry || geometry.type !== 'Point' || !geometry.coordinates) {
-    console.warn('⚠️ Invalid geometry for data point:', geometry)
     return
   }
 
   const [lon, lat] = geometry.coordinates
 
-  // Create temporary marker element
   const el = document.createElement('div')
   el.className = 'data-point'
 
-  // Create marker
   const tempMarker = new maplibregl.Marker({
     element: el,
     draggable: false,
@@ -391,47 +291,17 @@ const showDataPoint = (geometry) => {
       .setLngLat([lon, lat])
       .addTo(map.value)
 
-  console.log(`📍 Data point shown at [${lon.toFixed(4)}, ${lat.toFixed(4)}]`)
-
-  // Remove marker after animation completes (3 seconds)
+  // Remove marker after the animation has run out
   setTimeout(() => {
     tempMarker.remove()
   }, 5000)
 }
 
-const formatRelativeTime = (timestamp) => {
-  if (!timestamp) return 'Never'
-
-  const now = Date.now()
-  const messageTime = new Date(timestamp).getTime()
-  const diffMs = now - messageTime
-  const diffSec = Math.floor(diffMs / 1000)
-  const diffMin = Math.floor(diffSec / 60)
-  const diffHour = Math.floor(diffMin / 60)
-  const diffDay = Math.floor(diffHour / 24)
-
-  if (diffSec < 30) {
-    return 'Just now'
-  } else if (diffSec < 60) {
-    return `${diffSec}s ago`
-  } else if (diffMin < 60) {
-    return `${diffMin}m ago`
-  } else if (diffHour < 24) {
-    return `${diffHour}h ago`
-  } else if (diffDay === 1) {
-    return 'Yesterday'
-  } else if (diffDay < 7) {
-    return `${diffDay} days ago`
-  } else {
-    return new Date(timestamp).toLocaleDateString()
-  }
-}
-
 defineExpose({
-  pulseMarker,
+  pulseCentre,
   showNotif,
-  flyToNode,
-  showDataPoint  // NEW: Expose the data point visualization function
+  flyToCentre,
+  showDataPoint
 })
 </script>
 
@@ -660,39 +530,38 @@ defineExpose({
   min-width: 100px;
 }
 
-:deep(.popup-actions) {
+:deep(.popup-connections) {
   padding: 1rem;
   border-top: 1px solid var(--surface-border);
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  gap: 0.75rem;
 }
 
-:deep(.popup-actions .p-button) {
-  width: 100%;
-  justify-content: center;
-  gap: 0.5rem;
+:deep(.popup-connections-title) {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  color: var(--text-color-secondary);
 }
 
-/* Button styles */
-:deep(.p-button) {
-  font-size: 0.875rem;
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  display: inline-flex;
+:deep(.connection-row-head) {
+  display: flex;
   align-items: center;
   gap: 0.5rem;
-  cursor: pointer;
-  transition: all 0.2s;
-  text-decoration: none;
-  border: 1px solid var(--primary-color);
-  color: var(--primary-color);
-  background: transparent;
+  font-size: 0.875rem;
 }
 
-:deep(.p-button:hover) {
-  background: var(--primary-color);
-  color: white;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+:deep(.connection-row-meta) {
+  font-size: 0.75rem;
+  color: var(--text-color-secondary);
+  margin-top: 0.15rem;
+}
+
+:deep(.connection-row-error) {
+  font-size: 0.75rem;
+  color: var(--p-red-500);
+  margin-top: 0.15rem;
 }
 </style>

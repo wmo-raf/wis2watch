@@ -29,7 +29,7 @@ export default defineConfig({
     build: {
         rollupOptions: {
             input: {
-                "mqtt-monitor-map": resolve('./src/mqtt-monitor-map.js'),
+                "ingest-monitor-map": resolve('./src/ingest-monitor-map.js'),
                 "node-statistics": resolve('./src/node-statistics.js'),
             },
             output: {
