@@ -318,6 +318,38 @@ def propagation_gaps_left_out(*, now=None):
     }
 
 
+def propagation_gaps_unsettled(*, now=None):
+    """The centres whose gaps left this report without ever being answered.
+
+    Args:
+        now: the instant the horizon is worked out from.
+
+    Returns:
+        set[str]: the centre IDs holding open gaps past the horizon, and an
+        empty set where every centre that has left the report left it because
+        its propagation recovered.
+
+    A centre leaves this report two ways that look identical from outside it.
+    Its gaps close, which is a path somebody fixed; or its gaps pass the
+    horizon, which is this tool running out of evidence while the question
+    stands. Whoever reads the report can tell them apart from the sentence
+    beside it. Whatever reads it -- the digest -- cannot, and would otherwise
+    announce the second as the first.
+
+    Only what the horizon left out, and by the same query that counts it in
+    ``propagation_gaps_left_out``: the two disagreeing would mean a centre
+    counted as unlistable in one sentence and cleared in another. Centres
+    whose own vantage points have gone dark are absent here for the same
+    reason they are absent from that sentence -- their gaps are withheld
+    rather than unanswerable, and that is an absence that ends.
+    """
+    now = now or dj_timezone.now()
+
+    return set(
+        _gaps_past_the_horizon(now=now).values_list("node__centre_id", flat=True)
+    )
+
+
 def unregistered_centres(*, now=None):
     """Centres of the region publishing with no discovery catalogue record.
 
@@ -712,6 +744,17 @@ def _bounds_nothing(*, now=None):
     return None
 
 
+def _leaves_nothing_unsettled(*, now=None):
+    """Which of a report's findings have stopped being checkable at all.
+
+    None of them, for every report whose findings it can still answer for.
+    A report that stops listing something is saying the thing has gone, and
+    the only one of the five that can mean something else by it is the
+    propagation report, whose evidence expires under it.
+    """
+    return set()
+
+
 @dataclass(frozen=True)
 class GapReport:
     """One report: what it finds, and how to ask for it.
@@ -723,10 +766,10 @@ class GapReport:
     that exists but is not in the digest is a finding nobody sees until they
     next open the tool.
 
-    The three callables are named as the verbs they are. A template renders
-    any attribute it is given and calls it if it can, so a field called
-    ``count`` would run a query from the middle of a page that only meant to
-    print a number.
+    The callables are named as the verbs they are. A template renders any
+    attribute it is given and calls it if it can, so a field called ``count``
+    would run a query from the middle of a page that only meant to print a
+    number.
 
     ``describe_row`` answers with nothing where a row is not a finding at all.
     The rate report needs that: it lists every publishing centre so that a
@@ -739,6 +782,12 @@ class GapReport:
     propagation report bounds anything, and it is held here rather than in its
     template so that a sixth report that has to truncate says so in the same
     place and the same way.
+
+    ``find_unsettled`` is the same admission made to the digest rather than to
+    a reader. A finding leaving a report ordinarily means the problem has
+    gone, and where a report has stopped being able to answer for one instead,
+    this is where it says which -- so that what nobody can check any more is
+    let go rather than announced as fixed.
     """
 
     slug: str
@@ -748,6 +797,7 @@ class GapReport:
     count_rows: Callable[..., int]
     describe_row: Callable[..., Notice | None]
     describe_bound: Callable[..., str | None] = _bounds_nothing
+    find_unsettled: Callable[..., set[str]] = _leaves_nothing_unsettled
 
 
 @dataclass(frozen=True)
@@ -805,6 +855,7 @@ GAP_REPORTS = (
         count_rows=lambda *, now=None: _reportable_gaps(now=now).count(),
         describe_row=_propagation_gap_notice,
         describe_bound=propagation_gaps_left_out,
+        find_unsettled=propagation_gaps_unsettled,
     ),
     GapReport(
         slug="unregistered-centres",

@@ -335,23 +335,21 @@ class WhatCountsAsAFindingTests(DigestTestCase):
 
 
 @override_settings(WIS2WATCH_RAW_RETENTION_DAYS=RETENTION_DAYS)
-class RetiredFindingTests(DigestTestCase):
-    """News a bounded report gave the digest for want of anything to check.
+class LetGoFindingTests(DigestTestCase):
+    """The absence no grace period can rescue, and no clearing describes.
 
-    The propagation report stops listing a gap once it has passed the horizon
-    its evidence ends at, and no grace period can rescue that absence because
-    it is not one that ends: nothing will ever settle the gap either way. The
-    centre is cleared here having had nothing new go missing for the whole
-    forensic window, which is not a fix anybody made and not a fault anybody
-    can still be shown. So the mail carries what the report bounded beside the
-    news it gave -- and the gaps that caused the clearing are the ones counted
-    in it.
+    A propagation gap passes the horizon its evidence ends at, past which
+    nothing can settle it either way ever again. The centre leaves the report
+    for good with the question still open -- so waiting on it is pointless,
+    and announcing it cleared says somebody fixed a path nobody looked at.
+    What the digest does instead is forget it quietly: no news, and the same
+    centre breaking again is news again.
     """
 
-    def gap_at(self, centre_id, *, hours_ago=2):
-        """A centre with one notification the world has not carried."""
+    def watched(self, centre_id):
+        """A centre with a vantage point of its own that still answers."""
         node = WIS2Node.objects.create(centre_id=centre_id, name=centre_id.upper())
-        origin = MessageSource.objects.create(
+        MessageSource.objects.create(
             name=f"{centre_id} origin broker",
             source_type=MessageSource.ORIGIN_BROKER,
             node=node,
@@ -359,33 +357,149 @@ class RetiredFindingTests(DigestTestCase):
             host=f"wis.{centre_id}.example.int",
             is_reachable=True,
         )
-        PropagationGap.objects.create(
-            node=node,
-            origin_source=origin,
-            notification_id=f"{centre_id}-d9a1",
-            topic=f"origin/a/wis2/{centre_id}/data/core/weather",
-            published_at=NOW - timedelta(hours=hours_ago),
-            observed_at_origin=NOW - timedelta(hours=hours_ago),
-            detected_at=NOW,
-        )
 
         return node
 
-    def test_a_centre_whose_gaps_pass_the_horizon_stops_being_found(self):
-        self.gap_at("ke-meteo")
+    def gap_at(self, node, *, notification_id="d9a1", published=None):
+        """A notification the centre published that the world has not carried."""
+        published = published or NOW - timedelta(hours=2)
+
+        return PropagationGap.objects.create(
+            node=node,
+            origin_source=node.message_sources.first(),
+            notification_id=notification_id,
+            topic=f"origin/a/wis2/{node.centre_id}/data/core/weather",
+            published_at=published,
+            observed_at_origin=published,
+            detected_at=published + timedelta(minutes=20),
+        )
+
+    def remembered(self):
+        return set(
+            ReportedFinding.objects.filter(
+                report_slug="propagation-gaps"
+            ).values_list("key", flat=True)
+        )
+
+    def test_a_centre_whose_gaps_pass_the_horizon_is_not_reported_as_cleared(self):
+        """The point of the whole exercise: it announces a fix nobody made."""
+        self.gap_at(self.watched("ke-meteo"))
         self.send()
 
-        change = self.changes_for("propagation-gaps", now=PAST_THE_HORIZON)
+        self.assertIsNone(self.changes_for("propagation-gaps", now=PAST_THE_HORIZON))
 
-        self.assertEqual([notice.key for notice in change.resolved], ["ke-meteo"])
-
-    def test_the_mail_says_what_the_report_it_read_had_bounded(self):
-        self.gap_at("ke-meteo")
+    def test_nothing_is_mailed_about_a_centre_let_go_that_way(self):
+        self.gap_at(self.watched("ke-meteo"))
         self.send()
 
         self.send(now=PAST_THE_HORIZON)
 
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_a_centre_let_go_that_way_stops_being_remembered(self):
+        """Kept, it would be a row waiting on an answer that cannot come."""
+        self.gap_at(self.watched("ke-meteo"))
+        self.send()
+
+        self.send(now=PAST_THE_HORIZON)
+
+        self.assertEqual(self.remembered(), set())
+
+    def test_a_centre_is_let_go_on_a_morning_with_no_mail_to_send(self):
+        """The forgetting is not news, so it cannot wait on there being any."""
+        self.gap_at(self.watched("ke-meteo"))
+        self.send()
+
+        digest = self.send(now=PAST_THE_HORIZON)
+
+        self.assertFalse(digest.has_changes)
+        self.assertEqual(self.remembered(), set())
+
+    def test_a_centre_that_breaks_again_after_being_let_go_is_carried_again(self):
+        node = self.watched("ke-meteo")
+        self.gap_at(node)
+        self.send()
+        self.send(now=PAST_THE_HORIZON)
+
+        self.gap_at(
+            node,
+            notification_id="c4f2",
+            published=PAST_THE_HORIZON - timedelta(hours=2),
+        )
+        change = self.changes_for("propagation-gaps", now=PAST_THE_HORIZON)
+
+        self.assertEqual([notice.key for notice in change.new], ["ke-meteo"])
+
+    def test_a_centre_still_holding_gaps_that_can_be_checked_is_not_let_go(self):
+        """Only the ones that left the report; this one is still in it."""
+        node = self.watched("ke-meteo")
+        self.gap_at(node)
+        self.send()
+
+        self.gap_at(
+            node,
+            notification_id="c4f2",
+            published=PAST_THE_HORIZON - timedelta(hours=2),
+        )
+        self.send(now=PAST_THE_HORIZON)
+
+        self.assertEqual(self.remembered(), {"ke-meteo"})
+        self.assertEqual(len(mail.outbox), 1)
+
+    def carried_after_all(self, node, *, at):
+        """The world turns out to have it: a late arrival closes the gap."""
+        node.propagation_gaps.update(resolved_at=at)
+
+    def test_a_centre_whose_propagation_recovers_is_still_reported_as_cleared(self):
+        """The other half: good news is still news.
+
+        The gap is closed by a late arrival while the evidence still stands,
+        so the path really did start working. That is a clearing, and past the
+        grace it is carried like any other.
+        """
+        node = self.watched("ke-meteo")
+        self.gap_at(node)
+        self.send()
+
+        self.carried_after_all(node, at=NOW + timedelta(hours=1))
+        change = self.changes_for("propagation-gaps", now=PAST_THE_GRACE)
+
+        self.assertEqual([notice.key for notice in change.resolved], ["ke-meteo"])
+
+    def test_a_recovery_is_still_a_clearing_long_after_the_horizon(self):
+        """A settled gap leaves nothing unanswerable behind it to wait on."""
+        node = self.watched("ke-meteo")
+        self.gap_at(node)
+        self.send()
+
+        self.carried_after_all(node, at=NOW + timedelta(hours=1))
+        self.send(now=PAST_THE_HORIZON)
+
         self.assertIn("Cleared:", self.body())
+        self.assertIn("ke-meteo", self.body())
+
+    def test_a_centre_whose_own_broker_went_dark_still_gets_its_grace(self):
+        """A different absence, and one that ends: nothing here changes it."""
+        node = self.watched("ke-meteo")
+        self.gap_at(node)
+        self.send()
+        node.message_sources.update(is_reachable=False)
+
+        self.assertFalse(digest_changes(now=TOMORROW).has_changes)
+        self.assertEqual(self.remembered(), {"ke-meteo"})
+
+    def test_the_mail_says_what_the_report_it_read_had_bounded(self):
+        """The qualification the reader gets, beside whatever news there is."""
+        self.gap_at(self.watched("ke-meteo"))
+        self.send()
+
+        self.gap_at(
+            self.watched("ug-unma"),
+            published=PAST_THE_HORIZON - timedelta(hours=2),
+        )
+        self.send(now=PAST_THE_HORIZON)
+
+        self.assertIn("ug-unma", self.body())
         self.assertIn("1 older gap is not listed", self.body())
 
     def test_a_report_bounding_nothing_qualifies_nothing(self):
