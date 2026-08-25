@@ -29,12 +29,28 @@ import {
 } from './charts/plot.js'
 
 //: Below this much of a bucket, a station was heard *thinly* rather than
-//: fully. **Provisional.** #48 drew it at 90 days against seeded data and it
-//: looked right; #66 looked again in both themes and left it standing but
-//: unmeasured. It is the one number on this tab still set against fake data,
-//: and it is a single named constant so that real traffic can move it in one
-//: place rather than in every call site.
-export const THIN_FRACTION = 0.3
+//: fully. **Measured.** #48 set it at 0.3 against seeded data and #66 left it
+//: standing but unmeasured; #110 read it against six clean days of real
+//: Global Broker traffic -- 9,245 station-days, 2026-08-13 to 18.
+//:
+//: The distribution is bimodal with a wide flat trough: about 27% of
+//: station-days sit at 1-8 hours, 21% across 9-18, and 47% at 19-24, and that
+//: shape holds on all six days independently. 0.3 cut between 7 and 8 hours,
+//: which is the worst place available: **67% of the station-days at exactly 8
+//: hours report at (0,3,6,9,12,15,18,21)** -- textbook three-hourly synoptic
+//: reporting, a complete day for a station on that schedule. The commonest
+//: healthy cadence on the network sat 0.8 hours above the line and crossed it
+//: by missing one of its eight slots. The two hours straddling that cut hold
+//: 8.9% of all station-days; the two straddling this one hold 4.0%.
+//:
+//: 0.5 is also what the legend beside it already claims: "most of the day" is
+//: a majority of it, which 8 of 24 hours is not.
+//:
+//: What this does not fix: at day grain the cell reads reporting *cadence* at
+//: least as much as health, and no share of 24 hours tells a healthy
+//: three-hourly station from an hourly one down to a third. That needs a
+//: per-station ceiling rather than a different number here -- #112.
+export const THIN_FRACTION = 0.5
 
 //: How many hours a whole UTC day holds, and how long an hour is. The daily
 //: ceiling and the arithmetic that shortens it, each spelled once.
@@ -73,11 +89,11 @@ export const GRAINS = {
         //: hour against the station's own busiest.
         legend: {
             full: 'Heard for most of the day',
-            thin: 'Heard, but for a small part of the day',
+            thin: 'Heard, but for less than half the day',
         },
         scale:
             'A cell is judged against the 24 hours of its day, so a pale one is'
-            + ' a station that was heard for only a little of it.',
+            + ' a station that was heard in fewer than half of them.',
         long: formatDayLong,
         short: formatDay,
         ceiling: (bucket, now) => {
