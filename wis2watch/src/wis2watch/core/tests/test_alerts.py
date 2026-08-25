@@ -526,6 +526,23 @@ class GlobalBrokerUnreliableTests(HardFailureTestCase):
         self.assertIsNone(self.open_failure(self.KIND))
         self.assertEqual(mail.outbox, [])
 
+    def test_the_message_reads_as_prose_rather_than_as_escaped_markup(self):
+        """These are text/plain, and a template escapes by default.
+
+        Everything interpolated into one is English written by this tool or
+        the text of an exception, neither of which is ever parsed as HTML. Not
+        turned off, a reader gets ``the region&#x27;s traffic`` in their mail
+        and stops trusting the sender before they reach the finding.
+        """
+        self.drops((110, 60))
+
+        self.check()
+
+        (announced,) = self.announcements(self.KIND)
+
+        self.assertIn("the region's traffic", announced.body)
+        self.assertNotIn("&#", announced.body)
+
 
 class FlappingBrokerTests(HardFailureTestCase):
     """A whole day of the connection this design was built for.

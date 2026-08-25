@@ -1,4 +1,10 @@
-{% load i18n tz %}{% if recovered %}{% blocktranslate with failure=failure.get_kind_display started_at=failure.started_at|utc|date:"Y-m-d H:i" resolved_at=failure.resolved_at|utc|date:"Y-m-d H:i" %}{{ failure }} -- recovered.
+{% load i18n tz %}{% comment %}
+    Escaping off for the whole message. This is text/plain -- nothing here is
+    ever parsed as HTML -- and both of the values interpolated below are
+    English prose written by this tool: an apostrophe in "the region's
+    traffic", and a detail line quoting whatever an exception said. Left on,
+    a reader gets `&#x27;` in their mail.
+{% endcomment %}{% autoescape off %}{% if recovered %}{% blocktranslate with failure=failure.get_kind_display started_at=failure.started_at|utc|date:"Y-m-d H:i" resolved_at=failure.resolved_at|utc|date:"Y-m-d H:i" %}{{ failure }} -- recovered.
 
 It began at {{ started_at }} UTC and was seen working again at {{ resolved_at }} UTC.{% endblocktranslate %}
 {% if recovered_detail %}
@@ -11,4 +17,4 @@ It began at {{ started_at }} UTC and was seen working again at {{ resolved_at }}
 
 {{ consequence }}
 {% endif %}
-{{ overview_url }}
+{{ overview_url }}{% endautoescape %}
