@@ -21,9 +21,12 @@ from wis2watch.core.analysis import (
     GAP_REPORTS,
     DeclaringCentre,
     OriginTransport,
+    RegistryStanding,
     gap_report,
     gap_report_summaries,
     propagation_gaps,
+    registries_not_answering,
+    registries_not_answering_caveat,
     stations_declared_but_silent,
     stations_declared_but_silent_unasked_centres,
     stations_transmitting_undeclared,
@@ -39,6 +42,7 @@ from wis2watch.core.models import (
     PropagationGap,
     Station,
     StationSource,
+    SyncLog,
     UnregisteredCentre,
     WIS2Node,
 )
@@ -1044,8 +1048,283 @@ class UnattributedRateTests(GapReportTestCase):
         self.assertEqual(row.country_name, "Kenya")
 
 
+class RegistryRunTestCase(GapReportTestCase):
+    """A centre's registry with a run history behind it.
+
+    Seeded as sync logs rather than by running the sync: what is under test
+    is a pattern over a run history that would take a week to accumulate.
+    """
+
+    def registry_run(self, node=None, *, hours_ago, status=SyncLog.FAILED, error=""):
+        """One run of the station sync against a centre, as it was recorded."""
+        return SyncLog.objects.create(
+            node=node or self.kenya,
+            sync_type=SyncLog.NODE_STATIONS,
+            status=status,
+            started_at=NOW - timedelta(hours=hours_ago),
+            error_message=error,
+        )
+
+    def stopped_answering(self, node=None, *, hours_ago, error="connection refused"):
+        """A registry that answered once and has failed every run since."""
+        self.registry_run(node, hours_ago=hours_ago + 1, status=SyncLog.SUCCESS)
+        self.registry_run(node, hours_ago=hours_ago, error=error)
+        self.registry_run(node, hours_ago=1, error=error)
+
+    def never_answered(self, node=None, *, first_asked, error="connection refused"):
+        """A registry nothing has ever got an answer out of."""
+        self.registry_run(node, hours_ago=first_asked, error=error)
+        self.registry_run(node, hours_ago=1, error=error)
+
+
+class RegistriesNotAnsweringTests(RegistryRunTestCase):
+    """A centre's own registry that has failed every run for days on end.
+
+    The failures were always recorded -- one ``NODE_STATIONS`` sync log per
+    node per run -- and nothing read them, so a registry could fail hourly
+    from March to August with every surface of the tool saying nothing.
+
+    What the report has to get right is that a registry stops being readable
+    two ways, and they are different errands. An address that worked and
+    stopped is a host that has moved or died. One that has never answered is
+    an address derived wrong from the start, which is what the four centres
+    publishing their canonical links from bare IP addresses make ordinary.
+    """
+
+    def report(self, **kwargs):
+        return registries_not_answering(now=NOW, **kwargs)
+
+    def by_centre(self):
+        return [row.centre_id for row in self.report()]
+
+    def test_a_registry_that_has_failed_every_run_for_days_is_reported(self):
+        self.stopped_answering(hours_ago=90)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.centre_id, "ke-meteo")
+        self.assertEqual(row.last_answered_at, NOW - timedelta(hours=91))
+        self.assertEqual(row.unanswered_since, NOW - timedelta(hours=91))
+        self.assertAlmostEqual(row.hours_unanswered, 91)
+
+    def test_a_registry_that_started_failing_this_morning_is_not_reported(self):
+        """One bad morning is what the next run fixes."""
+        self.stopped_answering(hours_ago=6)
+
+        self.assertEqual(self.by_centre(), [])
+
+    def test_a_registry_whose_newest_run_answered_is_not_reported(self):
+        """However long it was failing before that."""
+        self.registry_run(hours_ago=300, status=SyncLog.SUCCESS)
+        self.registry_run(hours_ago=200, error="read timed out")
+        self.registry_run(hours_ago=1, status=SyncLog.SUCCESS)
+
+        self.assertEqual(self.by_centre(), [])
+
+    def test_a_run_that_stepped_over_records_still_answered(self):
+        """Partly is a registry this tool reached; the report is about reaching it."""
+        self.registry_run(hours_ago=300, error="read timed out")
+        self.registry_run(hours_ago=1, status=SyncLog.PARTIAL)
+
+        self.assertEqual(self.by_centre(), [])
+
+    def test_a_centre_advertising_no_registry_is_not_reported(self):
+        """Nothing has ever asked it, so nothing has failed to answer."""
+        unasked = self.node("cg-met", registry=False)
+        self.registry_run(unasked, hours_ago=300)
+        self.registry_run(unasked, hours_ago=1)
+
+        self.assertEqual(self.by_centre(), [])
+
+    def test_a_centre_whose_registry_nothing_has_asked_yet_is_not_reported(self):
+        """A registry with no run against it has not failed one."""
+        self.node("cg-met")
+
+        self.assertEqual(self.by_centre(), [])
+
+    def test_a_run_of_another_kind_against_the_same_centre_is_not_an_answer(self):
+        """Its message archive answering says nothing about its registry."""
+        self.never_answered(first_asked=300)
+        SyncLog.objects.create(
+            node=self.kenya,
+            sync_type=SyncLog.MESSAGE_ARCHIVE,
+            status=SyncLog.SUCCESS,
+            started_at=NOW - timedelta(hours=1),
+        )
+
+        self.assertEqual(self.by_centre(), ["ke-meteo"])
+
+    def test_a_registry_that_never_answered_is_timed_from_when_it_was_first_asked(self):
+        self.never_answered(first_asked=200)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.standing, RegistryStanding.NEVER_ANSWERED)
+        self.assertIsNone(row.last_answered_at)
+        self.assertEqual(row.unanswered_since, NOW - timedelta(hours=200))
+
+    def test_a_registry_that_worked_and_stopped_is_named_as_that(self):
+        self.stopped_answering(hours_ago=90)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.standing, RegistryStanding.STOPPED)
+        self.assertTrue(row.standing_label)
+
+    def test_the_row_carries_the_address_that_is_not_answering(self):
+        """Which is the thing an operator has to check, and the thing to correct."""
+        self.stopped_answering(hours_ago=90)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.stations_url, self.kenya.stations_url)
+        self.assertIn("ke-meteo.example.int", row.stations_url)
+
+    def test_the_row_carries_what_the_last_run_said_went_wrong(self):
+        """A read timeout and a 404 send somebody to different places."""
+        self.stopped_answering(hours_ago=90, error="read timed out")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.last_error, "read timed out")
+
+    def test_a_run_that_never_got_as_far_as_saying_why_carries_nothing(self):
+        self.registry_run(hours_ago=200, status=SyncLog.SUCCESS)
+        self.registry_run(hours_ago=1)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.last_error, "")
+
+    def test_the_report_reads_longest_unanswered_first(self):
+        congo = self.node("cg-met")
+        self.stopped_answering(hours_ago=90)
+        self.stopped_answering(congo, hours_ago=400)
+
+        self.assertEqual(self.by_centre(), ["cg-met", "ke-meteo"])
+
+    def test_a_centre_carries_the_country_it_is_registered_under(self):
+        self.stopped_answering(hours_ago=90)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.country_name, "Kenya")
+
+    @override_settings(WIS2WATCH_REGISTRY_UNANSWERED_HOURS=240)
+    def test_how_long_a_registry_may_fail_for_is_a_setting(self):
+        self.stopped_answering(hours_ago=90)
+
+        self.assertEqual(self.by_centre(), [])
+
+    def test_the_index_counts_what_the_report_lists(self):
+        congo = self.node("cg-met")
+        self.stopped_answering(hours_ago=90)
+        self.stopped_answering(congo, hours_ago=6)
+
+        counts = {
+            summary.slug: summary.count for summary in gap_report_summaries(now=NOW)
+        }
+
+        self.assertEqual(counts["registries-not-answering"], 1)
+
+
+class UnansweredRegistryNoticeTests(RegistryRunTestCase):
+    """What the digest is told about a registry nobody can read."""
+
+    def notice(self):
+        report = gap_report("registries-not-answering")
+        (row,) = report.find_rows(now=NOW)
+
+        return report.describe_row(row)
+
+    def test_the_notice_names_the_centre_the_address_and_when_it_last_answered(self):
+        self.stopped_answering(hours_ago=90, error="read timed out")
+
+        notice = self.notice()
+
+        self.assertEqual(notice.key, "ke-meteo")
+        self.assertIn("ke-meteo", notice.summary)
+        self.assertIn(self.kenya.stations_url, notice.summary)
+        self.assertIn("read timed out", notice.summary)
+
+    def test_the_notice_for_a_registry_that_never_answered_says_so(self):
+        """A different errand: the address was wrong from the start."""
+        self.never_answered(first_asked=200)
+
+        self.assertIn("has never answered", self.notice().summary)
+
+    def test_the_notice_for_a_registry_that_stopped_says_when_it_last_worked(self):
+        self.stopped_answering(hours_ago=90)
+
+        self.assertIn("has not answered since", self.notice().summary)
+
+    def test_the_notice_keeps_a_talkative_failure_to_one_line(self):
+        """An error the digest quotes whole is a digest nobody reads."""
+        self.stopped_answering(hours_ago=90, error="oh dear\n" * 40)
+
+        self.assertNotIn("\n", self.notice().summary)
+        self.assertLess(len(self.notice().summary), 400)
+
+
+class EveryRegistryFailingTests(GapReportTestCase):
+    """What this report cannot say when nothing at all is answering.
+
+    A handful of the region's registries failing is the region; every one of
+    them failing at once is very much more likely to be this tool -- an
+    outbound route lost, a proxy gone -- and a list of thirty centres offered
+    without that said is thirty conversations to have with the wrong people.
+    """
+
+    def registry(self, centre_id, *, answering):
+        node = self.node(centre_id)
+        SyncLog.objects.create(
+            node=node,
+            sync_type=SyncLog.NODE_STATIONS,
+            status=SyncLog.SUCCESS if answering else SyncLog.FAILED,
+            started_at=NOW - timedelta(hours=1),
+        )
+
+        return node
+
+    def caveat(self):
+        return registries_not_answering_caveat(now=NOW)
+
+    def test_nothing_is_said_while_some_of_them_answer(self):
+        self.registry("cg-met", answering=True)
+        self.registry("rw-rma", answering=False)
+
+        self.assertIsNone(self.caveat())
+
+    def test_nothing_is_said_where_no_registry_has_been_asked_at_all(self):
+        self.node("cg-met")
+
+        self.assertIsNone(self.caveat())
+
+    def test_nothing_is_said_of_a_single_centre_failing_on_its_own(self):
+        """One centre down is one centre down whichever way you count it."""
+        self.registry("cg-met", answering=False)
+
+        self.assertIsNone(self.caveat())
+
+    def test_none_of_them_answering_is_said_above_the_table(self):
+        self.registry("cg-met", answering=False)
+        self.registry("rw-rma", answering=False)
+
+        self.assertIn("2", self.caveat())
+
+    def test_the_sentence_stays_off_the_index(self):
+        """A caveat is about what a column means, not about what is listed."""
+        self.registry("cg-met", answering=False)
+        self.registry("rw-rma", answering=False)
+
+        self.assertEqual(
+            [summary.bound for summary in gap_report_summaries(now=NOW)],
+            [None] * len(GAP_REPORTS),
+        )
+
+
 class GapReportSummaryTests(GapReportTestCase):
-    """The index that says which of the five is worth opening."""
+    """The index that says which of the six is worth opening."""
 
     def test_every_report_is_summarised(self):
         self.assertEqual(

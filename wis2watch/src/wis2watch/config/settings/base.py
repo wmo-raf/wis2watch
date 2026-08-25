@@ -407,6 +407,14 @@ WIS2WATCH_VOLUME_WINDOW_HOURS = env.int("WIS2WATCH_VOLUME_WINDOW_HOURS", 24)
 # hundred per cent depending on the day it was asked about.
 WIS2WATCH_ATTRIBUTION_WINDOW_HOURS = env.int("WIS2WATCH_ATTRIBUTION_WINDOW_HOURS", 168)
 
+# How long a centre's own station registry may fail every run before the gap
+# reports name it, in hours. Against an hourly sync that is some fifty
+# consecutive failures -- past a host restarting overnight, and still inside
+# the week the registry went. Not an alerting threshold: one centre's dead
+# registry costs one of the three station pictures for one centre, and every
+# other answer the tool gives stays good.
+WIS2WATCH_REGISTRY_UNANSWERED_HOURS = env.int("WIS2WATCH_REGISTRY_UNANSWERED_HOURS", 48)
+
 # Who is told what changed, and who is told when the tool itself has stopped
 # working. There is one operator of a regional diagnostic tool rather than a
 # subscriber list, so both are configuration. Leaving the alert list unset
