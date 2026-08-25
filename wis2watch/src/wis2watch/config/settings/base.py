@@ -416,12 +416,31 @@ WIS2WATCH_ATTRIBUTION_WINDOW_HOURS = env.int("WIS2WATCH_ATTRIBUTION_WINDOW_HOURS
 WIS2WATCH_DIGEST_RECIPIENTS = env.list("WIS2WATCH_DIGEST_RECIPIENTS", default=[])
 WIS2WATCH_ALERT_RECIPIENTS = env.list("WIS2WATCH_ALERT_RECIPIENTS", default=[])
 
-# How long the Global Broker connection may be down, and how long nothing at
-# all may be ingested, before either is mailed about, in minutes. Both are a
-# first guess at what is more than a blip, and are meant to be revisited once
-# the region's normal traffic patterns are known.
-WIS2WATCH_BROKER_OUTAGE_MINUTES = env.int("WIS2WATCH_BROKER_OUTAGE_MINUTES", 5)
+# When the Global Broker connection is bad enough to mail about. Judged on how
+# much of a trailing window it failed to carry rather than on whether it is
+# carrying this instant: a broker that drops for eight minutes every quarter
+# of an hour is never down for long, and leaves the region half unwatched all
+# day. The window matters more than the budget -- a short one turns every bad
+# hour into news of its own -- and the clearing mark is far below the opening
+# one on purpose, so that a flapping afternoon is one spell rather than twelve.
+WIS2WATCH_BROKER_UNRELIABLE_MINUTES = env.int("WIS2WATCH_BROKER_UNRELIABLE_MINUTES", 45)
+WIS2WATCH_BROKER_UNRELIABLE_WINDOW_MINUTES = env.int(
+    "WIS2WATCH_BROKER_UNRELIABLE_WINDOW_MINUTES", 120
+)
+WIS2WATCH_BROKER_RELIABLE_MINUTES = env.int("WIS2WATCH_BROKER_RELIABLE_MINUTES", 10)
+
+# How long nothing at all may be ingested before it is mailed about, in
+# minutes. Left fast where the broker's judgement was deliberately slowed:
+# this is the only check that can notice the ingest process having died while
+# its connection records still read healthy, and it is what catches a total
+# blackout long before the window above has the evidence to call it anything.
 WIS2WATCH_INGESTION_STALL_MINUTES = env.int("WIS2WATCH_INGESTION_STALL_MINUTES", 15)
+
+# How much of a day this tool may have spent unable to watch before the digest
+# owns up to it, in minutes. Well below anything that raises an alert, because
+# the day it exists for is the one nobody was interrupted about: losses each
+# too small to be news, adding up to an afternoon.
+WIS2WATCH_BAD_DAY_MINUTES = env.int("WIS2WATCH_BAD_DAY_MINUTES", 30)
 
 # How many of a report's findings one digest names before linking to the rest.
 # Nothing is dropped -- what is left out is counted and the report is linked --
@@ -558,8 +577,9 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'wis2watch.core.tasks.run_send_daily_digest',
         'schedule': crontab(hour=6, minute=0),
     },
-    # Far oftener than the outages it judges: a check on a five-minute beat
-    # could not tell a five-minute outage from a twenty-minute one.
+    # The beat is what the evidence is made of, not just when it is read: each
+    # run is what opens and closes the drops a spell of unreliability is
+    # measured over, so a coarser beat would coarsen the measure itself.
     'check-hard-failures': {
         'task': 'wis2watch.core.tasks.run_check_hard_failures',
         'schedule': 60.0,  # Every minute

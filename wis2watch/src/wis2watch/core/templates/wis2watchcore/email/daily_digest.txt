@@ -11,6 +11,11 @@
 {% translate "Cleared:" %}
 {% for notice in change.resolved_sample %}  * {{ notice.summary }}
 {% endfor %}{% if change.resolved_withheld %}{% blocktranslate with withheld=change.resolved_withheld %}  ... and {{ withheld }} more.{% endblocktranslate %}
-{% endif %}{% endif %}{% endfor %}
+{% endif %}{% endif %}{% endfor %}{% if digest.bad_days %}
+== {% blocktranslate with day=digest.bad_days.0.day|utc|date:"Y-m-d" %}What this tool could not watch on {{ day }}{% endblocktranslate %} ==
+{% for bad_day in digest.bad_days %}  * {{ bad_day.line }}
+{% endfor %}
+{% translate "Findings above are bounded by that: a centre can only be reported silent for the hours somebody was listening." %}
+{% endif %}
 --
 {% blocktranslate with generated_at=digest.generated_at|utc|date:"Y-m-d H:i" %}WIS2Watch, {{ generated_at }} UTC.{% endblocktranslate %} {{ gap_reports_url }}

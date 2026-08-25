@@ -1,16 +1,24 @@
 """The hard-failure alerts, against a seeded database.
 
 These are the only findings this tool makes about itself, and the only ones
-that are worth waking somebody for: the Global Broker connection lost, or
-nothing being ingested at all. Everything else the tool reports is a statement
-about the region, and none of those statements mean anything while one of
-these is standing.
+worth waking somebody for: the Global Broker connection not carrying the
+region, or nothing being ingested at all. Everything else the tool reports is
+a statement about the region, and none of those statements mean anything while
+one of these is standing.
 
-Two things are being checked here, and they pull against each other. An
-outage has to be announced quickly enough to be worth announcing, and a blip
-must not be announced at all -- so the threshold, and what a failure's start
-is measured from, are what these tests are about. The other is that an outage
+Two things are being checked here and they pull against each other. A failure
+has to be announced quickly enough to be worth announcing, and a connection
+that drops sixty times a day must not produce sixty announcements -- so what a
+spell of unreliability is measured over, and what it takes to open and close
+one, are most of what these tests are about. The other is that a failure
 lasting a day is one message rather than a thousand.
+
+Two of these tests carry more weight than the rest. ``FlappingBrokerTests``
+runs the real shape of the problem this design was built for -- a day of drops
+too short to be outages and too frequent to ignore -- and asserts a number:
+two messages. Every other test here checks a mechanism; that one checks the
+requirement, and it is what would catch a plausible-looking change to the
+window or the clearing mark quietly restoring a hundred emails a day.
 """
 
 from datetime import timedelta
@@ -34,13 +42,17 @@ RECIPIENTS = ["diagnostician@example.int"]
 #: The thresholds the tests are written against, stated rather than inherited
 #: so that revising the first guess in settings does not silently change what
 #: is being asserted.
-OUTAGE_MINUTES = 5
+UNRELIABLE_MINUTES = 45
+UNRELIABLE_WINDOW_MINUTES = 120
+RELIABLE_MINUTES = 10
 STALL_MINUTES = 15
 
 
 @override_settings(
     WIS2WATCH_ALERT_RECIPIENTS=RECIPIENTS,
-    WIS2WATCH_BROKER_OUTAGE_MINUTES=OUTAGE_MINUTES,
+    WIS2WATCH_BROKER_UNRELIABLE_MINUTES=UNRELIABLE_MINUTES,
+    WIS2WATCH_BROKER_UNRELIABLE_WINDOW_MINUTES=UNRELIABLE_WINDOW_MINUTES,
+    WIS2WATCH_BROKER_RELIABLE_MINUTES=RELIABLE_MINUTES,
     WIS2WATCH_INGESTION_STALL_MINUTES=STALL_MINUTES,
 )
 class HardFailureTestCase(TestCase):
@@ -72,6 +84,37 @@ class HardFailureTestCase(TestCase):
         source.save()
 
         return source
+
+    def broker_back(self, *, source=None):
+        """The connection carrying traffic again."""
+        source = source or self.global_broker
+        source.is_reachable = True
+        source.last_error = ""
+        source.last_connected_at = NOW
+        source.save()
+
+        return source
+
+    def drops(self, *spans):
+        """Drops already on the record, as beats of the check would have left them.
+
+        Written directly rather than played out a minute at a time, because
+        what the spell above them is measured over is these rows, and a test
+        of a day's flapping that had to simulate fourteen hundred beats to
+        seed it would be a test of the loop rather than of the measure.
+
+        Each span is (minutes before NOW it began, minutes before NOW it
+        ended), so that a test reads in the direction its clock runs.
+        """
+        return [
+            HardFailure.objects.create(
+                kind=HardFailure.GLOBAL_BROKER_LOST,
+                detail="Could not reach globalbroker.example.int:8883",
+                started_at=NOW - timedelta(minutes=began),
+                resolved_at=NOW - timedelta(minutes=ended),
+            )
+            for began, ended in spans
+        ]
 
     def ingested(self, *, minutes_ago, published=None, source=None):
         """One notification, stored when this tool actually received it."""
@@ -176,25 +219,52 @@ class GlobalBrokerLostTests(HardFailureTestCase):
         self.assertIsNotNone(self.open_failure(self.KIND))
         self.assertEqual(mail.outbox, [])
 
-    def test_a_broker_still_down_past_the_threshold_is_announced(self):
+    def test_a_drop_is_never_announced_however_long_it_lasts(self):
+        """The guarantee the whole design rests on.
+
+        A drop is evidence, not news. If this ever starts sending, every one
+        of the dozens a bad connection produces in a day sends with it, which
+        is the behaviour this was built to end -- so it is asserted directly
+        rather than left to be inferred from the counts elsewhere.
+        """
+        self.broker_lost()
+
+        self.check()
+        self.check(now=NOW + timedelta(minutes=30))
+        self.check(now=NOW + timedelta(hours=1))
+
+        self.assertIsNotNone(self.open_failure(self.KIND))
+        self.assertEqual(self.announcements(self.KIND), [])
+
+    def test_a_drop_that_clears_says_nothing_either(self):
+        """Both ends of a drop are silent, not just the beginning.
+
+        A clearing that announced itself would halve the noise rather than
+        remove it, and would announce the end of something nobody had been
+        told had begun.
+        """
         self.broker_lost()
         self.check()
 
-        self.check(now=NOW + timedelta(minutes=OUTAGE_MINUTES + 1))
+        self.broker_back()
+        self.check(now=NOW + timedelta(hours=1))
 
-        (sent,) = mail.outbox
-        self.assertEqual(sent.to, RECIPIENTS)
-        self.assertIn("Global Broker", sent.subject)
+        self.assertEqual(self.announcements(self.KIND), [])
+        self.assertIsNone(self.open_failure(self.KIND))
 
-    def test_a_broker_down_when_first_looked_at_is_given_the_threshold(self):
-        """A broker that has never come up at all is not announced instantly:
-        a tool that has only just started has not watched anything long enough
-        to say."""
+    def test_a_broker_that_has_never_come_up_is_still_recorded(self):
+        """A tool that has only just started still keeps the evidence.
+
+        Nothing is announced off it, so there is no blip to protect anybody
+        from -- and a first window with no rows in it would be a window that
+        could not see the connection had never worked at all.
+        """
         self.global_broker.last_connected_at = None
         self.broker_lost()
 
         self.check()
 
+        self.assertIsNotNone(self.open_failure(self.KIND))
         self.assertEqual(mail.outbox, [])
 
     def test_a_blip_that_clears_is_never_announced(self):
@@ -206,27 +276,6 @@ class GlobalBrokerLostTests(HardFailureTestCase):
         self.check(now=NOW + timedelta(minutes=1))
 
         self.assertEqual(mail.outbox, [])
-        self.assertIsNone(self.open_failure(self.KIND))
-
-    def test_an_outage_is_announced_once_however_long_it_lasts(self):
-        self.broker_lost()
-
-        self.check()
-        self.check(now=NOW + timedelta(minutes=OUTAGE_MINUTES + 1))
-        self.check(now=NOW + timedelta(hours=3))
-
-        self.assertEqual(len(self.announcements(self.KIND)), 1)
-
-    def test_a_broker_that_comes_back_is_reported_as_recovered(self):
-        self.broker_lost()
-        self.check()
-        self.check(now=NOW + timedelta(minutes=OUTAGE_MINUTES + 1))
-
-        self.global_broker.is_reachable = True
-        self.global_broker.save()
-        self.check(now=NOW + timedelta(minutes=10))
-
-        self.assertEqual(len(self.announcements(self.KIND)), 2)
         self.assertIsNone(self.open_failure(self.KIND))
 
     def test_another_broker_still_carrying_the_region_is_not_a_failure(self):
@@ -324,15 +373,312 @@ class IngestionStalledTests(HardFailureTestCase):
         self.assertEqual(len(mail.outbox), 2)
         self.assertIsNone(self.open_failure(self.KIND))
 
-    def test_both_failures_at_once_are_announced_separately(self):
+    def test_a_drop_alongside_a_stall_is_one_message_about_the_stall(self):
+        """A blackout, at the moment it begins.
+
+        Both records open, and only one of them is anybody's business yet: the
+        drop is evidence, and the window it feeds has nothing like enough of it
+        to call the connection unreliable. This is the fast path -- the reader
+        hears within the quarter of an hour, from the check that was left
+        quick precisely so that they would.
+        """
         self.ingested(minutes_ago=STALL_MINUTES + 10)
         self.broker_lost()
 
         self.check()
-        self.check(now=NOW + timedelta(minutes=OUTAGE_MINUTES + 1))
 
-        self.assertEqual(len(mail.outbox), 2)
+        (sent,) = mail.outbox
+        self.assertIn("Ingestion", sent.subject)
         self.assertEqual(HardFailure.objects.open().count(), 2)
+
+
+class GlobalBrokerUnreliableTests(HardFailureTestCase):
+    """The connection judged on what it carried, not on what it is doing now."""
+
+    KIND = HardFailure.GLOBAL_BROKER_UNRELIABLE
+
+    #: Six drops in the last hundred minutes, adding to exactly the budget.
+    #: Spans rather than a count because what is being measured is time lost,
+    #: and a test that seeded "six drops" would pass on six of one minute.
+    A_BAD_WINDOW = ((100, 92), (80, 72), (60, 52), (40, 32), (20, 12), (10, 5))
+
+    def setUp(self):
+        super().setUp()
+
+        # Neither of the other two checks is what is being asserted here, and
+        # both would otherwise find something alongside every one of these.
+        self.ingested(minutes_ago=1)
+
+    def test_a_window_under_the_budget_is_not_a_spell(self):
+        self.drops((100, 92), (80, 72), (60, 52), (40, 32), (20, 12))
+
+        self.check()
+
+        self.assertIsNone(self.open_failure(self.KIND))
+        self.assertEqual(mail.outbox, [])
+
+    def test_a_window_over_the_budget_is_announced(self):
+        self.drops(*self.A_BAD_WINDOW)
+
+        self.check()
+
+        (sent,) = mail.outbox
+        self.assertEqual(sent.to, RECIPIENTS)
+        self.assertIn("unreliable", sent.subject)
+
+    def test_a_blackout_reaches_the_same_alert_by_the_same_route(self):
+        """One long drop and a dozen short ones are the same failure here.
+
+        The measure does not care how the time was lost, which is what makes
+        this one check rather than two: a connection down solidly for
+        three-quarters of an hour has cost the region exactly what a
+        connection down half of every quarter of an hour costs it.
+        """
+        self.drops((90, 45))
+
+        self.check()
+
+        self.assertIsNotNone(self.open_failure(self.KIND))
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_a_spell_is_dated_from_the_first_drop_rather_than_from_noticing(self):
+        """The number somebody would quote to whoever runs the broker.
+
+        Dating a spell from when the window filled up would under-report it by
+        however long the window is -- and it is the only kind of failure here
+        whose real beginning is recoverable, because the drops beneath it say
+        exactly when each one started.
+        """
+        self.drops(*self.A_BAD_WINDOW)
+
+        self.check()
+
+        self.assertEqual(
+            self.open_failure(self.KIND).started_at, NOW - timedelta(minutes=100)
+        )
+
+    def test_a_spell_stands_while_the_window_is_still_dirty(self):
+        """Falling back under the budget is not being reliable again.
+
+        If it were, a flapping afternoon would close and reopen a spell all
+        day and announce itself on each, which is the noise this replaced.
+        """
+        self.drops(*self.A_BAD_WINDOW)
+        self.check()
+
+        self.check(now=NOW + timedelta(minutes=30))
+
+        self.assertIsNotNone(self.open_failure(self.KIND))
+        self.assertEqual(len(self.announcements(self.KIND)), 1)
+
+    def test_a_spell_clears_once_the_window_is_nearly_clean(self):
+        self.drops(*self.A_BAD_WINDOW)
+        self.check()
+
+        self.check(now=NOW + timedelta(minutes=115))
+
+        self.assertIsNone(self.open_failure(self.KIND))
+        self.assertEqual(len(self.announcements(self.KIND)), 2)
+
+    def test_the_recovery_says_what_the_whole_spell_came_to(self):
+        """The one thing the second message can say that the first cannot."""
+        self.drops(*self.A_BAD_WINDOW)
+        self.check()
+
+        self.check(now=NOW + timedelta(minutes=115))
+
+        recovered = self.announcements(self.KIND)[-1]
+        self.assertIn("45m", recovered.body)
+        self.assertIn("6 drops", recovered.body)
+
+    def test_the_spell_says_the_window_that_opened_it_and_goes_on_saying_it(self):
+        """A detail rewritten every beat would be a write a minute for hours,
+        and would leave the record describing its last minute rather than the
+        reason anybody was told anything."""
+        self.drops(*self.A_BAD_WINDOW)
+        self.check()
+
+        self.check(now=NOW + timedelta(minutes=30))
+
+        detail = self.open_failure(self.KIND).detail
+        self.assertIn("45 of the last 120 minutes", detail)
+        self.assertIn("6 drops", detail)
+        self.assertIn("Global Broker", detail)
+
+    def test_a_healthy_connection_with_short_reconnects_says_nothing(self):
+        """The guard on the other side.
+
+        Ordinary reconnections are measured in seconds and happen all day. A
+        rule that drifted sensitive enough to call these a spell would be back
+        to mailing about a connection that is working.
+        """
+        self.drops(
+            (118, 117), (100, 99), (81, 80), (64, 62), (40, 39), (17, 16), (4, 3)
+        )
+
+        self.check()
+
+        self.assertIsNone(self.open_failure(self.KIND))
+        self.assertEqual(mail.outbox, [])
+
+
+class FlappingBrokerTests(HardFailureTestCase):
+    """A whole day of the connection this design was built for.
+
+    Every other test here checks a mechanism. This one checks the requirement,
+    against the shape the Meteo-France Global Broker actually kept for a
+    fortnight: drops of eight minutes about every quarter of an hour, for a
+    day, which is a hundred drops and roughly half the region's traffic lost.
+
+    Under the rule this replaced -- announce a connection down five continuous
+    minutes, announce it again when it comes back -- that day was two hundred
+    messages. The number asserted here is two.
+    """
+
+    KIND = HardFailure.GLOBAL_BROKER_UNRELIABLE
+
+    DROP_MINUTES = 8
+    CYCLE_MINUTES = 14
+    DAY_MINUTES = 24 * 60
+
+    #: How long the connection is watched after the flapping stops. It has to
+    #: outlast the window, or the spell would still be standing at the end and
+    #: the recovery it is supposed to send would go uncounted.
+    SETTLING_MINUTES = UNRELIABLE_WINDOW_MINUTES + 60
+
+    #: How often the check is run. Finer than this only moves the two messages
+    #: by a few minutes each; it does not change how many there are, which is
+    #: what is being asserted.
+    BEAT_MINUTES = 5
+
+    def flap(self):
+        """A day of drops, already on the record as the beats would leave them."""
+        HardFailure.objects.bulk_create(
+            HardFailure(
+                kind=HardFailure.GLOBAL_BROKER_LOST,
+                detail="Could not reach globalbroker.example.int:8883",
+                started_at=NOW + timedelta(minutes=minute),
+                resolved_at=NOW + timedelta(minutes=minute + self.DROP_MINUTES),
+            )
+            for minute in range(0, self.DAY_MINUTES, self.CYCLE_MINUTES)
+        )
+
+    def test_a_day_of_flapping_is_two_messages(self):
+        self.flap()
+
+        for minute in range(
+            0, self.DAY_MINUTES + self.SETTLING_MINUTES, self.BEAT_MINUTES
+        ):
+            # Traffic does arrive between the drops -- half a day's worth of it
+            # -- so the stall check has nothing to say and the count below is
+            # the broker's alone.
+            self.ingested(minutes_ago=-minute)
+            self.check(now=NOW + timedelta(minutes=minute))
+
+        opened, recovered = mail.outbox
+
+        self.assertIn("unreliable", opened.subject)
+        self.assertIn("recovered", recovered.subject)
+
+    def test_the_day_is_still_one_spell_on_the_record(self):
+        """A hundred drops kept as evidence, and one thing that happened."""
+        self.flap()
+
+        for minute in range(
+            0, self.DAY_MINUTES + self.SETTLING_MINUTES, self.BEAT_MINUTES
+        ):
+            self.ingested(minutes_ago=-minute)
+            self.check(now=NOW + timedelta(minutes=minute))
+
+        self.assertEqual(HardFailure.objects.filter(kind=self.KIND).count(), 1)
+        self.assertGreater(
+            HardFailure.objects.filter(kind=HardFailure.GLOBAL_BROKER_LOST).count(), 90
+        )
+
+
+class SuppressedStallTests(HardFailureTestCase):
+    """The stall that is the broker's fault, and the one that is not."""
+
+    KIND = HardFailure.INGESTION_STALLED
+
+    def a_spell(self):
+        """A standing spell of unreliability, with the drops holding it open.
+
+        The drops are not decoration. A spell is not a flag somebody sets, it
+        is a reading of the window beneath it -- so a spell seeded without them
+        is one the very next check correctly clears, and a test built on that
+        would be asserting the suppression while quietly removing the thing
+        doing the suppressing.
+        """
+        self.drops((100, 92), (80, 72))
+
+        return HardFailure.objects.create(
+            kind=HardFailure.GLOBAL_BROKER_UNRELIABLE,
+            detail="Global Broker: unreachable for 45 of the last 120 minutes",
+            started_at=NOW - timedelta(hours=2),
+            notified_at=NOW - timedelta(hours=2),
+        )
+
+    def test_a_stall_while_the_broker_is_already_the_news_is_recorded_silently(self):
+        """One event described twice is one message.
+
+        The reader is holding the cause already. What is withheld is only the
+        second telling -- the row is written either way, because whether the
+        tool was blind is exactly what the record exists to answer.
+        """
+        self.a_spell()
+        self.ingested(minutes_ago=STALL_MINUTES + 10)
+
+        self.check()
+
+        self.assertIsNotNone(self.open_failure(self.KIND))
+        self.assertEqual(self.announcements(self.KIND), [])
+
+    def test_a_stall_with_no_spell_standing_is_announced_at_once(self):
+        """The fast path survives the suppression.
+
+        A blackout beginning now has no spell above it -- the window has not
+        the evidence yet -- so nothing is suppressed and the reader hears
+        inside the quarter of an hour.
+        """
+        self.ingested(minutes_ago=STALL_MINUTES + 10)
+
+        self.check()
+
+        self.assertEqual(len(self.announcements(self.KIND)), 1)
+
+    def test_a_stall_outliving_the_spell_that_silenced_it_is_announced(self):
+        """The broker came back and the traffic did not.
+
+        The most alarming thing this tool can report, and the case the whole
+        ingestion check exists for: the connection is fine, so the silence is
+        this installation's own. The justification for suppressing it -- you
+        already know why -- has just stopped being true.
+        """
+        self.a_spell()
+        self.ingested(minutes_ago=STALL_MINUTES + 10)
+        self.check()
+
+        # Far enough on that the drops have left the window: the connection
+        # has settled, and the spell clears itself on this beat.
+        self.check(now=NOW + timedelta(minutes=95))
+
+        self.assertIsNone(
+            self.open_failure(HardFailure.GLOBAL_BROKER_UNRELIABLE),
+        )
+        self.assertEqual(len(self.announcements(self.KIND)), 1)
+
+    def test_a_stall_silenced_throughout_clears_without_a_word(self):
+        """Nobody was told it began, so nobody is told it ended."""
+        self.a_spell()
+        self.ingested(minutes_ago=STALL_MINUTES + 10)
+        self.check()
+
+        self.ingested(minutes_ago=-1)
+        self.check(now=NOW + timedelta(minutes=1))
+
+        self.assertIsNone(self.open_failure(self.KIND))
+        self.assertEqual(self.announcements(self.KIND), [])
 
 
 class UnannouncedFailureTests(HardFailureTestCase):

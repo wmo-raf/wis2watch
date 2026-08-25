@@ -26,6 +26,7 @@ from wis2watch.core.digest import send_digest
 from wis2watch.core.mail import INCOMPLETE, NOTHING_SENT
 from wis2watch.core.models import (
     MessageSource,
+    NotificationMessage,
     OutgoingEmail,
     UnregisteredCentre,
     WIS2Node,
@@ -37,18 +38,15 @@ NOW = at("2026-08-11T06:00:00")
 
 RECIPIENTS = ["diagnostician@example.int", "duty@example.int"]
 
-#: The broker threshold these tests are written against, stated rather than
+#: The stall threshold these tests are written against, stated rather than
 #: inherited so that revising the first guess does not change what is asserted.
-OUTAGE_MINUTES = 5
-
-#: Past the threshold, so that a failure opened at ``NOW`` is announced.
-PAST_THE_THRESHOLD = NOW + timedelta(minutes=OUTAGE_MINUTES + 1)
+STALL_MINUTES = 15
 
 
 @override_settings(
     WIS2WATCH_DIGEST_RECIPIENTS=RECIPIENTS,
     WIS2WATCH_ALERT_RECIPIENTS=RECIPIENTS,
-    WIS2WATCH_BROKER_OUTAGE_MINUTES=OUTAGE_MINUTES,
+    WIS2WATCH_INGESTION_STALL_MINUTES=STALL_MINUTES,
 )
 class ArchiveTestCase(TestCase):
     def setUp(self):
@@ -72,11 +70,26 @@ class ArchiveTestCase(TestCase):
             last_seen_at=NOW,
         )
 
-    def broker_lost(self):
-        """A Global Broker connection the supervisor could not hold."""
-        self.global_broker.is_reachable = False
-        self.global_broker.last_error = "Could not reach globalbroker.example.int:8883"
-        self.global_broker.save()
+    def ingested(self, *, minutes_ago):
+        """One notification, stored when this tool actually received it.
+
+        The vehicle these tests use to make an alert happen. A stall rather
+        than anything to do with the broker, because a broker is judged over a
+        two-hour window now and seeding one would be seeding a fixture rather
+        than testing an archive -- and what is being checked here is that
+        whatever was sent was written down, not which check sent it.
+        """
+        received = NOW - timedelta(minutes=minutes_ago)
+
+        return NotificationMessage.objects.create(
+            source=self.global_broker,
+            node=self.node,
+            notification_id=f"notification-{minutes_ago}",
+            topic="origin/a/wis2/ke-meteo/data/core/weather",
+            time=received,
+            received_datetime=received,
+            raw_json={},
+        )
 
     # -- reading ---------------------------------------------------------
 
@@ -228,9 +241,8 @@ class AlertArchiveTests(ArchiveTestCase):
 
     def setUp(self):
         super().setUp()
-        self.broker_lost()
+        self.ingested(minutes_ago=STALL_MINUTES + 10)
         check_hard_failures(now=NOW)
-        check_hard_failures(now=PAST_THE_THRESHOLD)
 
     def test_the_alert_is_archived_under_its_own_kind(self):
         """Told apart by what the sender said it was, not by its subject.
@@ -247,13 +259,12 @@ class AlertArchiveTests(ArchiveTestCase):
     def test_the_preview_says_what_was_wrong(self):
         (row,) = self.archived(OutgoingEmail.HARD_FAILURE)
 
-        self.assertIn("globalbroker.example.int", row.summary)
+        self.assertIn("Nothing has been ingested", row.summary)
 
     def test_the_recovery_is_archived_beside_the_outage(self):
-        self.global_broker.is_reachable = True
-        self.global_broker.save()
+        self.ingested(minutes_ago=0)
 
-        check_hard_failures(now=PAST_THE_THRESHOLD + timedelta(minutes=1))
+        check_hard_failures(now=NOW + timedelta(minutes=1))
 
         outage, recovery = sorted(
             self.archived(OutgoingEmail.HARD_FAILURE),
@@ -263,10 +274,10 @@ class AlertArchiveTests(ArchiveTestCase):
         self.assertNotIn("recovered", outage.subject)
         self.assertIn("recovered", recovery.subject)
 
-    def test_an_outage_lasting_a_day_is_archived_once(self):
+    def test_a_failure_lasting_a_day_is_archived_once(self):
         """One row per announcement, not one per check."""
         for minute in range(1, 6):
-            check_hard_failures(now=PAST_THE_THRESHOLD + timedelta(minutes=minute))
+            check_hard_failures(now=NOW + timedelta(minutes=minute))
 
         self.assertEqual(len(self.archived(OutgoingEmail.HARD_FAILURE)), 1)
 

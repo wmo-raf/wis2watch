@@ -256,17 +256,22 @@ def run_send_daily_digest():
 
 @app.task(base=Singleton)
 def run_check_hard_failures():
-    """Look for the two ways this tool itself stops working.
+    """Look for the ways this tool itself stops working.
 
     A singleton for the same reason as the digest, and a sharper one: the
-    record of an outage is what keeps it to a single message, and two runs
+    record of a failure is what keeps it to a single message, and two runs
     reading it before either had written would both find it unannounced.
 
-    Runs far oftener than the thresholds it judges against, since a check that
-    ran every five minutes could not tell a five-minute outage from a
-    twenty-minute one. Failures are recorded with when they began rather than
-    when they were noticed, so a missed beat delays the message without
-    misdating what it says.
+    The beat is what the evidence is made of, which is why it is far finer
+    than anything it judges. Every run is what opens and closes the drops a
+    spell of unreliability is measured over, so running this half as often
+    would not delay the alert -- it would coarsen the measure the alert is
+    computed from, and a broker dropping for eight minutes at a time would be
+    recorded as dropping for ten.
+
+    Failures are recorded with when they began rather than when they were
+    noticed, so a missed beat delays the message without misdating what it
+    says.
     """
     return check_hard_failures().summary
 

@@ -46,7 +46,7 @@ and what identifies it, is the report's own to say: see ``describe_row`` in
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
 from django.conf import settings
@@ -55,9 +55,10 @@ from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext as _
 from django.utils.translation import ngettext
 
+from .alerts import Downtime, downtime, span
 from .analysis import GAP_REPORTS, Notice
 from .mail import admin_url, digest_recipients, notify
-from .models import OutgoingEmail, ReportedFinding
+from .models import HardFailure, OutgoingEmail, ReportedFinding
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,14 @@ DEFAULT_DIGEST_SAMPLE_SIZE = 20
 #: least urgent thing the digest carries.
 DEFAULT_FINDING_GRACE_HOURS = 48
 
+#: How much of a day this tool may have spent unable to watch before the
+#: digest says so, in minutes. About two per cent of a day, which on a healthy
+#: installation -- where a reconnection is measured in seconds -- is well
+#: outside the ordinary. Deliberately far below anything that would raise an
+#: alert: the point of the line is the day nobody was interrupted about, where
+#: the losses were each too small to be news and added up to an afternoon.
+DEFAULT_BAD_DAY_MINUTES = 30
+
 
 def digest_sample_size():
     """How many of a report's findings one email names."""
@@ -89,6 +98,43 @@ def finding_grace_hours():
     return getattr(
         settings, "WIS2WATCH_FINDING_GRACE_HOURS", DEFAULT_FINDING_GRACE_HOURS
     )
+
+
+def bad_day_minutes():
+    """How much of a day may be lost before the digest mentions it."""
+    return getattr(settings, "WIS2WATCH_BAD_DAY_MINUTES", DEFAULT_BAD_DAY_MINUTES)
+
+
+@dataclass(frozen=True)
+class BadDay:
+    """A day this tool spent enough of unable to watch to be worth saying so.
+
+    Not a finding about the region -- it is the region's diagnostician owning
+    up -- which is why it rides along in the digest rather than being one of
+    the reports. It never makes a digest worth sending on its own: a morning
+    whose only news was that yesterday was patchy would be a daily email
+    again, arriving by the side door the digest's own rule was built to shut.
+
+    What it carries that the alerts cannot is the shape of a whole day. An
+    alert is about one spell, and a day made of losses each too small to
+    announce leaves no alert at all while still costing hours of watching.
+    That day is exactly the one this exists to name.
+    """
+
+    headline: str
+    noun: str
+    lost: Downtime
+    day: datetime
+
+    @property
+    def line(self):
+        """The whole of it, as one sentence for a reader in a hurry."""
+        return _("%(headline)s for %(lost)s, across %(count)d %(noun)s.") % {
+            "headline": self.headline,
+            "lost": span(self.lost.duration),
+            "count": self.lost.spells,
+            "noun": self.noun,
+        }
 
 
 @dataclass(frozen=True)
@@ -158,6 +204,7 @@ class Digest:
 
     generated_at: datetime
     changes: list[ReportChanges]
+    bad_days: list[BadDay] = field(default_factory=list)
 
     @property
     def changed(self):
@@ -166,7 +213,14 @@ class Digest:
 
     @property
     def has_changes(self):
-        """Whether there is anything worth anybody's morning."""
+        """Whether there is anything worth anybody's morning.
+
+        Asked of the reports alone. What the tool lost yesterday rides along
+        with news and is never news itself -- a bad day is already an alert's
+        to announce if it was bad enough to interrupt anybody, and a digest
+        that sent because of one would put a daily email back in front of a
+        reader who stopped wanting it.
+        """
         return bool(self.changed)
 
     @property
@@ -233,6 +287,7 @@ def digest_changes(now=None):
     return Digest(
         generated_at=now,
         changes=[_changes_for(report, now=now) for report in GAP_REPORTS],
+        bad_days=_bad_days(now=now),
     )
 
 
@@ -334,6 +389,63 @@ def record_digest(digest, *, now):
             # by hand -- must not fail on the finding both of them found.
             ignore_conflicts=True,
         )
+
+
+def _bad_days(*, now):
+    """What yesterday cost this tool, where that came to enough to say.
+
+    Args:
+        now: the instant the digest is being composed at.
+
+    Returns:
+        list[BadDay]: a line per kind of loss that crossed the mark, and an
+        empty list on a day worth nobody's attention -- which is most days,
+        and is what makes the lines worth reading when they appear.
+
+    The two kinds are asked separately and neither is inferred from the other.
+    During a spell of flapping they are two views of one cause and both lines
+    appear; but a day when the broker was faultless and ingestion stalled
+    anyway is the one this has to be able to show, and a single line that
+    blamed the stall on the connection would show it as a clean day with an
+    unexplained footnote. The modules that find them are careful never to
+    assert one causes the other, and neither is this.
+
+    The day is the last whole UTC day, not the last twenty-four hours. The
+    digest is read as a statement about yesterday, and a rolling window would
+    put part of this morning into it and quietly move the boundary every time
+    the schedule slipped a minute.
+    """
+    end = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start = end - timedelta(days=1)
+    mark = bad_day_minutes()
+
+    days = []
+
+    lost = downtime(HardFailure.GLOBAL_BROKER_LOST, start=start, end=end)
+
+    if lost.minutes >= mark:
+        days.append(
+            BadDay(
+                headline=_("The Global Broker connection was unreachable"),
+                noun=ngettext("drop", "drops", lost.spells),
+                lost=lost,
+                day=start,
+            )
+        )
+
+    stalled = downtime(HardFailure.INGESTION_STALLED, start=start, end=end)
+
+    if stalled.minutes >= mark:
+        days.append(
+            BadDay(
+                headline=_("Nothing was being ingested"),
+                noun=ngettext("spell", "spells", stalled.spells),
+                lost=stalled,
+                day=start,
+            )
+        )
+
+    return days
 
 
 def _changes_for(report, *, now):
