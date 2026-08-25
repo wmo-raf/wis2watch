@@ -223,6 +223,26 @@ class DatasetTests(NodeDetailTestCase):
         self.assertEqual(retired.last_active_hour, NOW - timedelta(hours=300))
 
 
+class StationRegistryTests(NodeDetailTestCase):
+    """Whether the centre's own registry was ever asked what it declares.
+
+    The page's whole station section is a statement about what the centre
+    declares, and it can only be read against whether anything asked. A centre
+    with no address of its own is never asked, and the page saying it declares
+    nothing would be reporting this tool's own blind spot as the centre's
+    fault.
+    """
+
+    def test_a_centre_with_a_registry_has_been_asked(self):
+        self.kenya.base_url = "https://wis2.example.ke"
+        self.kenya.save()
+
+        self.assertTrue(self.detail().advertises_station_registry)
+
+    def test_a_centre_with_no_address_of_its_own_has_never_been_asked(self):
+        self.assertFalse(self.detail().advertises_station_registry)
+
+
 class StationTests(NodeDetailTestCase):
     """The centre's stations, and which of them have stopped."""
 

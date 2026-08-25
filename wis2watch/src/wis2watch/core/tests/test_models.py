@@ -582,3 +582,38 @@ class WritingCatalogueTests(TestCase):
         writer.refresh_from_db()
 
         self.assertTrue(writer.is_writer)
+
+
+class StationRegistryAdvertisementTests(TestCase):
+    """Whether there is anywhere to ask a centre what stations it declares.
+
+    The distinction the rest of the tool reads off this: a centre whose own
+    registry answered and named nothing, and a centre nobody has ever been
+    able to ask, are not the same centre and must not read as one.
+    """
+
+    def test_a_node_with_a_station_registry_advertises_one(self):
+        node = make_node(centre_id="ke-kmd")
+
+        self.assertTrue(node.advertises_station_registry)
+
+    def test_a_node_with_no_address_advertises_none(self):
+        node = make_node(centre_id="bf-anam", base_url="")
+
+        self.assertFalse(node.advertises_station_registry)
+
+    def test_the_ones_there_is_somewhere_to_ask_are_asked(self):
+        make_node(centre_id="ke-kmd")
+        make_node(centre_id="bf-anam", base_url="")
+
+        asked = WIS2Node.objects.advertising_a_station_registry()
+
+        self.assertEqual([node.centre_id for node in asked], ["ke-kmd"])
+
+    def test_the_ones_there_is_nowhere_to_ask_are_named_apart(self):
+        make_node(centre_id="ke-kmd")
+        make_node(centre_id="bf-anam", base_url="")
+
+        unasked = WIS2Node.objects.advertising_no_station_registry()
+
+        self.assertEqual([node.centre_id for node in unasked], ["bf-anam"])

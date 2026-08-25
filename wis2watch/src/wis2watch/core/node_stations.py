@@ -142,7 +142,7 @@ def sync_node_stations(node, fetch=None):
 
     ``fetch`` is how the registry's pages are read, defaulting to the network.
     """
-    if not node.stations_url:
+    if not node.advertises_station_registry:
         logger.debug("%s advertises no station registry", node.centre_id)
 
         return None

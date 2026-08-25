@@ -116,6 +116,7 @@ class SummaryResponseTests(StatisticsEndpointTestCase):
                 "never_transmitted",
                 "undeclared_transmitting",
                 "declared_station_count",
+                "advertises_station_registry",
                 "unlocated_station_count",
                 "buckets",
                 "hourly",

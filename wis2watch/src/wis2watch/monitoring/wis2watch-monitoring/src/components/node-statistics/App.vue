@@ -74,11 +74,25 @@
             <!-- Said once, at the top, and the charts below repeat it on their
                  own axes: with nothing declared there is no promise to measure
                  against, so every ratio on this page is of what has been heard
-                 rather than of what was undertaken. -->
+                 rather than of what was undertaken.
+
+                 Two ways of having no promise, and they are different findings
+                 about different people. A centre that was asked and named
+                 nothing has a registry to populate; a centre with no address of
+                 its own was never asked, and saying it declares nothing would
+                 report this tool's blind spot as the centre's. -->
             <p v-if="!declares" class="node-statistics__caveats">
-              Nothing is declared for this centre, so the figures on this page
-              are counted against the stations it has been heard transmitting
-              for &mdash; not against a registered network.
+              <template v-if="asked">
+                Nothing is declared for this centre, so the figures on this page
+                are counted against the stations it has been heard transmitting
+                for &mdash; not against a registered network.
+              </template>
+              <template v-else>
+                This centre advertises no station registry, so nothing has ever
+                asked it what it declares. The figures on this page are counted
+                against the stations it has been heard transmitting for &mdash;
+                not against a registered network, and not because it has none.
+              </template>
             </p>
 
             <p class="node-statistics__population">
@@ -640,6 +654,12 @@ const population = computed(() =>
 // surface that would have said one has to say which population it is counting
 // against instead.
 const declares = computed(() => counts.value.declared_station_count > 0)
+
+// Why there is no promise, where there is none. A centre whose catalogue
+// records advertise no address for it has no station registry to read, so its
+// declared count is nought for a reason that is nothing to do with the centre
+// -- and the caveat above has to say which of the two it is looking at.
+const asked = computed(() => counts.value.advertises_station_registry)
 
 // What is transmitting right now, counted the way the headline beside it is
 // read. `TRANSMITTING` is declared-only by construction -- an undeclared

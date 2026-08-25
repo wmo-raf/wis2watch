@@ -39,6 +39,15 @@ one of them wrong across the board: a centre the catalogue has never indexed
 and a centre whose record this tool has not read are the same centre from
 here. That is a hard failure rather than a finding, it is announced as one,
 and the report it invalidates says so and holds its rows until it clears.
+
+One thing more is said and nothing withheld for it. Two of these reports read
+what a centre's own registry declares, and a centre whose catalogue records
+advertise no address for it has no registry to read: nothing has ever asked it.
+Its stations stay listed -- traffic nothing accounts for is worth naming
+whoever failed to declare it -- but the claim that the centre declares nothing
+is not the reports' to make. So they say which centres nobody asked: on the row
+where the row names a centre, and once above the table where it names a
+territory instead.
 """
 
 from collections.abc import Callable
@@ -61,6 +70,7 @@ from ..models import (
     PropagationGap,
     StationSource,
     UnregisteredCentre,
+    WIS2Node,
     evidence_horizon,
 )
 from ..rollups import window_start
@@ -109,6 +119,48 @@ class SilentStationRow:
         return self.name or self.wigos_id
 
 
+class DeclaringCentre:
+    """What is known of the centre that ought to have declared this station.
+
+    Three states rather than two flags, because each is a different errand and
+    the row, the notice and the table cell were each working the pair out for
+    themselves. A centre no catalogue has indexed cannot advertise a registry
+    anywhere, so saying it advertises none says nothing about it -- that is the
+    unregistered report's finding, not this one's.
+
+    ``UNASKED`` is the one this distinction exists for. Nothing has ever asked
+    such a centre what it declares, so a station under it is undeclared only as
+    far as anything knows: the two African centres this was checked against
+    turned out to run registries of 71 and 12 stations behind an address no
+    record advertises.
+    """
+
+    UNREGISTERED = "unregistered"
+    UNASKED = "unasked"
+    ASKED = "asked"
+
+    CHOICES = [
+        (UNREGISTERED, _("Unregistered centre")),
+        (UNASKED, _("Advertises no station registry")),
+        (ASKED, _("Registry read")),
+    ]
+
+    LABELS = dict(CHOICES)
+
+    @classmethod
+    def of(cls, node):
+        """Which of the three the centre behind an observation is."""
+        if node is None:
+            return cls.UNREGISTERED
+
+        return cls.ASKED if node.advertises_station_registry else cls.UNASKED
+
+    @classmethod
+    def label(cls, value):
+        """What that is called, for a cell or an email."""
+        return cls.LABELS.get(value, value)
+
+
 @dataclass(frozen=True)
 class UndeclaredStationRow:
     """A station transmitting under a centre's topics that no registry declares.
@@ -116,6 +168,10 @@ class UndeclaredStationRow:
     One row per centre that transmits for it rather than one per station: a
     station carried by two centres is two registration gaps, each of which is
     somebody's to close.
+
+    Except where nothing asked, which is what ``declaring_centre`` carries: it
+    decides whether the row is a finding about the centre at all, and every
+    surface that renders the row asks it rather than working it out again.
     """
 
     station_id: int
@@ -123,6 +179,7 @@ class UndeclaredStationRow:
     name: str
     node_id: int | None
     centre_id: str
+    declaring_centre: str
     last_transmitted: datetime | None
     hours_quiet: float | None
 
@@ -130,6 +187,11 @@ class UndeclaredStationRow:
     def display_name(self):
         """What to call the station, falling back to what identifies it."""
         return self.name or self.wigos_id
+
+    @property
+    def declaring_centre_label(self):
+        """What is known of the centre behind it, for a table cell."""
+        return DeclaringCentre.label(self.declaring_centre)
 
 
 @dataclass(frozen=True)
@@ -225,6 +287,49 @@ def stations_declared_but_silent(*, now=None):
     network is not connected to WIS2 at all.
     """
     return [_silent_station_row(declaration) for declaration in _silent_declarations()]
+
+
+def stations_declared_but_silent_unasked_centres(*, now=None):
+    """What this report cannot say about who declares a silent station.
+
+    Args:
+        now: unused; taken so that every caveat is asked in the same way.
+
+    Returns:
+        str | None: how many centres of the region nothing has been able to
+        ask, or nothing where every one of them advertises a registry.
+
+    The "declared by centre" column is blank two ways and cannot tell them
+    apart. No centre's own registry names the station, which is a registration
+    somebody has to correct; or the centre that would name it advertises no
+    address at all, so nothing has ever asked it -- and the column is then
+    reporting this tool's blind spot as a centre declaring nothing.
+
+    Said rather than resolved, because a row here cannot be told which centre
+    would have declared it. OSCAR files a declaration under a territory rather
+    than under a centre, which is the whole reason this report is about
+    countries; so the admission is the report's, once, above the table.
+
+    Said only where there is a blank cell to qualify. A report every row of
+    which names a declaring centre has nothing this could be about, and one
+    with no rows at all is announcing that every declared station has been
+    heard from -- a sentence about registries nobody read would read there as
+    a reason to doubt that, which it is not.
+    """
+    unasked = WIS2Node.objects.advertising_no_station_registry().count()
+
+    if not unasked or not _silent_declarations_naming_no_centre().exists():
+        return None
+
+    return ngettext(
+        "%(count)d centre advertises no station registry, so nothing has ever "
+        "asked it what it declares. A station only such a centre declares "
+        "reads here as declared by nobody.",
+        "%(count)d centres advertise no station registry, so nothing has ever "
+        "asked them what they declare. A station only such a centre declares "
+        "reads here as declared by nobody.",
+        unasked,
+    ) % {"count": unasked}
 
 
 def stations_transmitting_undeclared(*, now=None):
@@ -540,6 +645,16 @@ def _silent_declarations():
     )
 
 
+def _silent_declarations_naming_no_centre():
+    """The silent declarations whose "declared by centre" column is blank.
+
+    What the caveat above the table is about. Asked of the same query the
+    report is built from, so the sentence cannot appear over a table where
+    every row names a centre.
+    """
+    return _silent_declarations().filter(registry_centre_id__isnull=True)
+
+
 def _silent_station_row(declaration):
     """One OSCAR declaration nothing has answered, as a finding."""
     station = declaration.station
@@ -586,6 +701,7 @@ def _undeclared_station_row(observation, *, now):
         name=station.name,
         node_id=observation.node_id,
         centre_id=observation.node.centre_id if observation.node_id else "",
+        declaring_centre=DeclaringCentre.of(observation.node),
         last_transmitted=observation.last_seen,
         hours_quiet=hours_between(observation.last_seen, now),
     )
@@ -799,15 +915,28 @@ def _silent_station_notice(row):
 
 
 def _undeclared_station_notice(row):
-    """A station transmitting that nothing declares, in a sentence."""
+    """A station transmitting that nothing declares, in a sentence.
+
+    Two sentences, because a centre nobody asked is a different errand from a
+    centre that answered. Mailing the first as a registration gap sends
+    somebody to a centre to ask about a station its own registry may well
+    declare, which is how a digest stops being read.
+    """
     centre = row.centre_id or "an unregistered centre"
+
+    if row.declaring_centre == DeclaringCentre.UNASKED:
+        nobody_declares = (
+            ", which advertises no station registry and has never been asked "
+            "what it declares; OSCAR/Surface does not declare it either"
+        )
+    else:
+        nobody_declares = (
+            " and neither OSCAR/Surface nor any centre's registry declares it"
+        )
 
     return Notice(
         key=f"{row.centre_id}:{row.wigos_id}",
-        summary=(
-            f"{row.wigos_id} is transmitting under {centre} and neither "
-            f"OSCAR/Surface nor any centre's registry declares it"
-        ),
+        summary=f"{row.wigos_id} is transmitting under {centre}{nobody_declares}",
     )
 
 
@@ -873,6 +1002,15 @@ def _bounds_nothing(*, now=None):
     return None
 
 
+def _caveats_nothing(*, now=None):
+    """What a report whose every column means one thing says.
+
+    Nothing at all: each of its cells is a fact it can stand behind, so there
+    is nothing to qualify above the table.
+    """
+    return None
+
+
 def _leaves_nothing_unsettled(*, now=None):
     """Which of a report's findings have stopped being checkable at all.
 
@@ -912,6 +1050,13 @@ class GapReport:
     template so that a sixth report that has to truncate says so in the same
     place and the same way.
 
+    ``describe_caveat`` is the other thing a report can have to say for
+    itself, and is not the same thing. A bound is about which findings are on
+    the page; a caveat is about what a column of the findings that *are* on
+    the page can be read to mean. So it stays off the index, which exists to
+    decide whether a report is worth opening -- a count that is right is worth
+    opening whatever its columns can and cannot distinguish.
+
     ``find_unsettled`` is the same admission made to the digest rather than to
     a reader. A finding leaving a report ordinarily means the problem has
     gone, and where a report has stopped being able to answer for one instead,
@@ -926,6 +1071,7 @@ class GapReport:
     count_rows: Callable[..., int]
     describe_row: Callable[..., Notice | None]
     describe_bound: Callable[..., str | None] = _bounds_nothing
+    describe_caveat: Callable[..., str | None] = _caveats_nothing
     find_unsettled: Callable[..., set[str]] = _leaves_nothing_unsettled
 
 
@@ -959,13 +1105,16 @@ GAP_REPORTS = (
         find_rows=stations_declared_but_silent,
         count_rows=lambda *, now=None: _silent_declarations().count(),
         describe_row=_silent_station_notice,
+        describe_caveat=stations_declared_but_silent_unasked_centres,
     ),
     GapReport(
         slug="transmitting-undeclared",
         title=_("Transmitting but undeclared stations"),
         description=_(
             "Stations heard transmitting that neither OSCAR/Surface nor any "
-            "centre's own registry declares."
+            "centre's own registry declares. A centre advertising no registry "
+            "has never been asked, so its stations are traffic nothing "
+            "accounts for rather than registrations known to be missing."
         ),
         find_rows=stations_transmitting_undeclared,
         count_rows=lambda *, now=None: _undeclared_observations().count(),

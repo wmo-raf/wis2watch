@@ -25,7 +25,8 @@
             max-width: 80ch;
         }
 
-        .report-bound {
+        .report-bound,
+        .report-caveat {
             border-left: 3px solid #ddd;
             padding-left: 10px;
         }
@@ -110,6 +111,15 @@
     {% endcomment %}
     {% if bound_note %}
         <p class="report-note report-bound">{{ bound_note }}</p>
+    {% endif %}
+
+    {% comment %}
+        Beside the bound and not the same as it: what is listed here is
+        everything the report found, and this is what a column of it cannot
+        tell apart.
+    {% endcomment %}
+    {% if caveat_note %}
+        <p class="report-note report-caveat">{{ caveat_note }}</p>
     {% endif %}
 
     {% if rows %}

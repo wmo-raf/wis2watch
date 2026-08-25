@@ -75,6 +75,22 @@ class GlobalDiscoveryCatalogue(TimeStampedModel):
             ).update(is_writer=False)
 
 
+class WIS2NodeQuerySet(models.QuerySet):
+    def advertising_a_station_registry(self):
+        """The centres there is somewhere to ask what stations they declare."""
+        return self.exclude(stations_url="")
+
+    def advertising_no_station_registry(self):
+        """The centres there is nowhere to ask, so nothing knows what they declare.
+
+        Named apart from the ones that answered and declared nothing, because
+        every surface that reports on a centre's stations has to keep the two
+        apart. A centre nobody asked has no registry declarations for the same
+        reason it has no registry sync log: nothing ever went and looked.
+        """
+        return self.filter(stations_url="")
+
+
 class WIS2Node(TimeStampedModel):
     """
     A WIS2 node: one publishing centre, identified by its centre ID alone.
@@ -139,6 +155,8 @@ class WIS2Node(TimeStampedModel):
     last_check = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True)
 
+    objects = WIS2NodeQuerySet.as_manager()
+
     panels = [
         FieldPanel("centre_id"),
         FieldPanel("name"),
@@ -183,6 +201,18 @@ class WIS2Node(TimeStampedModel):
                 self.stations_url = f"{self.base_url}/oapi/collections/stations/items?f=json"
 
         super().save(*args, **kwargs)
+
+    @property
+    def advertises_station_registry(self):
+        """Whether there is anywhere to ask this centre what stations it declares.
+
+        Every surface that reports on a centre's stations reads this before it
+        says anything about what the centre declares. Without it, a centre
+        whose catalogue records point at no address for it reads exactly as a
+        centre that answered and named nothing -- which is a claim about the
+        centre, when what is true is that nobody asked it.
+        """
+        return bool(self.stations_url)
 
     @property
     def country_center_point(self):

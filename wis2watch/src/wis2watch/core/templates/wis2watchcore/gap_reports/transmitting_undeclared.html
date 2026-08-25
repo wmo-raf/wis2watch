@@ -4,7 +4,7 @@
 
 {% block report_note %}
     <p class="report-note">
-        {% trans "One row per centre transmitting for the station: a station carried by two centres is two registrations to correct." %}
+        {% trans "One row per centre transmitting for the station: a station carried by two centres is two registrations to correct. A centre that advertises no station registry has never been asked what it declares, so its rows are traffic nothing accounts for rather than registrations known to be missing." %}
     </p>
 {% endblock %}
 
@@ -18,10 +18,13 @@
 
 {% block table_row %}
     <td>
-        {% if row.node_id %}
-            <a href="{% url 'node_details' row.node_id %}"><code>{{ row.centre_id }}</code></a>
+        {% if row.declaring_centre == "unregistered" %}
+            <span class="badge badge-warning">{{ row.declaring_centre_label }}</span>
         {% else %}
-            <span class="badge badge-warning">{% trans "Unregistered centre" %}</span>
+            <a href="{% url 'node_details' row.node_id %}"><code>{{ row.centre_id }}</code></a>
+            {% if row.declaring_centre == "unasked" %}
+                <div class="row-detail">{% trans "advertises no station registry — never asked" %}</div>
+            {% endif %}
         {% endif %}
     </td>
     <td>{{ row.display_name }}</td>
