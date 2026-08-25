@@ -75,6 +75,17 @@ class GlobalDiscoveryCatalogue(TimeStampedModel):
             ).update(is_writer=False)
 
 
+#: What a wis2box serves under its own address, and the field each is kept in.
+#: Held here rather than spelled where they are built, because they are written
+#: twice -- derived when a node first learns its address, and re-derived when
+#: that address is corrected under it -- and two copies of a path that drifted
+#: apart would leave a node asking half its endpoints at a host it has left.
+DERIVED_ENDPOINTS = {
+    "discovery_metadata_url": "/oapi/collections/discovery-metadata/items?f=json",
+    "stations_url": "/oapi/collections/stations/items?f=json",
+}
+
+
 class WIS2NodeQuerySet(models.QuerySet):
     def advertising_a_station_registry(self):
         """The centres there is somewhere to ask what stations they declare."""
@@ -127,6 +138,18 @@ class WIS2Node(TimeStampedModel):
     node_type = models.CharField(max_length=20, choices=NODE_TYPE_CHOICES, default="wis2box")
 
     base_url = models.URLField(max_length=500, blank=True, help_text=_("Base URL of the node"))
+
+    advertised_base_url = models.URLField(
+        max_length=500,
+        blank=True,
+        editable=False,
+        help_text=_(
+            "The address this centre's own catalogue records last pointed at. "
+            "Kept beside the address in use so the two can be told apart: they "
+            "agree while the catalogue's address is the one being asked, and "
+            "differ once somebody has corrected it by hand."
+        ),
+    )
 
     discovery_metadata_url = models.URLField(
         max_length=500,
@@ -193,12 +216,14 @@ class WIS2Node(TimeStampedModel):
             self.country = monitored_country_code_for_centre_id(self.centre_id)
 
         if self.node_type == "wis2box" and self.base_url:
-            if not self.discovery_metadata_url:
-                self.discovery_metadata_url = (
-                    f"{self.base_url}/oapi/collections/discovery-metadata/items?f=json"
-                )
-            if not self.stations_url:
-                self.stations_url = f"{self.base_url}/oapi/collections/stations/items?f=json"
+            # Filled in only where nothing is there. An endpoint an operator
+            # has corrected is theirs, and a base URL that moves under one
+            # does not entitle this to undo the correction -- moving what was
+            # derived is the catalogue sync's job, where it can tell which
+            # were derived and which were typed.
+            for field, path in DERIVED_ENDPOINTS.items():
+                if not getattr(self, field):
+                    setattr(self, field, f"{self.base_url}{path}")
 
         super().save(*args, **kwargs)
 

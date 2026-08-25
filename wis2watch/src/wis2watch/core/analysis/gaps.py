@@ -768,6 +768,35 @@ def registries_not_answering(*, now=None, unanswered_hours=None):
     ]
 
 
+def registries_not_answering_centre_ids(*, now=None):
+    """Which centres the not-answering report currently names.
+
+    Args:
+        now: the instant each registry's silence is measured up to.
+
+    Returns:
+        set[str]: their centre IDs, empty where every registry is answering.
+
+    The finding without the prose around it, for the one caller that acts on
+    it rather than showing it. The catalogue sync asks this before it will
+    correct a stored address: a registry this report is naming is one whose
+    address is demonstrably dead, which is what entitles a sync that otherwise
+    never writes over an address to write over that one.
+
+    Asked here rather than worked out again there, so that the address a sync
+    corrects and the address a page reports as dead can never be a different
+    set of centres -- which would be a tool quietly editing the registry on
+    evidence it was not showing anybody.
+    """
+    now = now or dj_timezone.now()
+
+    return set(
+        _registries_not_answering(
+            now=now, hours=default_registry_unanswered_hours()
+        ).values_list("centre_id", flat=True)
+    )
+
+
 def registries_not_answering_caveat(*, now=None):
     """What this report cannot say when nothing at all is answering.
 

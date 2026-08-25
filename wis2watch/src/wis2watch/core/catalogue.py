@@ -28,8 +28,10 @@ import logging
 from django.db import transaction
 from django.utils import timezone as dj_timezone
 
+from .analysis import registries_not_answering_centre_ids
 from .interpretation import extract_discovery_records
 from .models import (
+    DERIVED_ENDPOINTS,
     Dataset,
     GlobalDiscoveryCatalogue,
     MessageSource,
@@ -51,8 +53,9 @@ FETCH_TIMEOUT = 60
 #: What :meth:`WIS2Node.save` works out from a base URL. Named alongside it
 #: wherever it is written, because an ``update_fields`` naming the base URL
 #: alone would drop them -- and the station registry URL is the whole reason
-#: the base URL is worth learning.
-DERIVED_FROM_BASE_URL = ("discovery_metadata_url", "stations_url")
+#: the base URL is worth learning. Read off the model's own paths rather than
+#: listed again, so that an endpoint added there cannot be one this forgets.
+DERIVED_FROM_BASE_URL = tuple(DERIVED_ENDPOINTS)
 
 #: Where a wis2box serves the archive of the notifications it has published,
 #: relative to the node's own address. A wis2box convention rather than a WIS2
@@ -82,37 +85,149 @@ def fetch_discovery_pages(catalogue):
     )
 
 
-def _fill_base_url(node, base_url):
-    """Give a node the address its own records point at, where it has none.
+def _apply_base_url(node, base_url, *, registries_not_answering):
+    """Give a node the address its own records point at, where that is ours to do.
 
     Nothing else ever learns it. Without a base URL a node has no station
     registry URL either, and the sync that asks every centre what stations it
     declares passes over it in silence -- so a centre reads as declaring
     nothing when nobody has asked it.
 
-    Filled once and never written over. The address is an inference from where
-    a centre serves its metadata rather than something the catalogue states, so
-    it is offered where there is nothing and withdrawn in favour of anything a
-    later run or an operator has put there. A record advertising no address
-    leaves what is there alone, in the way a record advertising no broker does:
-    most centres carry a canonical link on some of their records and not
-    others, and absence in one is not evidence about the centre.
+    Two writes, and the difference between them is the whole of this. The
+    **fill** puts an address where there is none, and is offered freely: there
+    is nothing to lose. The **re-assert** replaces one, and is not, because the
+    address it replaces may be somebody's correction.
+
+    What licenses a re-assert is the finding, not the failure. A registry that
+    has failed every run past the threshold has been reported dead on a page
+    and in the morning mail, and an address this tool has itself published as
+    dead is one it may stop asking. A registry merely failing this morning is
+    not: hosts restart.
+
+    What protects an operator is provenance, which the finding cannot supply.
+    ``advertised_base_url`` is what the catalogue last said, so an address
+    equal to it is one this sync put there and may take back, and an address
+    that differs is one somebody typed. Without that test a centre whose
+    catalogue address is also dead would have an operator's correction
+    overwritten every six hours for as long as the registry stayed down --
+    two dead addresses taking turns, and the work erased on a schedule.
+
+    What is advertised is recorded either way, including where nothing else is
+    written. It is bookkeeping rather than a claim, it is what makes the next
+    comparison mean anything, and an operator reading the two side by side can
+    see exactly what this sync thinks the centre is saying about itself.
+
+    A record advertising no address changes nothing at all, in the way a record
+    advertising no broker does: most centres carry a canonical link on some of
+    their records and not others, and absence in one is not evidence about the
+    centre.
     """
-    if not base_url or node.base_url:
+    if not base_url:
         return
 
+    if not node.base_url:
+        _write_base_url(node, base_url)
+
+        return
+
+    ours = node.base_url == node.advertised_base_url
+    dead = node.centre_id in registries_not_answering
+
+    if ours and dead and base_url != node.base_url:
+        logger.warning(
+            "%s: registry at %s has not answered; moving it to %s, which its "
+            "records now point at",
+            node.centre_id,
+            node.base_url,
+            base_url,
+        )
+
+        _write_base_url(node, base_url)
+
+        return
+
+    _remember_advertised(node, base_url)
+
+
+def _remember_advertised(node, base_url):
+    """Note what the records point at, having changed nothing else."""
+    if node.advertised_base_url == base_url:
+        return
+
+    node.advertised_base_url = base_url
+    node.save(update_fields=["advertised_base_url", "modified"])
+
+
+def _write_base_url(node, base_url):
+    """Move the node to an address, bringing what was derived from the old one.
+
+    ``save`` fills a derived endpoint only where one is missing, so writing the
+    base URL alone leaves a node asking the host it has just left -- the fill's
+    own ``update_fields`` trap, one layer down and immune to the same fix,
+    because there is a value there and ``save`` will not recompute over it.
+
+    So each endpoint is moved here, and only where this tool is the one that
+    worked it out: an endpoint equal to what the old address would have derived
+    is ours, and anything else is a centre that does not serve the wis2box
+    paths and an operator who has said so.
+    """
+    was = node.base_url
+
+    for field, path in DERIVED_ENDPOINTS.items():
+        if was and getattr(node, field) == f"{was}{path}":
+            setattr(node, field, f"{base_url}{path}")
+
     node.base_url = base_url
-    node.save(update_fields=["base_url", *DERIVED_FROM_BASE_URL, "modified"])
+    node.advertised_base_url = base_url
+    node.save(
+        update_fields=[
+            "base_url",
+            "advertised_base_url",
+            *DERIVED_FROM_BASE_URL,
+            "modified",
+        ]
+    )
+
+    _move_origin_api(node, was)
 
 
-def _apply_node(discovered):
-    """The node a record belongs to, created or refreshed."""
+def _move_origin_api(node, was):
+    """Bring the centre's message archive to the address the node moved to.
+
+    Left behind, it would go on pointing at the host this sync has just
+    established is not there -- the same silent staleness one door down, on a
+    vantage point whose reachability is reported beside the registry's.
+
+    Moved only where it is the guess this tool made from the old address.
+    ``_apply_origin_api`` offers that guess once and never writes over it, for
+    the reason it gives, and an address somebody corrected is not this sync's
+    to move.
+    """
+    if not was:
+        return
+
+    MessageSource.objects.filter(
+        node=node,
+        source_type=MessageSource.ORIGIN_API,
+        api_url=message_archive_url(was),
+    ).update(api_url=message_archive_url(node.base_url))
+
+
+def _apply_node(discovered, *, registries_not_answering=frozenset()):
+    """The node a record belongs to, created or refreshed.
+
+    ``registries_not_answering`` is the centres whose own registry this tool
+    has reported dead, which is what licenses correcting a stored address.
+    Passed in rather than asked for here: it is one query for the run, and
+    asking it per record would be one per dataset in the region.
+    """
     node, created = WIS2Node.objects.get_or_create(
         centre_id=discovered.centre_id,
         defaults={
             "name": discovered.centre_id,
             "country": discovered.country,
             "base_url": discovered.base_url,
+            "advertised_base_url": discovered.base_url,
         },
     )
 
@@ -123,7 +238,11 @@ def _apply_node(discovered):
         node.country = discovered.country
         node.save(update_fields=["country", "modified"])
 
-    _fill_base_url(node, discovered.base_url)
+    _apply_base_url(
+        node,
+        discovered.base_url,
+        registries_not_answering=registries_not_answering,
+    )
 
     return node
 
@@ -214,7 +333,7 @@ def _apply_dataset(node, discovered):
     return CREATED if created else UPDATED
 
 
-def apply_discovery_record(record):
+def apply_discovery_record(record, *, registries_not_answering=frozenset()):
     """Write one discovery record to the registry, reporting what happened.
 
     Each record is applied in its own savepoint, so a record the database
@@ -223,7 +342,9 @@ def apply_discovery_record(record):
     """
     try:
         with transaction.atomic():
-            node = _apply_node(record.node)
+            node = _apply_node(
+                record.node, registries_not_answering=registries_not_answering
+            )
 
             if not node.is_manually_managed:
                 _apply_origin_broker(node, record.origin_broker)
@@ -256,6 +377,13 @@ def sync_catalogue(catalogue, fetch=None):
 
     counts = SyncCounts()
 
+    # Read once, before anything is written. Which registries are dead is a
+    # question about the runs behind them rather than about this catalogue, and
+    # asking it per record would be a query per dataset in the region.
+    not_answering = (
+        registries_not_answering_centre_ids() if catalogue.is_writer else frozenset()
+    )
+
     try:
         for payload in fetch(catalogue):
             for record in extract_discovery_records(payload):
@@ -265,7 +393,11 @@ def sync_catalogue(catalogue, fetch=None):
                 counts.found += 1
 
                 if catalogue.is_writer:
-                    counts.record(apply_discovery_record(record))
+                    counts.record(
+                        apply_discovery_record(
+                            record, registries_not_answering=not_answering
+                        )
+                    )
     except Exception as exc:
         logger.error("Catalogue sync failed for %s: %s", catalogue.centre_id, exc)
 

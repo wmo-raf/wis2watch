@@ -10,6 +10,7 @@ centre -- ``ke-meteo``, ``cg-met``, ``sz-swazimet``, ``gh-gmet`` and
 ``ke-meteo`` and ``tg-anamet`` advertise an address of their own.
 """
 
+from datetime import timedelta
 from io import StringIO
 from unittest import mock
 
@@ -399,6 +400,211 @@ class OriginApiTests(CatalogueSyncTestCase):
             self.api_source("cg-met").api_url,
             "https://wis.dirmet.cg/oapi/collections/messages",
         )
+
+
+class ReassertedAddressTests(CatalogueSyncTestCase):
+    """Correcting an address this tool has itself reported as dead.
+
+    Fill-once cannot self-heal, and four of the region's centres publish their
+    canonical links from bare IP addresses. When one moves, the stored address
+    keeps pointing at the dead host and the hourly station sync keeps failing
+    against it for ever.
+
+    So the finding licenses the write: once a registry has failed every run
+    past the threshold, the address in use is demonstrably dead and the
+    catalogue's is worth trying. What guards an operator's correction is not
+    the finding but provenance -- the address the catalogue last advertised is
+    kept beside the one in use, and only an address this tool put there is one
+    it may take back.
+
+    ``ke-meteo`` is the fixture's centre with an address of its own,
+    ``http://wis.meteo.go.ke``, so a node seeded on some other host is one the
+    catalogue now disagrees with.
+    """
+
+    MOVED_FROM = "http://197.159.3.42"
+    ADVERTISED = "http://wis.meteo.go.ke"
+
+    def node(self, *, base_url=MOVED_FROM, advertised=MOVED_FROM, **kwargs):
+        """A centre already carrying an address, and where it came from."""
+        return WIS2Node.objects.create(
+            centre_id="ke-meteo",
+            name="Kenya Met",
+            base_url=base_url,
+            advertised_base_url=advertised,
+            **kwargs,
+        )
+
+    def registry_run(self, node, *, hours_ago, status=SyncLog.FAILED):
+        return SyncLog.objects.create(
+            node=node,
+            sync_type=SyncLog.NODE_STATIONS,
+            status=status,
+            started_at=dj_timezone.now() - timedelta(hours=hours_ago),
+        )
+
+    def not_answering(self, node, *, since_hours=200):
+        """A registry that has failed every run for long enough to be named."""
+        self.registry_run(node, hours_ago=since_hours)
+        self.registry_run(node, hours_ago=1)
+
+        return node
+
+    def answering(self, node):
+        """A registry whose newest run reached it."""
+        self.registry_run(node, hours_ago=200)
+        self.registry_run(node, hours_ago=1, status=SyncLog.SUCCESS)
+
+        return node
+
+    def reload(self):
+        return WIS2Node.objects.get(centre_id="ke-meteo")
+
+    def test_a_dead_registry_is_moved_to_the_address_now_advertised(self):
+        self.not_answering(self.node())
+
+        self.sync()
+
+        self.assertEqual(self.reload().base_url, self.ADVERTISED)
+
+    def test_the_station_registry_moves_with_it(self):
+        """The whole point. A base URL that moved alone would change nothing.
+
+        ``save`` fills a derived endpoint only where one is missing, so a node
+        whose base URL is corrected under it keeps asking the host it left --
+        and the re-assert reads as having done nothing at all.
+        """
+        self.not_answering(self.node())
+
+        self.sync()
+
+        self.assertEqual(
+            self.reload().stations_url,
+            f"{self.ADVERTISED}/oapi/collections/stations/items?f=json",
+        )
+
+    def test_the_discovery_metadata_endpoint_moves_with_it(self):
+        self.not_answering(self.node())
+
+        self.sync()
+
+        self.assertEqual(
+            self.reload().discovery_metadata_url,
+            f"{self.ADVERTISED}/oapi/collections/discovery-metadata/items?f=json",
+        )
+
+    def test_the_message_archive_vantage_point_moves_with_it(self):
+        """Otherwise the correction leaves a second address on the dead host."""
+        node = self.not_answering(self.node())
+        MessageSource.objects.create(
+            node=node,
+            source_type=MessageSource.ORIGIN_API,
+            name="ke-meteo origin API",
+            centre_id="ke-meteo",
+            api_url=f"{self.MOVED_FROM}/oapi/collections/messages",
+        )
+
+        self.sync()
+
+        self.assertEqual(
+            MessageSource.objects.get(
+                node__centre_id="ke-meteo", source_type=MessageSource.ORIGIN_API
+            ).api_url,
+            f"{self.ADVERTISED}/oapi/collections/messages",
+        )
+
+    def test_what_is_now_advertised_is_remembered(self):
+        """Which is what makes the next comparison mean anything."""
+        self.not_answering(self.node())
+
+        self.sync()
+
+        self.assertEqual(self.reload().advertised_base_url, self.ADVERTISED)
+
+    def test_a_registry_that_is_answering_is_left_alone(self):
+        """Fill-once still holds wherever the address is working."""
+        self.answering(self.node())
+
+        self.sync()
+
+        self.assertEqual(self.reload().base_url, self.MOVED_FROM)
+
+    def test_a_registry_nothing_has_asked_yet_is_left_alone(self):
+        self.node()
+
+        self.sync()
+
+        self.assertEqual(self.reload().base_url, self.MOVED_FROM)
+
+    def test_a_registry_failing_only_since_this_morning_is_left_alone(self):
+        """One bad night is not evidence that an address is dead."""
+        self.not_answering(self.node(), since_hours=6)
+
+        self.sync()
+
+        self.assertEqual(self.reload().base_url, self.MOVED_FROM)
+
+    def test_an_address_somebody_typed_is_never_taken_back(self):
+        """The one thing provenance is for.
+
+        A dead registry is not licence to undo a correction: the operator may
+        be halfway through moving the centre, and a sync that overwrote them
+        every six hours would erase the work faster than it could be done.
+        """
+        self.not_answering(
+            self.node(base_url="https://typed.example.int", advertised=self.MOVED_FROM)
+        )
+
+        self.sync()
+
+        self.assertEqual(self.reload().base_url, "https://typed.example.int")
+
+    def test_a_typed_address_still_records_what_is_advertised(self):
+        """So an operator can see both, and so a later fill is not confused."""
+        self.not_answering(
+            self.node(base_url="https://typed.example.int", advertised=self.MOVED_FROM)
+        )
+
+        self.sync()
+
+        self.assertEqual(self.reload().advertised_base_url, self.ADVERTISED)
+
+    def test_an_endpoint_somebody_typed_is_not_re_derived(self):
+        """A centre serving its registry off the wis2box path is not a wis2box."""
+        node = self.not_answering(self.node())
+        node.stations_url = "https://typed.example.int/stations"
+        node.save(update_fields=["stations_url"])
+
+        self.sync()
+
+        self.assertEqual(self.reload().stations_url, "https://typed.example.int/stations")
+
+    def test_a_dead_registry_the_catalogue_still_agrees_with_is_not_rewritten(self):
+        """There is nothing to correct it to; the host is simply down."""
+        node = self.not_answering(
+            self.node(base_url=self.ADVERTISED, advertised=self.ADVERTISED)
+        )
+        node.refresh_from_db()
+        before = node.modified
+
+        self.sync()
+
+        self.assertEqual(self.reload().modified, before)
+
+    def test_a_manually_managed_node_is_never_corrected(self):
+        self.not_answering(self.node(is_manually_managed=True))
+
+        self.sync()
+
+        self.assertEqual(self.reload().base_url, self.MOVED_FROM)
+
+    def test_a_node_with_no_address_is_still_filled_rather_than_re_asserted(self):
+        """The fill is the ordinary path and is unchanged by any of this."""
+        self.not_answering(self.node(base_url="", advertised=""))
+
+        self.sync()
+
+        self.assertEqual(self.reload().base_url, self.ADVERTISED)
 
 
 class ManuallyManagedNodeTests(CatalogueSyncTestCase):
