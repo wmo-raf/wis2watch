@@ -1778,32 +1778,55 @@ class HardFailureQuerySet(models.QuerySet):
         """
         return self.filter(resolved_at__isnull=True)
 
+    def overlapping(self, start, end):
+        """The spells that stood at any point between two instants.
+
+        The half-open comparison is what makes a spell still open count: a row
+        with no ``resolved_at`` is excluded by nothing, so it is carried into
+        every window that begins before now. Asked wherever the question is
+        how much of a stretch of time a failure occupied rather than whether
+        one is standing.
+        """
+        return self.filter(started_at__lt=end).exclude(resolved_at__lt=start)
+
 
 class HardFailure(models.Model):
     """A spell in which this tool itself stopped working.
 
     Everything else recorded here is a finding about the region. This is the
-    other kind: the Global Broker connection lost, or nothing at all being
-    ingested. Neither says anything about whether African centres are
-    publishing, and both mean that nothing the tool goes on to say about them
-    can be believed until it is fixed.
+    other kind: the Global Broker connection lost, that connection proving
+    unreliable, or nothing at all being ingested. None of them says anything
+    about whether African centres are publishing, and each means that nothing
+    the tool goes on to say about them can be believed until it is fixed.
 
     A row per spell rather than per check, so that a failure lasting a day is
     one thing that happened rather than a thousand. ``notified_at`` is what
-    keeps it to one message: an outage is announced once it has lasted past
-    the threshold, and again only when it clears.
+    keeps it to one message: a failure is announced once, if its check decides
+    it is worth announcing at all, and again only when it clears.
 
-    The threshold is not stored. It is a first guess about what counts as more
-    than a blip, and it is meant to be revised once the region's normal
-    rhythms are known; a row that recorded the guess it was opened under would
-    have to be reconciled with the setting on every read.
+    The kinds are not all announced, and that is the point of keeping them
+    apart. ``GLOBAL_BROKER_LOST`` is written on every drop and mailed on none
+    of them: a broker that drops for seven minutes every quarter of an hour is
+    not sixty pieces of news, and these rows are the evidence rather than the
+    story. ``GLOBAL_BROKER_UNRELIABLE`` is the story -- one spell covering the
+    whole stretch in which those drops added up to the tool not really
+    watching -- and it is read out of the rows beneath it. Which of them
+    reaches anybody is :mod:`wis2watch.core.alerts`'s to say; what is recorded
+    here is what happened, announced or not.
+
+    No threshold is stored, on any kind. They are guesses about what counts as
+    more than a blip, meant to be revised once the region's normal rhythms are
+    known, and a row that recorded the guess it was opened under would have to
+    be reconciled with the setting on every read.
     """
 
     GLOBAL_BROKER_LOST = "global_broker_lost"
+    GLOBAL_BROKER_UNRELIABLE = "global_broker_unreliable"
     INGESTION_STALLED = "ingestion_stalled"
 
     KIND_CHOICES = [
         (GLOBAL_BROKER_LOST, _("Global Broker connection lost")),
+        (GLOBAL_BROKER_UNRELIABLE, _("Global Broker unreliable")),
         (INGESTION_STALLED, _("Ingestion stalled")),
     ]
 
@@ -1849,6 +1872,16 @@ class HardFailure(models.Model):
 
     def __str__(self):
         return f"{self.get_kind_display()} since {self.started_at}"
+
+    @property
+    def duration(self):
+        """How long the failure stood, or has stood so far.
+
+        Left as a timedelta rather than formatted, because the two readers
+        want it differently: a listing column renders it, and the summaries
+        the alerts compose add several of them together.
+        """
+        return (self.resolved_at or dj_timezone.now()) - self.started_at
 
 
 class OutgoingEmail(models.Model):

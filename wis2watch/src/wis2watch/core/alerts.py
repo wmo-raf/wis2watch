@@ -1,35 +1,66 @@
-"""The two failures of this tool itself that cannot wait for the digest.
+"""The failures of this tool itself that cannot wait for the digest.
 
 Everything else here is a finding about the region, and the digest carries
 them in the morning because that is soon enough for a station that has been
-silent for a year. These two are different in kind: the Global Broker
-connection lost, and nothing at all being ingested. While either stands, every
-answer the tool gives about the region is an answer about its own blindness --
-centres look silent, propagation looks broken, and the overview is quietly
-wrong rather than empty.
+silent for a year. These are different in kind: the Global Broker connection
+not carrying the region's traffic, and nothing at all being ingested. While
+either stands, every answer the tool gives about the region is an answer about
+its own blindness -- centres look silent, propagation looks broken, and the
+overview is quietly wrong rather than empty.
 
-They are also the two that are unambiguous. There is no judgement to make
-about whether a broker connection being down is a problem, which is why these
+They are also the ones that are unambiguous. There is no judgement to make
+about whether a broker that is not delivering is a problem, which is why these
 are alerts and the rest is a digest. A rules engine for anything subtler is
 deliberately not here.
 
+What is judged, and what took some finding out, is *when* a connection not
+delivering is worth somebody's attention. The obvious answer -- it is down
+right now, and has been for five minutes -- turns out to describe a broker
+badly. A Global Broker that drops for eight minutes every quarter of an hour
+passes that test sixty times a day and is announced sixty times, which is an
+outage nobody reads about the second time; and the tool is meanwhile blind for
+half of every hour, which is the thing actually worth saying and which no one
+of those sixty messages says. So the connection is judged on how much of a
+trailing window it has failed to carry rather than on whether it is carrying
+now. A blackout is simply that measure at its maximum, and reaches the same
+alert by the same route.
+
+That leaves two records with two different jobs, and separating them is what
+makes the rest work. Every drop opens and closes a ``GLOBAL_BROKER_LOST`` row
+and is announced to nobody: those rows are the evidence, and they have to keep
+being written whether or not anything is worth saying, because they are what
+the window is measured over. The stretch in which they add up to the tool not
+really watching is one ``GLOBAL_BROKER_UNRELIABLE`` row, and that is what is
+announced. One spell, one message, however many drops it contains.
+
 Three things keep an alert worth reading. It is announced once, however long
-the failure lasts, because an outage repeated every minute is an outage
-nobody reads about the second time. It is not announced at all until it has
-lasted past a threshold, so that a broker reconnecting after a blip costs
-nobody their morning. And its clearing is announced too, since the one thing
-worth knowing after "the region is unwatched" is that it is not any more.
+the failure lasts. It is not announced at all until it has passed the measure
+that makes it more than a blip. And its clearing is announced too, since the
+one thing worth knowing after "the region is unwatched" is that it is not any
+more -- and, for a spell of unreliability, what the whole spell came to, which
+is the number worth taking to whoever runs the broker.
 
 The thresholds are a first guess. They are settings rather than constants
 because the right numbers are the region's normal rhythms, and those are not
 known until the tool has watched them for a while.
 
-The two checks are asymmetric on purpose. A broker's state is read from what
-the supervisor recorded about its own connections, so it says nothing when the
+The checks are asymmetric on purpose. A broker's state is read from what the
+supervisor recorded about its own connections, so it says nothing when the
 supervisor itself is not running -- a process killed while connected leaves a
 record saying it was connected. That case is exactly what the ingestion check
 catches, which is why "nothing has arrived" is checked separately rather than
-inferred from the connections looking healthy.
+inferred from the connections looking healthy, and why that check is left fast
+where the broker's has been deliberately slowed.
+
+It is left fast and it is also silenced while the broker is already the news.
+During a spell of unreliability the two checks are describing one event from
+two sides, and the reader has the cause in front of them already. The
+suppression is only ever of a second telling: a stall that begins when no
+spell is standing is announced at once, ahead of anything the window could
+say, and a stall that outlives the spell that silenced it is announced the
+moment that spell clears. The broker coming back while traffic does not is the
+most alarming thing this tool can report, and it is precisely the case the
+ingestion check exists for.
 """
 
 import logging
@@ -47,14 +78,30 @@ from .models import HardFailure, MessageSource, NotificationMessage, OutgoingEma
 
 logger = logging.getLogger(__name__)
 
-#: How long the Global Broker connection may be down before it is announced,
-#: in minutes. Long enough that an ordinary reconnection is not news.
-DEFAULT_BROKER_OUTAGE_MINUTES = 5
+#: How much of the trailing window the Global Broker connection may fail to
+#: carry before it is announced, in minutes. Set well above any ordinary
+#: reconnection, which is measured in seconds: what this is meant to catch is
+#: a connection that is not really holding, not one that blinked.
+DEFAULT_BROKER_UNRELIABLE_MINUTES = 45
+
+#: How long the window it is measured over is, in minutes. This is the number
+#: that decides what "unreliable" means, far more than the budget does: a
+#: short window turns every bad hour into a spell of its own, and a long one
+#: takes hours to notice a blackout. Two hours is long enough that a flapping
+#: connection stays one spell rather than becoming a dozen.
+DEFAULT_BROKER_UNRELIABLE_WINDOW_MINUTES = 120
+
+#: How little of the window may be lost before the connection counts as
+#: reliable again, in minutes. Deliberately far below the budget rather than
+#: equal to it: a spell that cleared the moment the measure dipped under what
+#: opened it would close and reopen all day, and announce itself each time.
+DEFAULT_BROKER_RELIABLE_MINUTES = 10
 
 #: How long nothing may be ingested from anywhere before it is announced, in
-#: minutes. Longer than the broker's, because this is a statement about a
-#: whole region's traffic rather than about one connection, and the region is
-#: entitled to a quiet quarter of an hour.
+#: minutes. Longer than a reconnection and shorter than anything the window
+#: can say, because this is the fast path: it is what notices a blackout while
+#: the broker's own measure is still filling up, and what notices an ingest
+#: process that has died leaving its connection records reading healthy.
 DEFAULT_INGESTION_STALL_MINUTES = 15
 
 
@@ -81,11 +128,11 @@ class Symptom:
     """What one check found, whether or not anything is wrong.
 
     ``since`` is the failure's own beginning where that can be told -- the
-    moment the last message arrived is the moment ingestion stopped. Where it
+    moment the last message arrived is the moment ingestion stopped, and the
+    first drop in the window is when a spell of unreliability began. Where it
     cannot be, it is left empty and the moment a check first found the failure
     stands in. That is the most that can honestly be claimed of a broker whose
-    record says only when it last came up, and it is what keeps a blip from
-    being announced as an outage.
+    record says only when it last came up.
     """
 
     failing: bool
@@ -93,10 +140,51 @@ class Symptom:
     since: datetime | None = None
 
 
-def broker_outage_minutes():
-    """How long the Global Broker may be unreachable before it is announced."""
+@dataclass(frozen=True)
+class Downtime:
+    """How much of a stretch of time one kind of failure occupied.
+
+    ``began`` is the start of the earliest spell touching the stretch, not
+    clamped to it. A four-hour outage half an hour into a two-hour window
+    began four hours ago, and saying it began when the window opened would
+    under-report the one number a reader would take to whoever runs the
+    broker.
+    """
+
+    minutes: float
+    spells: int
+    began: datetime | None
+
+    @property
+    def duration(self):
+        """The same total, for anything that renders rather than compares."""
+        return timedelta(minutes=self.minutes)
+
+
+def broker_unreliable_minutes():
+    """How much of the window may be lost before the connection is announced."""
     return getattr(
-        settings, "WIS2WATCH_BROKER_OUTAGE_MINUTES", DEFAULT_BROKER_OUTAGE_MINUTES
+        settings,
+        "WIS2WATCH_BROKER_UNRELIABLE_MINUTES",
+        DEFAULT_BROKER_UNRELIABLE_MINUTES,
+    )
+
+
+def broker_unreliable_window_minutes():
+    """How long the window the connection is judged over is."""
+    return getattr(
+        settings,
+        "WIS2WATCH_BROKER_UNRELIABLE_WINDOW_MINUTES",
+        DEFAULT_BROKER_UNRELIABLE_WINDOW_MINUTES,
+    )
+
+
+def broker_reliable_minutes():
+    """How little of the window may be lost for the spell to be over."""
+    return getattr(
+        settings,
+        "WIS2WATCH_BROKER_RELIABLE_MINUTES",
+        DEFAULT_BROKER_RELIABLE_MINUTES,
     )
 
 
@@ -109,8 +197,47 @@ def ingestion_stall_minutes():
     )
 
 
+def downtime(kind, *, start, end):
+    """How much of a stretch of time one kind of failure stood for.
+
+    Args:
+        kind: which of :class:`~wis2watch.core.models.HardFailure`'s kinds to
+            add up.
+        start: the beginning of the stretch.
+        end: the end of it, and what an unresolved spell is counted up to.
+
+    Returns:
+        Downtime: the total, how many spells contributed, and when the
+        earliest of them began.
+
+    Read out of the failure rows rather than kept as a counter of its own,
+    because the rows are already the record and a counter would be a second
+    account of the same thing that could disagree with it. Overlapping spells
+    are not possible -- one open row per kind is a database constraint -- so
+    the total is a plain sum rather than a union.
+    """
+    total = timedelta()
+    spells = 0
+    began = None
+
+    for spell in HardFailure.objects.filter(kind=kind).overlapping(start, end):
+        opened = max(spell.started_at, start)
+        closed = min(spell.resolved_at or end, end)
+
+        if closed <= opened:
+            continue
+
+        total += closed - opened
+        spells += 1
+
+        if began is None or spell.started_at < began:
+            began = spell.started_at
+
+    return Downtime(minutes=total.total_seconds() / 60, spells=spells, began=began)
+
+
 def check_hard_failures(*, now=None):
-    """Look for the two ways this tool stops being able to answer anything.
+    """Look for the ways this tool stops being able to answer anything.
 
     Args:
         now: the instant the failures are judged as of.
@@ -120,6 +247,13 @@ def check_hard_failures(*, now=None):
 
     Safe to run on a beat and safe to miss: the state is the failure rows, and
     each run recomputes what is wrong now rather than advancing anything.
+
+    The order the checks run in is load-bearing, which is why they are a
+    sequence rather than a set. The drops have to be reconciled before the
+    spell that is measured over them, or the window would be short by whatever
+    is happening this minute; and the spell has to be reconciled before the
+    stall it silences, or a spell clearing would take a beat longer to let the
+    stall it was hiding be spoken about.
     """
     now = now or dj_timezone.now()
     counts = AlertCounts()
@@ -138,7 +272,7 @@ def _reconcile(check, symptom, *, now, counts):
 
     if not symptom.failing:
         if standing is not None:
-            _clear(standing, now=now, counts=counts)
+            _clear(standing, check=check, now=now, counts=counts)
 
         return
 
@@ -149,7 +283,7 @@ def _reconcile(check, symptom, *, now, counts):
             started_at=min(symptom.since or now, now),
         )
         counts.opened += 1
-    elif standing.detail != symptom.detail:
+    elif not check.frozen_detail and standing.detail != symptom.detail:
         standing.detail = symptom.detail
         standing.save(update_fields=["detail"])
 
@@ -160,17 +294,21 @@ def _reconcile(check, symptom, *, now, counts):
 
 
 def _announce(failure, *, check, now, counts):
-    """Tell somebody, once the failure has lasted long enough to be worth it.
+    """Tell somebody, if this is a failure worth telling anybody about.
 
-    Announced only when it has lasted past its threshold, and recorded as
-    announced only when somebody was actually told -- an installation with no
-    recipient configured yet has not been told, and gets the message when it
-    has one.
+    Whether it is, and when, is the check's own to say: a drop is never worth
+    it, a spell of unreliability is worth it the moment it is found because
+    the window it was found over is itself the waiting, and a stall is worth
+    it unless the reader is already holding the reason for it.
+
+    Recorded as announced only when somebody was actually told -- an
+    installation with no recipient configured yet has not been told, and gets
+    the message when it has one.
     """
-    if now - failure.started_at < timedelta(minutes=check.threshold_minutes()):
+    if not check.announce_now(failure, now=now):
         return
 
-    if not _send(failure, now=now, recovered=False):
+    if not _send(failure, check=check, now=now, recovered=False):
         return
 
     failure.notified_at = now
@@ -183,12 +321,13 @@ def _announce(failure, *, check, now, counts):
     )
 
 
-def _clear(failure, *, now, counts):
+def _clear(failure, *, check, now, counts):
     """Close a failure, and say so to whoever was told it had begun.
 
     A failure nobody was ever told about clears silently. Announcing the end
-    of an outage that was never announced would be a message about nothing,
-    and blips are exactly what the threshold exists to keep out of the mail.
+    of something that was never announced would be a message about nothing,
+    and the drops -- which are never announced -- are most of what passes
+    through here.
     """
     failure.resolved_at = now
     failure.save(update_fields=["resolved_at"])
@@ -198,18 +337,24 @@ def _clear(failure, *, now, counts):
     if failure.notified_at is None:
         return
 
-    _send(failure, now=now, recovered=True)
+    _send(failure, check=check, now=now, recovered=True)
 
     logger.info("[ALERTS] %s cleared after %s", failure.kind, now - failure.started_at)
 
 
-def _send(failure, *, now, recovered):
+def _send(failure, *, check, now, recovered):
     """Put one failure, beginning or ending, in front of whoever is watching.
 
-    Both ends of an outage are the same message about the same thing, so they
-    are written once and told apart by a flag: what a reader needs is the
-    failure, when it began, and -- for the second message -- that everything
-    the tool said in between is worth reading again.
+    Both ends are the same message about the same thing, so they are written
+    once and told apart by a flag: what a reader needs is the failure, when it
+    began, and -- for the second message -- that everything the tool said in
+    between is worth reading again.
+
+    The one thing the second message can say that the first cannot is what the
+    whole spell came to, and only a check that knows how to add its own
+    evidence up can say it. Composed here rather than held on the row, because
+    it is not known until the spell is over and a row that carried it would
+    have to be rewritten on every beat until then.
     """
     subject = failure.get_kind_display()
 
@@ -222,6 +367,12 @@ def _send(failure, *, now, recovered):
             "failure": failure,
             "now": now,
             "recovered": recovered,
+            "intermittent": failure.kind == HardFailure.GLOBAL_BROKER_UNRELIABLE,
+            "recovered_detail": (
+                check.recovered_detail(failure)
+                if recovered and check.recovered_detail
+                else ""
+            ),
             "overview_url": admin_url("node_overview"),
         },
     )
@@ -233,6 +384,9 @@ def _send(failure, *, now, recovered):
         kind=OutgoingEmail.HARD_FAILURE,
         summary=failure.detail,
     )
+
+
+# -- what the checks look for ---------------------------------------------
 
 
 def _global_broker_symptom(*, now):
@@ -252,10 +406,10 @@ def _global_broker_symptom(*, now):
     Nothing here can say when the connection dropped, so nothing here tries.
     A source's ``last_connected_at`` is when it last came up, written on
     connection and left standing afterwards: a broker up for six hours and
-    down for thirty seconds carries a stamp six hours old, and timing the
-    outage from it would announce every blip on the next beat -- which is
-    exactly what the threshold exists to prevent. So the outage begins when a
-    check first found it, and the beat is what bounds how much later that is.
+    down for thirty seconds carries a stamp six hours old. So the drop begins
+    when a check first found it, and the beat is what bounds how much later
+    that is -- which is close enough, because nothing is announced off one of
+    these and the window that is measured over them is two hours long.
     """
     watched = MessageSource.objects.connections().filter(
         source_type=MessageSource.GLOBAL_BROKER, is_active=True
@@ -289,6 +443,116 @@ def _last_connected(source):
     return f" (last connected {source.last_connected_at:%Y-%m-%d %H:%M} UTC)"
 
 
+def _global_broker_unreliable_symptom(*, now):
+    """Whether the Global Broker connection has really been carrying the region.
+
+    Args:
+        now: the instant the window ends at.
+
+    The measure is how many minutes of the trailing window the connection
+    failed to carry, added up out of the drops recorded beneath it. A
+    connection down solidly and one down half of every quarter of an hour
+    reach the same number by different routes, which is the point: to this
+    tool they are the same failure, because in both the region goes half
+    unwatched and everything said about it is unsafe.
+
+    Opening and clearing are deliberately not the same number. A spell that
+    ended the moment the measure fell back under what opened it would spend a
+    flapping afternoon closing and reopening, and announce itself on each --
+    which is the failure mode this whole check exists to end. So once a spell
+    stands it stands until the window is nearly clean, and the distance
+    between the two numbers is what makes it one spell rather than twelve.
+    """
+    window = timedelta(minutes=broker_unreliable_window_minutes())
+    lost = downtime(HardFailure.GLOBAL_BROKER_LOST, start=now - window, end=now)
+
+    standing = (
+        HardFailure.objects.open()
+        .filter(kind=HardFailure.GLOBAL_BROKER_UNRELIABLE)
+        .exists()
+    )
+
+    if standing:
+        failing = lost.minutes > broker_reliable_minutes()
+    else:
+        failing = lost.minutes >= broker_unreliable_minutes()
+
+    if not failing:
+        return Symptom(failing=False)
+
+    return Symptom(
+        failing=True,
+        detail=(
+            f"{_watched_brokers()}: unreachable for {round(lost.minutes)} of the "
+            f"last {round(window.total_seconds() / 60)} minutes, "
+            f"across {lost.spells} {_drops(lost.spells)}"
+        ),
+        since=lost.began,
+    )
+
+
+def _watched_brokers():
+    """The Global Brokers a spell of unreliability is about, by name.
+
+    Named from the registry rather than from the drops, because a drop records
+    that the connection was not carrying rather than which broker was asked --
+    and because a spell is about the connection this installation relies on,
+    which is what the registry says it is.
+    """
+    names = list(
+        MessageSource.objects.connections()
+        .filter(source_type=MessageSource.GLOBAL_BROKER, is_active=True)
+        .values_list("name", flat=True)
+    )
+
+    return "; ".join(names) or "Global Broker"
+
+
+def _drops(count):
+    """One word or the other, for a sentence that has to read as one."""
+    return "drop" if count == 1 else "drops"
+
+
+def span(delta):
+    """A length of time as somebody would say it, to the minute.
+
+    Minutes alone stop being read somewhere around three figures, and a spell
+    of unreliability is very often measured in half-days. Shared with the
+    digest, which reports the same totals over a day rather than a spell and
+    must not word them differently.
+    """
+    minutes = int(delta.total_seconds() // 60)
+    hours, minutes = divmod(minutes, 60)
+
+    if not hours:
+        return f"{minutes}m"
+
+    return f"{hours}h{minutes:02d}m"
+
+
+def _unreliable_spell_summary(failure):
+    """What a whole spell of unreliability came to, once it is over.
+
+    This is the number worth having: not that the connection is working again,
+    which the subject line already said, but how much of the stretch it was
+    not working for and how many separate drops that took. It is the sentence
+    somebody would quote to whoever runs the broker, and it cannot be composed
+    until the spell has ended.
+    """
+    ended = failure.resolved_at or dj_timezone.now()
+    lost = downtime(HardFailure.GLOBAL_BROKER_LOST, start=failure.started_at, end=ended)
+
+    return _(
+        "Over %(spell)s, the connection was unreachable for %(lost)s "
+        "across %(spells)d %(drops)s."
+    ) % {
+        "spell": span(ended - failure.started_at),
+        "lost": span(lost.duration),
+        "spells": lost.spells,
+        "drops": _drops(lost.spells),
+    }
+
+
 def _ingestion_symptom(*, now):
     """Whether anything at all has arrived lately, from any vantage point.
 
@@ -309,10 +573,10 @@ def _ingestion_symptom(*, now):
     while nothing at all was being listened to -- an alert silently disabled
     by another feature working correctly.
 
-    Unlike the broker check, this one can date its own failure: the moment the
-    last message arrived is the moment ingestion stopped. An installation that
-    has never ingested anything has no such moment, and is timed from when it
-    was first looked at instead.
+    Unlike the broker's checks, this one can date its own failure: the moment
+    the last message arrived is the moment ingestion stopped. An installation
+    that has never ingested anything has no such moment, and is timed from
+    when it was first looked at instead.
     """
     arrived = (
         NotificationMessage.objects.exclude(
@@ -339,33 +603,120 @@ def _ingestion_symptom(*, now):
     )
 
 
+# -- when a check is worth somebody's attention ---------------------------
+
+
+def never(failure, *, now):
+    """A failure worth recording and never worth a message.
+
+    The drops are this. Each one is evidence the window is measured over, and
+    on a connection that is behaving badly there are dozens a day; the story
+    they add up to is told by the spell above them, once.
+    """
+    return False
+
+
+def immediately(failure, *, now):
+    """A failure worth a message on the beat it is found.
+
+    For a check whose looking is already the waiting. A spell of unreliability
+    cannot be found until two hours of evidence say so, and holding it back
+    further would be waiting twice.
+    """
+    return True
+
+
+def after(threshold_minutes):
+    """Announce once the failure has outlasted a threshold.
+
+    Args:
+        threshold_minutes: a callable giving the threshold, so that the
+            setting is read at the moment of judging rather than at import.
+    """
+
+    def announce(failure, *, now):
+        return now - failure.started_at >= timedelta(minutes=threshold_minutes())
+
+    return announce
+
+
+def unless_the_broker_is_already_the_news(announce):
+    """Hold a message back while its likeliest cause is already standing.
+
+    Args:
+        announce: the policy that applies when nothing is suppressing it.
+
+    Wraps rather than replaces, so that the check underneath keeps its own
+    threshold and gets it back the moment the suppression lifts. That lifting
+    matters as much as the suppressing: a stall that outlives the spell which
+    silenced it is a broker that came back while traffic did not, and there is
+    nothing this tool can say that is more worth saying.
+
+    Only ever a second telling is withheld. A stall beginning when no spell is
+    standing goes out at once -- which is the fast path a blackout is caught
+    on, well before the window has enough evidence to call the connection
+    unreliable at all.
+    """
+
+    def announce_unless_suppressed(failure, *, now):
+        if (
+            HardFailure.objects.open()
+            .filter(kind=HardFailure.GLOBAL_BROKER_UNRELIABLE)
+            .exists()
+        ):
+            return False
+
+        return announce(failure, now=now)
+
+    return announce_unless_suppressed
+
+
 @dataclass(frozen=True)
 class HardFailureCheck:
-    """One way this tool stops working: how it is looked for, and how long it
-    is given before anybody is told.
+    """One way this tool stops working: how it is looked for, whether anybody
+    is told, and what is said when it is over.
 
-    The two are held as a list for the same reason the gap reports are: a
-    third kind of breakage should be one entry rather than an edit to a
-    branch in the announcing, another in the checking, and a third somebody
-    forgets. What is left hard-wired is the pair of choices on the model,
-    which is what the rows are read back by.
+    Held as a list for the same reason the gap reports are: another kind of
+    breakage should be one entry rather than an edit to a branch in the
+    announcing, another in the checking, and a third somebody forgets. What is
+    left hard-wired is the set of choices on the model, which is what the rows
+    are read back by.
+
+    ``frozen_detail`` is for a check whose detail quotes a moving measure. The
+    reconciliation rewrites a standing failure's detail whenever it changes,
+    which for a spell of unreliability would be a database write every beat
+    for hours, and would leave the row describing its last minute rather than
+    the reason anybody was told about it. Frozen, the detail says what was
+    true when the message went out, which is what the row is a record of.
     """
 
     kind: str
     look_for: Callable[..., Symptom]
-    threshold_minutes: Callable[[], int]
+    announce_now: Callable[..., bool]
+    frozen_detail: bool = False
+    recovered_detail: Callable[[HardFailure], str] | None = None
 
 
-#: The failures worth interrupting somebody for, in the order they are checked.
+#: The failures this tool watches for, in the order they are checked. The
+#: order is part of the behaviour: see ``check_hard_failures``.
 HARD_FAILURE_CHECKS = (
     HardFailureCheck(
         kind=HardFailure.GLOBAL_BROKER_LOST,
         look_for=_global_broker_symptom,
-        threshold_minutes=broker_outage_minutes,
+        announce_now=never,
+    ),
+    HardFailureCheck(
+        kind=HardFailure.GLOBAL_BROKER_UNRELIABLE,
+        look_for=_global_broker_unreliable_symptom,
+        announce_now=immediately,
+        frozen_detail=True,
+        recovered_detail=_unreliable_spell_summary,
     ),
     HardFailureCheck(
         kind=HardFailure.INGESTION_STALLED,
         look_for=_ingestion_symptom,
-        threshold_minutes=ingestion_stall_minutes,
+        announce_now=unless_the_broker_is_already_the_news(
+            after(ingestion_stall_minutes)
+        ),
     ),
 )

@@ -10,6 +10,7 @@ from wagtail.snippets.views.snippets import SnippetViewSet
 from .models import (
     Dataset,
     GlobalDiscoveryCatalogue,
+    HardFailure,
     MessageSource,
     OutgoingEmail,
     WIS2Node,
@@ -202,9 +203,59 @@ class OutgoingEmailViewSet(ModelViewSet):
         return ReadOnlyPermissionPolicy(self.model)
 
 
+class HardFailureViewSet(ModelViewSet):
+    """Every spell in which this tool could not answer for the region.
+
+    The record of its own blindness, and the only page that can settle the
+    question a reader arrives with after a bad week: was the region quiet, or
+    was nobody listening? Most of what is here was never mailed to anybody and
+    was never meant to be -- a connection that drops sixty times in a day is
+    sixty rows and one alert -- so a page is the only place those rows are
+    visible at all.
+
+    Listed by kind and by when the spell began, with how long it lasted beside
+    it, because the question is nearly always about a stretch of time rather
+    than about one row. Whether anybody was told is a column of its own: an
+    unannounced spell is the ordinary case here, and a reader who did not know
+    that would take the blanks for a mail failure.
+
+    Read-only for the same reason the outgoing email archive is. A record of
+    when this tool was not working is worth what it cannot be tidied up to
+    say, and the rows are the evidence the alerts are computed from -- editing
+    one would not correct the past, it would change what the next check
+    believes about it.
+    """
+
+    model = HardFailure
+    base_url_path = "hard-failure"
+    icon = "warning"
+    menu_label = "Hard failures"
+    add_to_admin_menu = True
+    menu_order = 150
+    inspect_view_enabled = True
+    # Wagtail builds the add and edit views whether or not anybody may reach
+    # them, and refuses to start without being told what their form holds.
+    exclude_form_fields = []
+    list_display = [
+        Column("kind", label=_("Kind"), accessor="get_kind_display", sort_key="kind"),
+        Column("started_at", label=_("Began"), sort_key="started_at"),
+        Column("duration", label=_("Lasted")),
+        Column("resolved_at", label=_("Cleared"), sort_key="resolved_at"),
+        Column("notified_at", label=_("Announced"), sort_key="notified_at"),
+        "detail",
+    ]
+    list_filter = ["kind"]
+    search_fields = ["detail"]
+
+    @property
+    def permission_policy(self):
+        return ReadOnlyPermissionPolicy(self.model)
+
+
 admin_viewsets = [
     WIS2NodeViewSet(),
     MessageSourceViewSet(),
     GlobalDiscoveryCatalogueViewSet(),
     OutgoingEmailViewSet(),
+    HardFailureViewSet(),
 ]

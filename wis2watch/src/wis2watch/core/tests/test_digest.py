@@ -20,6 +20,7 @@ from django.test import TestCase, override_settings
 from wis2watch.core.digest import digest_changes, send_digest
 from wis2watch.core.interpretation import OPERATIONAL
 from wis2watch.core.models import (
+    HardFailure,
     HourlyRollup,
     MessageSource,
     PropagationGap,
@@ -115,6 +116,28 @@ class DigestTestCase(TestCase):
             )
 
     # -- reading ---------------------------------------------------------
+
+    def lost_yesterday(self, kind, *spans):
+        """Time this tool spent unable to watch, on the day before ``NOW``.
+
+        Each span is (hour of yesterday it began, hour it ended), which is
+        coarse on purpose: what the digest reads off these is a day's total,
+        and a fixture measured to the minute would suggest the line says more
+        than it does.
+        """
+        yesterday = NOW.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+            days=1
+        )
+
+        return [
+            HardFailure.objects.create(
+                kind=kind,
+                detail="seeded",
+                started_at=yesterday + timedelta(hours=began),
+                resolved_at=yesterday + timedelta(hours=ended),
+            )
+            for began, ended in spans
+        ]
 
     def send(self, *, now=NOW):
         return send_digest(now=now)
@@ -428,3 +451,70 @@ class UnsentDigestTests(DigestTestCase):
 
         self.assertEqual(ReportedFinding.objects.count(), 0)
         self.assertTrue(digest_changes(now=NOW).has_changes)
+
+
+class BadDayTests(DigestTestCase):
+    """The digest owning up to what this tool itself could not watch.
+
+    Not a finding about the region -- it is the qualification on every other
+    finding in the same email, since a centre can only be reported silent for
+    the hours somebody was listening. It rides along and never sends.
+    """
+
+    def test_a_clean_day_is_not_mentioned(self):
+        self.publishing_unregistered("ke-meteo")
+
+        self.send()
+
+        self.assertNotIn("could not watch", self.body())
+
+    def test_a_day_mostly_spent_disconnected_is_owned_up_to(self):
+        self.publishing_unregistered("ke-meteo")
+        self.lost_yesterday(HardFailure.GLOBAL_BROKER_LOST, (2, 5), (9, 11))
+
+        self.send()
+
+        self.assertIn(
+            "The Global Broker connection was unreachable for 5h00m, "
+            "across 2 drops.",
+            self.body(),
+        )
+
+    def test_losses_too_small_to_mention_are_not_mentioned(self):
+        """The mark is what keeps the line worth reading when it appears."""
+        self.publishing_unregistered("ke-meteo")
+        self.lost_yesterday(HardFailure.GLOBAL_BROKER_LOST, (2, 2.2))
+
+        self.send()
+
+        self.assertNotIn("could not watch", self.body())
+
+    def test_a_day_the_broker_was_fine_and_nothing_arrived_still_shows(self):
+        """The day this exists for.
+
+        The connection was faultless, so no spell of unreliability was ever
+        opened and no alert was ever sent -- and the tool was blind anyway.
+        A line that blamed the stall on the connection would render this as a
+        clean day with an unexplained footnote.
+        """
+        self.publishing_unregistered("ke-meteo")
+        self.lost_yesterday(HardFailure.INGESTION_STALLED, (3, 7))
+
+        self.send()
+
+        body = self.body()
+        self.assertIn("Nothing was being ingested for 4h00m", body)
+        self.assertNotIn("Global Broker connection was unreachable", body)
+
+    def test_a_bad_day_never_makes_a_digest_worth_sending(self):
+        """Otherwise it is a daily email again, by the side door.
+
+        The digest's whole rule is that it sends when something changed. A
+        morning whose only news was that yesterday was patchy is a morning the
+        reader is better off not being written to.
+        """
+        self.lost_yesterday(HardFailure.GLOBAL_BROKER_LOST, (0, 23))
+
+        self.send()
+
+        self.assertEqual(mail.outbox, [])
