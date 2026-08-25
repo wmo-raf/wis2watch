@@ -316,6 +316,73 @@ class ClearedFindingTests(DigestTestCase):
         self.assertFalse(digest_changes(now=TOMORROW + timedelta(days=1)).has_changes)
 
 
+class FrozenRegistryTests(DigestTestCase):
+    """A report withheld for days, and the clearing it must not announce.
+
+    The unregistered report is withheld outright while the catalogue that
+    writes the registry is not syncing, because a centre with no record and a
+    centre whose record nobody has read are the same centre from here. The
+    grace period is no use against it: a writer unreachable for a week
+    outlasts any grace, and every centre the sweep had found would go out as
+    registered on the morning it ran out.
+    """
+
+    def setUp(self):
+        super().setUp()
+
+        self.publishing_unregistered("ke-meteo")
+        self.send()
+
+    def registry_frozen(self):
+        return HardFailure.objects.create(
+            kind=HardFailure.CATALOGUE_WRITER_STALE,
+            detail="io-wis2dev-12-test: no records read since 2026-08-09 06:00 UTC",
+            started_at=NOW,
+            notified_at=NOW,
+        )
+
+    def remembered(self):
+        return set(
+            ReportedFinding.objects.filter(
+                report_slug="unregistered-centres"
+            ).values_list("key", flat=True)
+        )
+
+    def test_a_withheld_centre_is_not_reported_as_registered(self):
+        """The point of the whole exercise: nobody registered anything."""
+        self.registry_frozen()
+
+        self.assertIsNone(self.changes_for("unregistered-centres", now=PAST_THE_GRACE))
+
+    def test_nothing_is_mailed_about_a_centre_withheld_that_way(self):
+        self.registry_frozen()
+
+        self.send(now=PAST_THE_GRACE)
+
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_a_withheld_centre_stops_being_remembered(self):
+        """Held, it would be a row waiting on an answer the sweep cannot give:
+        the centre is found again the moment the catalogue answers again."""
+        self.registry_frozen()
+
+        self.send(now=PAST_THE_GRACE)
+
+        self.assertEqual(self.remembered(), set())
+
+    def test_a_centre_still_unregistered_when_the_registry_returns_is_news(self):
+        frozen = self.registry_frozen()
+        self.send(now=PAST_THE_GRACE)
+
+        frozen.resolved_at = PAST_THE_GRACE
+        frozen.save()
+        change = self.changes_for(
+            "unregistered-centres", now=PAST_THE_GRACE + timedelta(hours=1)
+        )
+
+        self.assertEqual([notice.key for notice in change.new], ["ke-meteo"])
+
+
 class WhatCountsAsAFindingTests(DigestTestCase):
     """Not every row of every report is something to tell somebody about."""
 

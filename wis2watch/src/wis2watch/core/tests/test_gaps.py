@@ -31,6 +31,7 @@ from wis2watch.core.analysis import (
 from wis2watch.core.interpretation import OPERATIONAL
 from wis2watch.core.models import (
     Dataset,
+    HardFailure,
     HourlyRollup,
     MessageSource,
     PropagationGap,
@@ -679,6 +680,114 @@ class UnregisteredCentreTests(GapReportTestCase):
         self.assertEqual(
             [row.centre_id for row in self.report()], ["td-meteo", "ml-meteo"]
         )
+
+
+class FrozenRegistryTests(GapReportTestCase):
+    """What the unregistered report may say while the registry is frozen.
+
+    The report is the wildcard sweep's answer to a question it puts to the
+    registry: is this centre publishing that no catalogue has indexed? While
+    the catalogue that writes the registry is not syncing, the question has no
+    answer -- a centre with no record cannot be told from a centre whose
+    record this tool has not read -- and the report would go on naming centres
+    with more and more confidence the longer the sync stayed broken.
+
+    So it is withheld, the way propagation gaps are withheld at a centre whose
+    own broker has gone dark, and for the same reason: sending somebody to ask
+    a centre about a registration that may be perfectly in order is how a
+    diagnostic stops being believed.
+    """
+
+    def report(self):
+        return unregistered_centres(now=NOW)
+
+    def note(self):
+        return gap_report("unregistered-centres").describe_bound(now=NOW)
+
+    def unsettled(self):
+        return gap_report("unregistered-centres").find_unsettled(now=NOW)
+
+    def counted(self):
+        return {
+            summary.slug: summary.count for summary in gap_report_summaries(now=NOW)
+        }["unregistered-centres"]
+
+    def seen(self, centre_id):
+        return UnregisteredCentre.objects.create(
+            centre_id=centre_id,
+            country=centre_id[:2].upper(),
+            sample_topic=f"origin/a/wis2/{centre_id}/data/core/synop",
+            first_seen_at=NOW - timedelta(hours=48),
+            last_seen_at=NOW - timedelta(hours=1),
+        )
+
+    def registry_frozen(self, *, cleared=False):
+        return HardFailure.objects.create(
+            kind=HardFailure.CATALOGUE_WRITER_STALE,
+            detail="io-wis2dev-12-test: no records read since 2026-08-09 06:00 UTC",
+            started_at=NOW - timedelta(days=2),
+            notified_at=NOW - timedelta(days=2),
+            resolved_at=NOW - timedelta(hours=1) if cleared else None,
+        )
+
+    def test_a_centre_is_withheld_while_the_registry_is_frozen(self):
+        self.seen("ml-meteo")
+        self.registry_frozen()
+
+        self.assertEqual(self.report(), [])
+
+    def test_the_index_count_is_withheld_with_it(self):
+        """A count is a claim too, and it is the one people act on."""
+        self.seen("ml-meteo")
+        self.registry_frozen()
+
+        self.assertEqual(self.counted(), 0)
+
+    def test_the_report_says_what_it_is_holding_and_why(self):
+        self.seen("ml-meteo")
+        self.seen("td-meteo")
+        self.registry_frozen()
+
+        note = self.note()
+
+        self.assertIn("2 centres", note)
+        self.assertIn("not syncing", note)
+
+    def test_an_empty_report_still_says_it_is_withholding(self):
+        """With nothing listed and nothing said it would read as all clear."""
+        self.registry_frozen()
+
+        self.assertIn("not syncing", self.note())
+
+    def test_a_withheld_centre_has_stopped_being_checkable(self):
+        """What the digest needs, so it lets the finding go rather than
+        announcing a registration nobody made."""
+        self.seen("ml-meteo")
+        self.registry_frozen()
+
+        self.assertEqual(self.unsettled(), {"ml-meteo"})
+
+    def test_a_registry_being_rebuilt_again_withholds_nothing(self):
+        self.seen("ml-meteo")
+        self.registry_frozen(cleared=True)
+
+        self.assertEqual([row.centre_id for row in self.report()], ["ml-meteo"])
+        self.assertIsNone(self.note())
+        self.assertEqual(self.unsettled(), set())
+
+    def test_nothing_else_is_withheld_by_a_frozen_registry(self):
+        """The other four are about the region rather than about the registry."""
+        self.registry_frozen()
+
+        counted = self.counted()
+        bounds = {
+            summary.slug: summary.bound
+            for summary in gap_report_summaries(now=NOW)
+            if summary.slug != "unregistered-centres"
+        }
+
+        self.assertEqual(counted, 0)
+        self.assertEqual(set(bounds.values()), {None})
 
 
 class UnattributedRateTests(GapReportTestCase):

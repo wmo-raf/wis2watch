@@ -1795,9 +1795,16 @@ class HardFailure(models.Model):
 
     Everything else recorded here is a finding about the region. This is the
     other kind: the Global Broker connection lost, that connection proving
-    unreliable, or nothing at all being ingested. None of them says anything
+    unreliable, nothing at all being ingested, or the one catalogue that
+    writes the registry having stopped answering. None of them says anything
     about whether African centres are publishing, and each means that nothing
     the tool goes on to say about them can be believed until it is fixed.
+
+    The last of them fails in the opposite direction to the others, which is
+    why it belongs here rather than reading as a quieter kind of finding. A
+    broker that stops delivering empties the picture; a registry that stops
+    being rebuilt freezes it, and every surface goes on answering confidently
+    about the region as it stood when the catalogue was last reachable.
 
     A row per spell rather than per check, so that a failure lasting a day is
     one thing that happened rather than a thousand. ``notified_at`` is what
@@ -1823,11 +1830,13 @@ class HardFailure(models.Model):
     GLOBAL_BROKER_LOST = "global_broker_lost"
     GLOBAL_BROKER_UNRELIABLE = "global_broker_unreliable"
     INGESTION_STALLED = "ingestion_stalled"
+    CATALOGUE_WRITER_STALE = "catalogue_writer_stale"
 
     KIND_CHOICES = [
         (GLOBAL_BROKER_LOST, _("Global Broker connection lost")),
         (GLOBAL_BROKER_UNRELIABLE, _("Global Broker unreliable")),
         (INGESTION_STALLED, _("Ingestion stalled")),
+        (CATALOGUE_WRITER_STALE, _("Registry catalogue not syncing")),
     ]
 
     kind = models.CharField(max_length=50, choices=KIND_CHOICES)

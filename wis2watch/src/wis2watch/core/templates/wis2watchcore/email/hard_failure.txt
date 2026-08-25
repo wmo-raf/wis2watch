@@ -9,6 +9,6 @@ It began at {{ started_at }} UTC and was seen working again at {{ resolved_at }}
 
 {{ failure.detail }}
 
-{% if intermittent %}{% translate "While this stands, WIS2Watch is only intermittently receiving the region's traffic: centres will look quieter than they are, and any propagation gap reported may be this tool's own." %}{% else %}{% translate "While this stands, nothing WIS2Watch says about the region can be relied on: centres that are publishing normally will look silent, because nothing is reaching this tool to say otherwise." %}{% endif %}
+{{ consequence }}
 {% endif %}
 {{ overview_url }}

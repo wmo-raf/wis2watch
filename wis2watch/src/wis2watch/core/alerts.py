@@ -3,10 +3,19 @@
 Everything else here is a finding about the region, and the digest carries
 them in the morning because that is soon enough for a station that has been
 silent for a year. These are different in kind: the Global Broker connection
-not carrying the region's traffic, and nothing at all being ingested. While
-either stands, every answer the tool gives about the region is an answer about
-its own blindness -- centres look silent, propagation looks broken, and the
+not carrying the region's traffic, nothing at all being ingested, and the one
+catalogue that writes the registry having stopped answering. While any of them
+stands, every answer the tool gives about the region is an answer about its
+own blindness -- centres look silent, propagation looks broken, and the
 overview is quietly wrong rather than empty.
+
+The last of the three is the one that gets quieter rather than louder, and it
+is the reason a fourth kind exists at all. A registry that has stopped being
+rebuilt does not empty any page: it freezes one, and every surface goes on
+answering confidently about the region as it stood when the catalogue was last
+reachable, while centres that onboard in the meantime are never created, never
+subscribed to and never reported on. Nothing about that is visible to anybody
+who has not already gone looking at a sync log.
 
 They are also the ones that are unambiguous. There is no judgement to make
 about whether a broker that is not delivering is a problem, which is why these
@@ -72,9 +81,17 @@ from django.conf import settings
 from django.template.loader import render_to_string
 from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 
 from .mail import admin_url, alert_recipients, notify
-from .models import HardFailure, MessageSource, NotificationMessage, OutgoingEmail
+from .models import (
+    GlobalDiscoveryCatalogue,
+    HardFailure,
+    MessageSource,
+    NotificationMessage,
+    OutgoingEmail,
+    SyncLog,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +120,40 @@ DEFAULT_BROKER_RELIABLE_MINUTES = 10
 #: the broker's own measure is still filling up, and what notices an ingest
 #: process that has died leaving its connection records reading healthy.
 DEFAULT_INGESTION_STALL_MINUTES = 15
+
+#: How long the registry may go without being rebuilt before it is announced,
+#: in hours. Measured in multiples of the sync's own six-hourly schedule
+#: rather than in the minutes the connection checks use, because a single
+#: missed run is a blip the next run fixes and nothing worth a message. Four
+#: missed runs is a catalogue that is not coming back on its own.
+DEFAULT_CATALOGUE_STALE_HOURS = 24
+
+#: What each kind of failure costs a reader, in the sentence the message ends
+#: on. Held here, one per check, rather than as branches in the template: a
+#: fourth kind of breakage should be one entry in the list below rather than a
+#: fourth arm of an ``if`` somebody has to remember to extend. They differ
+#: more than the failures do -- a broker gone empties the picture, a registry
+#: gone freezes it -- and the difference is the only part of the message a
+#: reader could not have worked out from the subject line.
+BLIND = gettext_lazy(
+    "While this stands, nothing WIS2Watch says about the region can be relied "
+    "on: centres that are publishing normally will look silent, because "
+    "nothing is reaching this tool to say otherwise."
+)
+
+HALF_BLIND = gettext_lazy(
+    "While this stands, WIS2Watch is only intermittently receiving the "
+    "region's traffic: centres will look quieter than they are, and any "
+    "propagation gap reported may be this tool's own."
+)
+
+FROZEN = gettext_lazy(
+    "While this stands, the registry is frozen at what that catalogue last "
+    "said: a centre that onboards to WIS2 now is never created, never "
+    "subscribed to, and never reported on. Unregistered centres are withheld "
+    "meanwhile, because a centre publishing without a catalogue record cannot "
+    "be told from one whose record this tool has not read."
+)
 
 
 @dataclass
@@ -197,6 +248,18 @@ def ingestion_stall_minutes():
     )
 
 
+def catalogue_stale_hours():
+    """How long the registry may go unrebuilt before it is announced."""
+    return getattr(
+        settings, "WIS2WATCH_CATALOGUE_STALE_HOURS", DEFAULT_CATALOGUE_STALE_HOURS
+    )
+
+
+def catalogue_stale_minutes():
+    """The same threshold in the minutes the announcing policies judge in."""
+    return catalogue_stale_hours() * 60
+
+
 def downtime(kind, *, start, end):
     """How much of a stretch of time one kind of failure stood for.
 
@@ -253,7 +316,9 @@ def check_hard_failures(*, now=None):
     spell that is measured over them, or the window would be short by whatever
     is happening this minute; and the spell has to be reconciled before the
     stall it silences, or a spell clearing would take a beat longer to let the
-    stall it was hiding be spoken about.
+    stall it was hiding be spoken about. The registry check depends on none of
+    them and nothing depends on it, so it is last: what it reads is sync logs,
+    which no check here writes.
     """
     now = now or dj_timezone.now()
     counts = AlertCounts()
@@ -347,8 +412,9 @@ def _send(failure, *, check, now, recovered):
 
     Both ends are the same message about the same thing, so they are written
     once and told apart by a flag: what a reader needs is the failure, when it
-    began, and -- for the second message -- that everything the tool said in
-    between is worth reading again.
+    began, what to stop believing while it stands, and -- for the second
+    message -- that everything the tool said in between is worth reading
+    again.
 
     The one thing the second message can say that the first cannot is what the
     whole spell came to, and only a check that knows how to add its own
@@ -367,7 +433,7 @@ def _send(failure, *, check, now, recovered):
             "failure": failure,
             "now": now,
             "recovered": recovered,
-            "intermittent": failure.kind == HardFailure.GLOBAL_BROKER_UNRELIABLE,
+            "consequence": check.consequence,
             "recovered_detail": (
                 check.recovered_detail(failure)
                 if recovered and check.recovered_detail
@@ -603,6 +669,119 @@ def _ingestion_symptom(*, now):
     )
 
 
+def _writer_catalogue_symptom(*, now):
+    """Whether the registry is still being rebuilt from a catalogue.
+
+    Args:
+        now: the instant the registry's age is measured up to.
+
+    Exactly one catalogue creates registry records; the others are fetched
+    read-only so that their divergence from it is reportable. So this is a
+    question about one catalogue, and a reading catalogue that goes dark is
+    deliberately not asked about here -- the tool still answers without it.
+
+    An installation with no writer designated is not one whose writer has
+    stopped answering, and gets the silence a Global Broker nothing has been
+    given gets. A writer that has never synced is a different thing and is
+    reported, timed from when it was first looked at: a catalogue that has sat
+    in the registry for a day without one run against it means the sync is not
+    running, which freezes the registry exactly as an unreachable host does.
+
+    What is measured is when the registry was last actually rebuilt, not when
+    a run last succeeded. A catalogue answering 200 with nothing in it passes
+    every check this tool makes -- the fetch worked, the run is green, the
+    stamp is fresh -- and stops the registry growing just as effectively as a
+    refused connection. So the clock is read off the last run that brought
+    records back, and a run that brought none holds nothing up.
+    """
+    writer = GlobalDiscoveryCatalogue.objects.filter(
+        is_writer=True, is_active=True
+    ).first()
+
+    if writer is None:
+        return Symptom(failing=False)
+
+    rebuilt = _registry_last_rebuilt(writer)
+
+    if rebuilt and now - rebuilt < timedelta(hours=catalogue_stale_hours()):
+        return Symptom(failing=False)
+
+    return Symptom(
+        failing=True,
+        detail=f"{writer.name} ({writer.centre_id}): {_frozen_since(rebuilt)}, "
+        f"{_why_the_registry_is_frozen(writer)}",
+        since=rebuilt,
+    )
+
+
+def _registry_last_rebuilt(writer):
+    """When a run of this catalogue last brought registry records back.
+
+    A failed run brought nothing back whatever it read on the way, and an
+    empty one brought nothing back by answering. Neither moves this clock,
+    which is the whole of what "the registry is current" can honestly mean.
+
+    Timed from when the run finished rather than when it started, because
+    what the stamp claims is that the registry was current at that moment.
+    """
+    last = (
+        SyncLog.objects.filter(
+            catalogue=writer, sync_type=SyncLog.CATALOGUE, items_found__gt=0
+        )
+        .exclude(status=SyncLog.FAILED)
+        .order_by("-started_at")
+        .first()
+    )
+
+    if last is None:
+        return None
+
+    return last.completed_at or last.started_at
+
+
+def _frozen_since(rebuilt):
+    """How long the registry has been standing still, for a reader to date it by."""
+    if rebuilt is None:
+        return "the registry has never been built from it"
+
+    return f"no records read since {rebuilt:%Y-%m-%d %H:%M} UTC"
+
+
+def _why_the_registry_is_frozen(writer):
+    """Which of the ways a catalogue stops feeding the registry this one is.
+
+    Three of them look identical from the registry's side and want different
+    people: a run that failed is a catalogue or a network to chase, a run that
+    answered with nothing is a catalogue that has lost the region's records,
+    and no run at all since is a scheduler that has stopped. The last is the
+    one nothing else in this tool would ever say, because a sync that does not
+    run leaves no failing sync log to read.
+    """
+    latest = (
+        SyncLog.objects.filter(catalogue=writer, sync_type=SyncLog.CATALOGUE)
+        .order_by("-started_at")
+        .first()
+    )
+
+    if latest is None:
+        return "no sync has ever run against it"
+
+    ran_at = f"{latest.started_at:%Y-%m-%d %H:%M} UTC"
+
+    if latest.status == SyncLog.FAILED:
+        return f"the run at {ran_at} failed: {_one_line(latest.error_message)}"
+
+    if not latest.items_found:
+        return f"the run at {ran_at} returned no records for the monitored region"
+
+    return "no sync has run since"
+
+
+def _one_line(message):
+    """An exception's text as a sentence a subject-adjacent line can hold."""
+    return " ".join(message.split()) or "no reason recorded"
+
+
 # -- when a check is worth somebody's attention ---------------------------
 
 
@@ -682,6 +861,10 @@ class HardFailureCheck:
     left hard-wired is the set of choices on the model, which is what the rows
     are read back by.
 
+    ``consequence`` is what the failure costs a reader, and it is the reason
+    the message is worth sending at all: the subject line says what broke, and
+    this says what to stop believing until it is mended.
+
     ``frozen_detail`` is for a check whose detail quotes a moving measure. The
     reconciliation rewrites a standing failure's detail whenever it changes,
     which for a spell of unreliability would be a database write every beat
@@ -693,6 +876,7 @@ class HardFailureCheck:
     kind: str
     look_for: Callable[..., Symptom]
     announce_now: Callable[..., bool]
+    consequence: str
     frozen_detail: bool = False
     recovered_detail: Callable[[HardFailure], str] | None = None
 
@@ -704,11 +888,13 @@ HARD_FAILURE_CHECKS = (
         kind=HardFailure.GLOBAL_BROKER_LOST,
         look_for=_global_broker_symptom,
         announce_now=never,
+        consequence=BLIND,
     ),
     HardFailureCheck(
         kind=HardFailure.GLOBAL_BROKER_UNRELIABLE,
         look_for=_global_broker_unreliable_symptom,
         announce_now=immediately,
+        consequence=HALF_BLIND,
         frozen_detail=True,
         recovered_detail=_unreliable_spell_summary,
     ),
@@ -718,5 +904,12 @@ HARD_FAILURE_CHECKS = (
         announce_now=unless_the_broker_is_already_the_news(
             after(ingestion_stall_minutes)
         ),
+        consequence=BLIND,
+    ),
+    HardFailureCheck(
+        kind=HardFailure.CATALOGUE_WRITER_STALE,
+        look_for=_writer_catalogue_symptom,
+        announce_now=after(catalogue_stale_minutes),
+        consequence=FROZEN,
     ),
 )
