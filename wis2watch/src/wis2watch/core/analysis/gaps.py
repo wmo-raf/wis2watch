@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from django.conf import settings
-from django.db.models import Exists, F, OuterRef, Q, Subquery, Sum
+from django.db.models import Exists, F, Max, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone as dj_timezone
 from django.utils.formats import date_format
@@ -315,6 +315,66 @@ def propagation_gaps_left_out(*, now=None):
         "horizon": date_format(
             dj_timezone.localtime(evidence_horizon(now)), "Y-m-d H:i"
         ),
+    }
+
+
+def propagation_gaps_unsettled(*, now=None):
+    """The centres whose gaps left this report without ever being answered.
+
+    Args:
+        now: the instant the horizon is worked out from.
+
+    Returns:
+        set[str]: the keys of the findings this report can no longer settle
+        either way -- centre IDs, as this report identifies a finding -- and
+        an empty set where every centre that has left the report left it
+        having been heard from.
+
+    A centre leaves this report two ways that look identical from outside it.
+    Its gaps close, which is a path that started working; or its gaps pass the
+    horizon, which is this tool running out of evidence while the question
+    stands. Whoever reads the report can tell them apart from the sentence
+    beside it. Whatever reads it -- the digest -- cannot, and would otherwise
+    announce the second as the first.
+
+    The horizon is asked for by the same query that counts it in
+    ``propagation_gaps_left_out``: the two disagreeing about what is past it
+    would be this same mistake in a second place. Centres whose own vantage
+    points have gone dark are absent here for the reason they are absent from
+    that sentence too -- their gaps are withheld rather than unanswerable, and
+    that is an absence that ends.
+
+    What is asked on top of it is whether the centre has been heard from
+    since. A gap the world turned out to carry is the one thing that settles
+    anything here, and a centre with one of those later than its last
+    unanswerable gap has been observed publishing to a path that works. So
+    only a centre whose last word is a question nobody can ask any more is
+    named -- otherwise a single gap left open one spring would silence every
+    good word about that centre for the life of the installation.
+    """
+    now = now or dj_timezone.now()
+
+    unanswered = dict(
+        _gaps_past_the_horizon(now=now)
+        .values_list("node__centre_id")
+        .annotate(last=Max("published_at"))
+    )
+
+    if not unanswered:
+        return set()
+
+    carried = dict(
+        PropagationGap.objects.filter(
+            node__centre_id__in=unanswered, resolved_at__isnull=False
+        )
+        .values_list("node__centre_id")
+        .annotate(last=Max("published_at"))
+    )
+
+    return {
+        centre_id
+        for centre_id, unanswered_at in unanswered.items()
+        if centre_id not in carried or carried[centre_id] < unanswered_at
     }
 
 
@@ -712,6 +772,17 @@ def _bounds_nothing(*, now=None):
     return None
 
 
+def _leaves_nothing_unsettled(*, now=None):
+    """Which of a report's findings have stopped being checkable at all.
+
+    None of them, for every report whose findings it can still answer for.
+    A report that stops listing something is saying the thing has gone, and
+    only a report whose evidence expires under it -- the propagation report --
+    can mean anything else by it.
+    """
+    return set()
+
+
 @dataclass(frozen=True)
 class GapReport:
     """One report: what it finds, and how to ask for it.
@@ -723,10 +794,10 @@ class GapReport:
     that exists but is not in the digest is a finding nobody sees until they
     next open the tool.
 
-    The three callables are named as the verbs they are. A template renders
-    any attribute it is given and calls it if it can, so a field called
-    ``count`` would run a query from the middle of a page that only meant to
-    print a number.
+    The callables are named as the verbs they are. A template renders any
+    attribute it is given and calls it if it can, so a field called ``count``
+    would run a query from the middle of a page that only meant to print a
+    number.
 
     ``describe_row`` answers with nothing where a row is not a finding at all.
     The rate report needs that: it lists every publishing centre so that a
@@ -739,6 +810,12 @@ class GapReport:
     propagation report bounds anything, and it is held here rather than in its
     template so that a sixth report that has to truncate says so in the same
     place and the same way.
+
+    ``find_unsettled`` is the same admission made to the digest rather than to
+    a reader. A finding leaving a report ordinarily means the problem has
+    gone, and where a report has stopped being able to answer for one instead,
+    this is where it says which -- so that what nobody can check any more is
+    let go rather than announced as fixed.
     """
 
     slug: str
@@ -748,6 +825,7 @@ class GapReport:
     count_rows: Callable[..., int]
     describe_row: Callable[..., Notice | None]
     describe_bound: Callable[..., str | None] = _bounds_nothing
+    find_unsettled: Callable[..., set[str]] = _leaves_nothing_unsettled
 
 
 @dataclass(frozen=True)
@@ -805,6 +883,7 @@ GAP_REPORTS = (
         count_rows=lambda *, now=None: _reportable_gaps(now=now).count(),
         describe_row=_propagation_gap_notice,
         describe_bound=propagation_gaps_left_out,
+        find_unsettled=propagation_gaps_unsettled,
     ),
     GapReport(
         slug="unregistered-centres",

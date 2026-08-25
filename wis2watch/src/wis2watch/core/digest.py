@@ -30,14 +30,22 @@ being listed is given a grace period before it is let go, and what a run found
 is written down whether or not anything was worth sending -- the clock has to
 keep running on the mornings there is no mail.
 
-One of those absences no grace period can rescue, because it is permanent: a
-propagation gap passes the horizon its evidence ends at, past which nothing
-can check it either way ever again. A centre leaving the report that way has
-had nothing new go missing for the whole forensic window, so the news is not
-false -- but it is not the fix it reads as either, and nothing here can tell
-the two apart. So each report's own account of what it has bounded is carried
-into the mail beside its news, where the gaps that caused such a clearing are
-the very ones it counts.
+One of those absences no grace period can rescue, because it is not one that
+ends: a propagation gap passes the horizon its evidence ends at, past which
+nothing can settle it either way ever again. Waiting on it is pointless, and
+calling it cleared is the first of the two harms above -- a centre that had
+nothing new go missing for a fortnight is announced as a path somebody fixed,
+which nobody did.
+
+So a report is asked which of its findings have stopped being checkable
+rather than stopped -- which only it can know -- and those are let go without
+a word: nothing is announced, the row is dropped, and the same centre breaking
+again is news again. Everything else a report stops listing keeps its grace
+period, because every other absence is one that can end.
+
+What that costs is that a centre really going quiet for the whole forensic
+window is not announced either, which is why each report's own account of
+what it has bounded is still carried into the mail beside its news.
 
 The reports are read from the same registry the index and the routing read, so
 a sixth report joins the digest by existing. What each one considers a finding,
@@ -145,12 +153,17 @@ class ReportChanges:
     already reported. It is what a run writes down to say these were still
     being found today, which is what the grace period is measured from.
 
+    ``let_go`` is the findings that have stopped being checkable rather than
+    stopped: the report has said it can no longer answer for them either way,
+    so no grace period will bring them back and no clearing describes them.
+    They are dropped from what is remembered and never mentioned, which is
+    what leaves the same centre breaking again to be news again.
+
     ``bound`` is what the report holds and does not list, where it bounds
-    anything. It is carried because it is the one thing that can qualify the
-    news beside it: the propagation report stops listing a centre whose gaps
-    have passed the horizon its evidence ends at, and a centre that leaves
-    that way is cleared here for want of anything left to check rather than
-    because anybody fixed it.
+    anything. It is carried because it is the one thing that qualifies the
+    news beside it: a centre that has gone quiet for the whole forensic window
+    is one this report can no longer say anything about, and the mail should
+    not read as though the region were clear.
     """
 
     slug: str
@@ -160,6 +173,7 @@ class ReportChanges:
     new: list[Notice]
     resolved: list[Notice]
     bound: str | None = None
+    let_go: list[str] = field(default_factory=list)
 
     @property
     def found(self):
@@ -317,6 +331,11 @@ def send_digest(now=None):
     # morning with no mail is exactly when that would otherwise go unsaid.
     record_seen(digest, now=now)
 
+    # Likewise on every run, and for the same reason in reverse: letting go of
+    # a finding nothing can check any more is not news, so it cannot be made
+    # to wait on there being any.
+    record_let_go(digest)
+
     if not digest.has_changes:
         logger.info("[DIGEST] nothing has changed; nothing sent")
         return digest
@@ -357,6 +376,30 @@ def record_seen(digest, *, now):
         ReportedFinding.objects.filter(
             report_slug=change.slug, key__in=change.seen
         ).update(last_seen_at=now)
+
+
+def record_let_go(digest):
+    """Forget the findings their reports can no longer answer for.
+
+    Quietly, and whether or not anything was sent. A finding here has not
+    cleared and has not gone: the report has run out of the evidence that
+    would settle it, so it will never be listed again and nothing will ever
+    say what became of it. Keeping the row would leave a grace period running
+    against an absence that does not end, which is how a fortnight of silence
+    at a centre comes to be announced as a recovery.
+
+    Dropping it is what makes the same centre breaking again arrive as news
+    rather than as a finding somebody was told about a season ago. Nothing is
+    lost by it: the rows here are a record of what has been said, not evidence
+    of anything, and the reports are derived afresh each time they are asked.
+    """
+    for change in digest.changes:
+        if not change.let_go:
+            continue
+
+        ReportedFinding.objects.filter(
+            report_slug=change.slug, key__in=change.let_go
+        ).delete()
 
 
 def record_digest(digest, *, now):
@@ -455,7 +498,12 @@ def _changes_for(report, *, now):
         finding.key: finding
         for finding in ReportedFinding.objects.filter(report_slug=report.slug)
     }
+    unsettled = report.find_unsettled(now=now)
     gone_by = now - timedelta(hours=finding_grace_hours())
+
+    # A finding the report still lists is a finding, whatever else the report
+    # can no longer answer for. Only what has left it is anybody's to let go.
+    gone = {key: finding for key, finding in reported.items() if key not in found}
 
     return ReportChanges(
         slug=report.slug,
@@ -465,10 +513,11 @@ def _changes_for(report, *, now):
         new=[notice for key, notice in found.items() if key not in reported],
         resolved=[
             Notice(key=key, summary=finding.summary)
-            for key, finding in reported.items()
-            if key not in found and finding.last_seen_at <= gone_by
+            for key, finding in gone.items()
+            if key not in unsettled and finding.last_seen_at <= gone_by
         ],
         bound=report.describe_bound(now=now),
+        let_go=[key for key in gone if key in unsettled],
     )
 
 

@@ -531,6 +531,116 @@ class PropagationGapHorizonTests(PropagationGapTestCase):
         self.assertEqual(self.counted()["propagation-gaps"], 1)
 
 
+@override_settings(WIS2WATCH_RAW_RETENTION_DAYS=14)
+class PropagationGapUnsettledTests(PropagationGapTestCase):
+    """Which centres left the report for want of anything left to check.
+
+    Leaving a report is ordinarily a problem going away, and the digest reads
+    it that way once it has stood long enough to mean something. Past the
+    horizon it is not: the Global Broker rows that would settle the gap have
+    been expired, so the centre leaves for good with the question still open,
+    and no amount of waiting will bring it back. Only the report knows which
+    of the two happened, so this is where it says.
+    """
+
+    def unsettled(self, now=NOW):
+        return gap_report("propagation-gaps").find_unsettled(now=now)
+
+    def note(self, now=NOW):
+        return gap_report("propagation-gaps").describe_bound(now=now)
+
+    def test_a_centre_whose_gaps_passed_the_horizon_is_named(self):
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+
+        self.assertEqual(self.unsettled(), {"ke-meteo"})
+
+    def test_a_centre_whose_gaps_can_still_be_checked_is_not_named(self):
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="this-morning", hours_ago=2)
+
+        self.assertEqual(self.unsettled(), set())
+
+    def test_an_old_gap_the_world_turned_out_to_carry_settles_it(self):
+        """Closed while the evidence stood: that centre really did recover."""
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20, resolved=True)
+
+        self.assertEqual(self.unsettled(), set())
+
+    def test_a_centre_whose_broker_is_unreachable_is_not_named(self):
+        """A different absence, and one that can end: the grace is for that."""
+        origin_broker(self.kenya, is_reachable=False)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+
+        self.assertEqual(self.unsettled(), set())
+
+    def test_a_centre_is_named_once_however_many_gaps_it_holds(self):
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+        self.gap(notification_id="the-one-before", hours_ago=24 * 21)
+
+        self.assertEqual(self.unsettled(), {"ke-meteo"})
+
+    def test_each_centre_answers_for_itself(self):
+        uganda = self.node("ug-unma")
+        origin_broker(self.kenya, is_reachable=True)
+        origin_broker(uganda, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+        self.gap(uganda, notification_id="this-morning", hours_ago=2)
+
+        self.assertEqual(self.unsettled(), {"ke-meteo"})
+
+    def test_what_is_named_is_what_the_bound_sentence_counts(self):
+        """One horizon, asked two ways: they cannot be allowed to differ."""
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+
+        self.assertEqual(self.unsettled(), {"ke-meteo"})
+        self.assertIn("1 older gap is not listed", self.note())
+
+    def test_a_centre_heard_from_since_is_not_named(self):
+        """Something it published was seen to arrive after the question closed.
+
+        The old gap is still unanswerable and always will be. What has changed
+        is that the path has been observed working since, so a centre that
+        leaves the report now leaves it having been heard from -- which is a
+        clearing somebody can be told about.
+        """
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+        self.gap(notification_id="yesterday", hours_ago=24, resolved=True)
+
+        self.assertEqual(self.unsettled(), set())
+
+    def test_a_centre_whose_last_word_is_unanswered_is_still_named(self):
+        """The late arrival came first; the silence since is the unanswerable part."""
+        origin_broker(self.kenya, is_reachable=True)
+        self.gap(notification_id="the-one-before", hours_ago=24 * 21, resolved=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+
+        self.assertEqual(self.unsettled(), {"ke-meteo"})
+
+    def test_another_centres_late_arrival_says_nothing_about_this_one(self):
+        uganda = self.node("ug-unma")
+        origin_broker(self.kenya, is_reachable=True)
+        origin_broker(uganda, is_reachable=True)
+        self.gap(notification_id="last-fortnight", hours_ago=24 * 20)
+        self.gap(uganda, notification_id="yesterday", hours_ago=24, resolved=True)
+
+        self.assertEqual(self.unsettled(), {"ke-meteo"})
+
+    def test_a_report_bounded_by_its_filters_leaves_nothing_unsettled(self):
+        """Every other report's absences are ones the grace period can rescue."""
+        unsettled = {
+            report.slug: report.find_unsettled(now=NOW)
+            for report in GAP_REPORTS
+            if report.slug != "propagation-gaps"
+        }
+
+        self.assertEqual([slug for slug, keys in unsettled.items() if keys], [])
+
+
 class UnregisteredCentreTests(GapReportTestCase):
     """Centres of the region publishing that no catalogue has indexed."""
 
