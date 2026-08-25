@@ -976,11 +976,9 @@ class NodeStatisticsViewTests(TestCase):
     def test_the_island_is_told_where_the_comparison_lives(self):
         """The tab's station-less figure raises a question it does not answer.
 
-        A share is only readable against the centres carrying the identifier
-        throughout, and this tab shows one centre. So it hands the island the
-        report that does list them all, plainly -- reversed here rather than
-        assembled in the bundle, which is built ahead of time and cannot be
-        renamed from the Python side.
+        So the mount point carries the report that does. Reversed here rather
+        than assembled in the bundle, which is built ahead of time and cannot
+        be renamed from the Python side.
         """
         response = self.page()
 
@@ -990,17 +988,42 @@ class NodeStatisticsViewTests(TestCase):
             f'{reverse("gap_report", args=["unattributed-messages"])}"',
         )
 
-    @override_settings(WIS2WATCH_ATTRIBUTION_WINDOW_HOURS=72)
-    def test_the_island_is_told_the_window_the_report_answers_over(self):
+    def test_the_island_is_told_the_period_the_report_answers_over(self):
         """The link names the destination's frame, which is not this tab's.
 
         The report works its share out over a fixed window while the figure
-        beside the link moves with the reader's control, so at every setting
-        of that control but one the two surfaces quote different periods for
-        the same centre. The link says which one it is leading to. Read from
-        the setting rather than spelled in the bundle, or a server that
-        widened its window would go on advertising the old one.
-        """
-        response = self.page()
+        beside the link moves with the reader's control, so at most settings
+        of that control the two surfaces cover different periods. The link
+        says which one it is leading to.
 
-        self.assertContains(response, 'data-attribution-hours="72"')
+        In days wherever the window is whole days, because the control beside
+        it is in days: at the one setting where the two periods really are the
+        same, "168 hours" against "last 7 days" reads as a disagreement where
+        there is none. Read off the setting rather than spelled in the bundle,
+        or a server that widened its window would advertise the old one.
+        """
+        for hours, period in (
+            (168, "7 days"),
+            (24, "1 day"),
+            (100, "100 hours"),
+            (1, "1 hour"),
+        ):
+            with self.subTest(hours=hours):
+                with override_settings(WIS2WATCH_ATTRIBUTION_WINDOW_HOURS=hours):
+                    self.assertContains(
+                        self.page(), f'data-attribution-period="{period}"'
+                    )
+
+    def test_the_link_to_the_report_is_plain(self):
+        """No anchor, no filter -- the whole table, this centre somewhere in it.
+
+        Deep-linking to a computed position was rejected because rate-sorted
+        positions move hourly and the anchor is stale before the click, and
+        scoping the report to one centre is a question nobody has answered
+        yet. Either would arrive here as something on the end of this URL, so
+        the assertion is that there is nothing on the end of it.
+        """
+        url = self.page().context["unattributed_report_url"]
+
+        self.assertNotIn("?", str(url))
+        self.assertNotIn("#", str(url))

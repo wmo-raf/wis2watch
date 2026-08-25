@@ -97,9 +97,10 @@ from .silence import hours_between
 #: over a day.
 DEFAULT_ATTRIBUTION_WINDOW_HOURS = 168
 
-#: Which report answers "is this share bad?" for a centre. Named here beside
-#: the report rather than spelled again wherever a link to it is reversed: a
-#: slug that lives in two places is a link that survives the rename of one.
+#: Which report answers "is this share bad?" for a centre. Alone among the six
+#: slugs in being named here, because it is the only one reversed from outside
+#: this module -- the statistics tab links to it. Renaming it should not be a
+#: search for the same string somewhere else in the tree.
 UNATTRIBUTED_MESSAGES_SLUG = "unattributed-messages"
 
 #: How long a centre's registry may fail every run before the report names it,
@@ -123,6 +124,28 @@ def default_attribution_window_hours():
         "WIS2WATCH_ATTRIBUTION_WINDOW_HOURS",
         DEFAULT_ATTRIBUTION_WINDOW_HOURS,
     )
+
+
+def attribution_window_label():
+    """That same window, said the way the reader beside it says periods.
+
+    In days wherever it divides into whole days, and in hours otherwise. The
+    link that quotes this sits under a control labelled in days, and at the
+    one setting where the two periods really do coincide, "168 hours" against
+    "last 7 days" reads as a disagreement where there is none -- which is the
+    opposite of what naming the period is for.
+
+    Returns:
+        str: the period, as "7 days" or "100 hours".
+    """
+    hours = default_attribution_window_hours()
+
+    if hours and hours % 24 == 0:
+        days = hours // 24
+
+        return ngettext("%(count)d day", "%(count)d days", days) % {"count": days}
+
+    return ngettext("%(count)d hour", "%(count)d hours", hours) % {"count": hours}
 
 
 def default_registry_unanswered_hours():

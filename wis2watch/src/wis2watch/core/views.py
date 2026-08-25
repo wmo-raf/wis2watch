@@ -12,6 +12,7 @@ from .analysis import (
     GAP_REPORTS,
     UNATTRIBUTED_MESSAGES_SLUG,
     Staleness,
+    attribution_window_label,
     default_attribution_window_hours,
     default_volume_hours,
     gap_report,
@@ -325,13 +326,10 @@ def node_statistics(request, node_id):
             "gap_report", args=[UNATTRIBUTED_MESSAGES_SLUG]
         ),
         # And over what the report worked its share out, which is not the
-        # window this tab's figure moves with. The two disagree at every
-        # setting of the control but one, so the link has to say which period
-        # it is leading to rather than leave a reader to assume it is theirs.
-        # The same number `views.py` already carries into the report itself,
-        # for the same reason: a share whose window is unstated is a number
-        # nobody can check.
-        "attribution_hours": default_attribution_window_hours(),
+        # window this tab's figure moves with. The two cover different periods
+        # at most settings of the control, so the link has to say which one it
+        # is leading to rather than leave a reader to assume it is theirs.
+        "attribution_period": attribution_window_label(),
     }
 
     return render(request, 'wis2watchcore/node_statistics.html', context)

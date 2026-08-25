@@ -213,22 +213,20 @@
               no station.
             </p>
 
-            <!-- Whether that share is bad is a question this tab cannot answer:
-                 a share only reads as a verdict beside the centres carrying the
-                 identifier throughout, and this page has one centre on it. The
-                 report that lists them all is region-wide and the link is plain
-                 -- it lands on the whole table, this centre somewhere in it.
+            <!-- Whether that share is bad is a question this tab cannot answer,
+                 having one centre on it; the report that can is region-wide and
+                 the link to it is plain, landing on the whole table with this
+                 centre somewhere in it.
 
                  The text names the report's window rather than the one the
-                 control above is set to, because they are different periods and
-                 the report will quote a different percentage for this centre
-                 than the figures here do. Saying whose window it is, in the
-                 report's own vocabulary of hours, is where that mismatch is
+                 control above is set to. They are different periods at most
+                 settings of that control, and the report will quote a different
+                 percentage for this centre than the figures here do; saying
+                 which period is being compared over is where that mismatch is
                  disarmed. -->
             <p class="node-statistics__compare">
               <a :href="unattributedReportUrl">
-                Compare with other centres over the last
-                {{ attributionHours }} hours
+                Compare with other centres over the last {{ attributionPeriod }}
               </a>
             </p>
 
@@ -523,11 +521,12 @@ const props = defineProps({
     type: String,
     required: true
   },
-  //: Over how many hours that report works its share out. Off the server for
-  //: the same reason the windows are: it is a setting, and a page that spelled
-  //: its own copy would go on advertising the old period after it was widened.
-  attributionHours: {
-    type: Number,
+  //: What period that report works its share out over, already phrased --
+  //: "7 days", "100 hours". Off the server for the same reason the windows
+  //: are: it is a setting, and a page holding its own copy of how a period is
+  //: worded is the second place that decides what a window is called.
+  attributionPeriod: {
+    type: String,
     required: true
   },
 })
