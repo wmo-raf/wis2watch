@@ -36,12 +36,13 @@
             {% trans "Never" %}
         {% endif %}
     </td>
+    {% comment %}
+        Always a number, unlike the other reports' spans: a registry is only
+        here because it was asked and did not answer, so there is always an
+        instant to count from.
+    {% endcomment %}
     <td>
-        {% if row.hours_unanswered is not None %}
-            {% blocktrans with hours=row.hours_unanswered|floatformat:1 %}{{ hours }}h{% endblocktrans %}
-        {% else %}
-            —
-        {% endif %}
+        {% blocktrans with hours=row.hours_unanswered|floatformat:1 %}{{ hours }}h{% endblocktrans %}
     </td>
 {% endblock %}
 

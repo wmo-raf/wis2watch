@@ -673,6 +673,25 @@ class UnansweredRegistryTests(DigestTestCase):
         self.assertIn("cm-meteocameroon", self.body())
         self.assertIn("cleared", self.body().lower())
 
+    def test_the_digest_reads_as_prose_rather_than_as_escaped_markup(self):
+        """These are text/plain, and a template escapes by default.
+
+        This report's line is the first to carry any of it: an apostrophe in
+        the centre's name for its own registry, an ampersand in the query
+        string of the address, and whatever an unreachable host said for
+        itself. Not turned off, a reader gets ``ke-meteo&#x27;s`` in their
+        morning mail and stops trusting the sender before reaching the
+        finding.
+        """
+        self.registry_not_answering("cm-meteocameroon", answered_hours_ago=300)
+
+        self.send()
+
+        self.assertIn("cm-meteocameroon's station registry", self.body())
+        self.assertIn("items?f=json", self.body())
+        self.assertNotIn("&#", self.body())
+        self.assertNotIn("&amp;", self.body())
+
     def test_the_same_dead_registry_is_not_carried_every_morning(self):
         self.registry_not_answering("cm-meteocameroon", answered_hours_ago=300)
         self.send()

@@ -1,4 +1,11 @@
-{% load i18n tz %}{% translate "What has changed in the region since the last digest. Findings already reported are left out." %}
+{% load i18n tz %}{% comment %}
+    Escaping off for the whole message, as in the alert beside it. This is
+    text/plain -- nothing here is ever parsed as HTML -- and the findings
+    interpolated below are prose: an apostrophe in "a centre's registry", a
+    query string with an ampersand in it, and whatever an unreachable host
+    said for itself. Left on, a reader gets `&#x27;` and `&amp;` in their
+    morning mail.
+{% endcomment %}{% autoescape off %}{% translate "What has changed in the region since the last digest. Findings already reported are left out." %}
 {% for change in digest.changed %}
 == {{ change.title }} ==
 {% blocktranslate with found=change.found %}{{ found }} standing now.{% endblocktranslate %} {{ change.url }}
@@ -18,4 +25,4 @@
 {% translate "Findings above are bounded by that: a centre can only be reported silent for the hours somebody was listening." %}
 {% endif %}
 --
-{% blocktranslate with generated_at=digest.generated_at|utc|date:"Y-m-d H:i" %}WIS2Watch, {{ generated_at }} UTC.{% endblocktranslate %} {{ gap_reports_url }}
+{% blocktranslate with generated_at=digest.generated_at|utc|date:"Y-m-d H:i" %}WIS2Watch, {{ generated_at }} UTC.{% endblocktranslate %} {{ gap_reports_url }}{% endautoescape %}

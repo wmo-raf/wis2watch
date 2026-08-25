@@ -16,9 +16,9 @@ single view of one centre can show:
   declares;
 * what a centre published that the Global Broker never carried;
 * which centres publish with no catalogue record at all;
+* whose own station registry has stopped answering, or never did;
 * how much of each centre's traffic says nothing about which station it came
-  from;
-* whose own station registry has stopped answering, or never did.
+  from.
 
 The last of those is the only one that is a finding about this tool's reach
 rather than about the region alone, and it earns its place beside the others
@@ -108,7 +108,7 @@ DEFAULT_REGISTRY_UNANSWERED_HOURS = 48
 #: How much of a run's error the digest will quote. Enough for a read timeout,
 #: a refused connection or an HTTP status to be recognised, and not enough for
 #: a registry answering with a page of HTML to fill the mail.
-ERROR_EXCERPT = 200
+ERROR_EXCERPT_CHARS = 200
 
 
 def default_attribution_window_hours():
@@ -370,7 +370,7 @@ class UnansweredRegistryRow:
     standing: str
     last_answered_at: datetime | None
     unanswered_since: datetime
-    hours_unanswered: float | None
+    hours_unanswered: float
     last_error: str
 
     @property
@@ -796,13 +796,9 @@ def registries_not_answering_caveat(*, now=None):
     failing" over a set of one is a coincidence dressed as a pattern.
     """
     asked = _registries_asked()
+    failing = _registries_failing_now(asked).count()
 
-    if asked.filter(last_run_at=F("last_answered_at")).exists():
-        return None
-
-    failing = asked.count()
-
-    if failing < 2:
+    if failing < 2 or failing < asked.count():
         return None
 
     return gettext(
@@ -826,6 +822,14 @@ def _registries_asked():
     is no last-answered instant to count from, and timing it from the first
     failure would say the same thing -- the two are one run apart -- while
     reading as though something had once been different.
+
+    The set this starts from is the set the hourly beat queues, both of them
+    ``advertising_a_station_registry``. That is what entitles the sentence
+    above to say "the centres this tool asks" and mean it: a centre in here is
+    one something is still going to every hour, so its newest run is as recent
+    as the schedule, and a stale answer can only mean the schedule itself has
+    stopped -- in which case nothing is being asked and there is nothing for
+    that sentence to be about.
     """
     asked = Q(sync_logs__sync_type=SyncLog.NODE_STATIONS)
     answered = asked & ~Q(sync_logs__status=SyncLog.FAILED)
@@ -855,13 +859,30 @@ def _registries_not_answering(*, now, hours):
     this one's.
     """
     return (
-        _registries_asked()
+        _registries_failing_now(_registries_asked())
         .annotate(unanswered_since=Coalesce("last_answered_at", "first_asked_at"))
-        .filter(
-            Q(last_answered_at__isnull=True) | Q(last_run_at__gt=F("last_answered_at"))
-        )
         .filter(unanswered_since__lte=now - timedelta(hours=hours))
         .order_by("unanswered_since", "centre_id")
+    )
+
+
+def _registries_failing_now(registries):
+    """Those of them whose newest run is one that failed.
+
+    The one place "nothing has answered since" is spelled, because the report
+    and the sentence above it both ask it and an answer they disagreed about
+    would be a page saying every registry is failing over a table of the ones
+    that are not.
+
+    Written as two arms rather than as the negation of "the newest run
+    answered", which would be the same statement in SQL only for a registry
+    that has answered at some point: there is no instant to compare against
+    for one that never has, and a comparison with nothing is neither true nor
+    false, so the negation would quietly drop exactly the registries this
+    report was built to find.
+    """
+    return registries.filter(
+        Q(last_answered_at__isnull=True) | Q(last_run_at__gt=F("last_answered_at"))
     )
 
 
@@ -911,10 +932,10 @@ def _error_excerpt(message):
     """
     excerpt = " ".join(message.split())
 
-    if len(excerpt) <= ERROR_EXCERPT:
+    if len(excerpt) <= ERROR_EXCERPT_CHARS:
         return excerpt
 
-    return excerpt[: ERROR_EXCERPT - 1].rstrip() + "\u2026"
+    return excerpt[: ERROR_EXCERPT_CHARS - 1].rstrip() + "\u2026"
 
 
 def _silent_declarations():

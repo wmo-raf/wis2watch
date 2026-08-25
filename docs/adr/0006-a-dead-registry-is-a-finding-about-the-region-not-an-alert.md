@@ -119,6 +119,13 @@ report has shown how often the catalogue actually knows better.
 runs, and a standing derived once and shown in both places is the next thing
 to want. It is not needed for the failure to stop being silent.
 
+**Carrying the all-failing sentence into the digest.** `describe_caveat` is
+read by the report's page and by nothing else, which is where the existing
+caveat plumbing ends. The digest is the surface that would mail thirty notices
+with nothing beside them, so it is the surface that most wants the sentence --
+but giving it one means a second channel for every report's caveat, and that
+is a change to the digest rather than to this report.
+
 **Probing the address to tell a dead host from a wrong path.** The sync's own
 error already distinguishes a refused connection from a 404 well enough to
 start the conversation, and a prober that ran against hosts known to hang
