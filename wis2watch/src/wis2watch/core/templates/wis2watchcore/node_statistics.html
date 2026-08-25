@@ -31,7 +31,9 @@
          data-node-name="{{ node.name }}"
          data-centre-id="{{ node.centre_id }}"
          data-summary-url="{% url 'node_statistics_summary' node.id %}"
-         data-stations-url="{% url 'node_statistics_stations' node.id %}">
+         data-stations-url="{% url 'node_statistics_stations' node.id %}"
+         data-unattributed-report-url="{{ unattributed_report_url }}"
+         data-attribution-period="{{ attribution_period }}">
     </div>
 {% endblock %}
 

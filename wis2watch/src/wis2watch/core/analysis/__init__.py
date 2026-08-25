@@ -14,6 +14,7 @@ them.
 
 from .gaps import (
     GAP_REPORTS,
+    UNATTRIBUTED_MESSAGES_SLUG,
     DeclaringCentre,
     GapReport,
     GapReportSummary,
@@ -25,6 +26,7 @@ from .gaps import (
     UnattributedRateRow,
     UndeclaredStationRow,
     UnregisteredCentreRow,
+    attribution_window_label,
     default_attribution_window_hours,
     default_registry_unanswered_hours,
     gap_report,
@@ -94,6 +96,7 @@ from .windows import Grain, UnknownWindow, Window
 
 __all__ = [
     "GAP_REPORTS",
+    "UNATTRIBUTED_MESSAGES_SLUG",
     "Bucket",
     "CachePickup",
     "DailyActivity",
@@ -143,6 +146,7 @@ __all__ = [
     "WindowBounds",
     "WindowOption",
     "WindowStats",
+    "attribution_window_label",
     "dataset_silence",
     "default_attribution_window_hours",
     "default_registry_unanswered_hours",

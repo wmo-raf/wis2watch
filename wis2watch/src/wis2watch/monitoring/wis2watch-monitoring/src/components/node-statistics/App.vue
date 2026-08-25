@@ -213,6 +213,23 @@
               no station.
             </p>
 
+            <!-- Whether that share is bad is a question this tab cannot answer,
+                 having one centre on it; the report that can is region-wide and
+                 the link to it is plain, landing on the whole table with this
+                 centre somewhere in it.
+
+                 The text names the report's window rather than the one the
+                 control above is set to. They are different periods at most
+                 settings of that control, and the report will quote a different
+                 percentage for this centre than the figures here do; saying
+                 which period is being compared over is where that mismatch is
+                 disarmed. -->
+            <p class="node-statistics__compare">
+              <a :href="unattributedReportUrl">
+                Compare with other centres over the last {{ attributionPeriod }}
+              </a>
+            </p>
+
             <!-- The gap between the two bands, said here in full rather than left
                  to be found by comparing this figure with one a screen above it:
                  the bands are what separated them, so the sentence has to carry
@@ -493,6 +510,22 @@ const props = defineProps({
     required: true
   },
   stationsUrl: {
+    type: String,
+    required: true
+  },
+  //: Where the comparison this tab declines to make is actually made.
+  //: Reversed on the server like every other path here: the bundle is built
+  //: ahead of time, so a URL assembled inside it is a URL nobody can rename
+  //: from the Python side.
+  unattributedReportUrl: {
+    type: String,
+    required: true
+  },
+  //: What period that report works its share out over, already phrased --
+  //: "7 days", "100 hours". Off the server for the same reason the windows
+  //: are: it is a setting, and a page holding its own copy of how a period is
+  //: worded is the second place that decides what a window is called.
+  attributionPeriod: {
     type: String,
     required: true
   },
@@ -1022,6 +1055,15 @@ onMounted(load)
 .node-statistics__population {
   font-size: 0.8rem;
   color: var(--w-color-text-meta);
+  margin: 0 0 0.5rem;
+}
+
+/* Set apart from the figure above it rather than run on from it: the link
+   leaves the page, and a destination that reads as the tail of a sentence
+   about this centre is one a reader follows without noticing they have gone
+   region-wide. */
+.node-statistics__compare {
+  font-size: 0.8rem;
   margin: 0 0 0.5rem;
 }
 

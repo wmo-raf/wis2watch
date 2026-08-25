@@ -10,7 +10,9 @@ from wagtail.admin.paginator import WagtailPaginator
 
 from .analysis import (
     GAP_REPORTS,
+    UNATTRIBUTED_MESSAGES_SLUG,
     Staleness,
+    attribution_window_label,
     default_attribution_window_hours,
     default_volume_hours,
     gap_report,
@@ -314,6 +316,20 @@ def node_statistics(request, node_id):
         "breadcrumbs_items": node_breadcrumbs(node, leaf=_("Statistics")),
         "node": node,
         "active_tab": "statistics",
+        # The tab shows one centre's station-less traffic and stops there: a
+        # share is only a verdict beside the centres carrying the identifier
+        # throughout, and this page has none of them. The report that does
+        # list them all is region-wide and stays that way -- the link is
+        # plain, landing on the whole table rather than pretending to a scope
+        # the report does not offer.
+        "unattributed_report_url": reverse_lazy(
+            "gap_report", args=[UNATTRIBUTED_MESSAGES_SLUG]
+        ),
+        # And over what the report worked its share out, which is not the
+        # window this tab's figure moves with. The two cover different periods
+        # at most settings of the control, so the link has to say which one it
+        # is leading to rather than leave a reader to assume it is theirs.
+        "attribution_period": attribution_window_label(),
     }
 
     return render(request, 'wis2watchcore/node_statistics.html', context)
