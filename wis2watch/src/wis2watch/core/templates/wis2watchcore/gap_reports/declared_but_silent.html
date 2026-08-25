@@ -14,7 +14,7 @@
     <th>{% trans "Territory" %}</th>
     <th>{% trans "WMO region" %}</th>
     <th>{% trans "Facility" %}</th>
-    <th title="{% trans 'The centre whose own registry also declares this station, where one does' %}">
+    <th title="{% trans 'The centre whose own registry also declares this station, where one does and has been asked' %}">
         {% trans "Declared by centre" %}
     </th>
 {% endblock %}
@@ -29,7 +29,7 @@
         {% if row.registry_centre_id %}
             <code>{{ row.registry_centre_id }}</code>
         {% else %}
-            <span class="badge badge-warning">{% trans "No centre declares it" %}</span>
+            <span class="badge badge-warning">{% trans "No declaration on record" %}</span>
         {% endif %}
     </td>
 {% endblock %}

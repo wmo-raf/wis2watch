@@ -19,11 +19,13 @@ from django.test import TestCase, override_settings
 
 from wis2watch.core.analysis import (
     GAP_REPORTS,
+    DeclaringCentre,
     OriginTransport,
     gap_report,
     gap_report_summaries,
     propagation_gaps,
     stations_declared_but_silent,
+    stations_declared_but_silent_unasked_centres,
     stations_transmitting_undeclared,
     unattributed_rates,
     unregistered_centres,
@@ -55,8 +57,19 @@ class GapReportTestCase(TestCase):
         )
         self.kenya = self.node("ke-meteo")
 
-    def node(self, centre_id):
-        return WIS2Node.objects.create(centre_id=centre_id, name=centre_id.upper())
+    def node(self, centre_id, *, registry=True):
+        """A centre, by default one there is somewhere to ask for its stations.
+
+        ``registry=False`` is the centre whose catalogue records advertise no
+        address for it: nothing has ever asked it what it declares, and every
+        report has to keep that apart from a centre that answered and declared
+        nothing.
+        """
+        return WIS2Node.objects.create(
+            centre_id=centre_id,
+            name=centre_id.upper(),
+            base_url=f"https://{centre_id}.example.int" if registry else "",
+        )
 
     def station(self, wigos_id, **kwargs):
         station, _ = Station.objects.get_or_create(wigos_id=wigos_id, defaults=kwargs)
@@ -192,6 +205,83 @@ class DeclaredButSilentTests(GapReportTestCase):
         )
 
 
+class UnaskedCentresTests(GapReportTestCase):
+    """What the declared-but-silent report cannot say about who declares a station.
+
+    The report's "Declared by centre" column is blank two ways. No centre's
+    registry names the station, which is a registration to correct; or the
+    centre that would name it advertises no registry and has never been asked,
+    which is a catalogue record to fix and somebody else's conversation. The
+    column cannot tell them apart, so the report says once how many centres
+    are in the second case.
+    """
+
+    def sentence(self):
+        return stations_declared_but_silent_unasked_centres(now=NOW)
+
+    def undeclared_and_silent(self, wigos_id="0-20000-0-63741"):
+        """A silent station no centre's registry declares: one blank cell."""
+        return self.in_oscar(wigos_id)
+
+    def test_nothing_is_said_where_every_centre_advertises_a_registry(self):
+        self.undeclared_and_silent()
+
+        self.assertIsNone(self.sentence())
+
+    def test_nothing_is_said_where_no_row_has_a_blank_cell_to_qualify(self):
+        """A report whose every row names a centre has nothing to qualify."""
+        self.node("bf-anam", registry=False)
+        self.in_oscar("0-20000-0-63741")
+        self.in_registry("0-20000-0-63741")
+
+        self.assertIsNone(self.sentence())
+
+    def test_the_centres_nothing_has_asked_are_counted_and_said(self):
+        self.node("bf-anam", registry=False)
+        self.undeclared_and_silent()
+
+        self.assertIn("1 centre advertises no station registry", self.sentence())
+
+    def test_more_than_one_reads_as_more_than_one(self):
+        self.node("bf-anam", registry=False)
+        self.node("dj-anm", registry=False)
+        self.undeclared_and_silent()
+
+        self.assertIn("2 centres advertise no station registry", self.sentence())
+
+    def test_the_declared_but_silent_report_carries_the_sentence(self):
+        self.node("bf-anam", registry=False)
+        self.undeclared_and_silent()
+
+        self.assertEqual(
+            gap_report("declared-but-silent").describe_caveat(now=NOW), self.sentence()
+        )
+
+    def test_the_other_reports_have_nothing_of_the_kind_to_say(self):
+        """Only the report whose column cannot tell the two absences apart."""
+        self.node("bf-anam", registry=False)
+        self.undeclared_and_silent()
+
+        said = {
+            report.slug
+            for report in GAP_REPORTS
+            if report.describe_caveat(now=NOW) is not None
+        }
+
+        self.assertEqual(said, {"declared-but-silent"})
+
+    def test_the_sentence_stays_off_the_index(self):
+        """The count is right whatever it says; only the page needs the caveat."""
+        self.node("bf-anam", registry=False)
+        self.undeclared_and_silent()
+
+        bounded = {
+            summary.slug for summary in gap_report_summaries(now=NOW) if summary.bound
+        }
+
+        self.assertEqual(bounded, set())
+
+
 class TransmittingUndeclaredTests(GapReportTestCase):
     """Stations the world is hearing from that no registry admits to."""
 
@@ -259,6 +349,54 @@ class TransmittingUndeclaredTests(GapReportTestCase):
 
         self.assertEqual(row.wigos_id, "0-20000-0-63741")
         self.assertEqual(row.centre_id, "")
+
+    def test_a_centre_with_a_registry_has_been_asked_what_it_declares(self):
+        self.transmitted("0-20000-0-63741")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.declaring_centre, DeclaringCentre.ASKED)
+
+    def test_a_centre_with_no_address_of_its_own_was_never_asked(self):
+        """Undeclared by a registry nothing has read is not undeclared."""
+        burkina = self.node("bf-anam", registry=False)
+        self.transmitted("0-20000-0-63741", node=burkina)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.declaring_centre, DeclaringCentre.UNASKED)
+
+    def test_a_centre_no_catalogue_knows_is_not_called_unasked(self):
+        """It has nowhere to advertise a registry; that is the other report."""
+        station = self.station("0-20000-0-63741")
+        StationSource.objects.create(
+            station=station,
+            source_type=StationSource.OBSERVED,
+            node=None,
+            last_seen=NOW,
+        )
+
+        (row,) = self.report()
+
+        self.assertEqual(row.declaring_centre, DeclaringCentre.UNREGISTERED)
+
+    def test_a_centre_that_was_never_asked_is_said_so_in_the_notice(self):
+        burkina = self.node("bf-anam", registry=False)
+        self.transmitted("0-20000-0-63741", node=burkina)
+
+        (row,) = self.report()
+        notice = gap_report("transmitting-undeclared").describe_row(row)
+
+        self.assertIn("advertises no station registry", notice.summary)
+
+    def test_a_centre_that_was_asked_is_reported_as_a_registration_gap(self):
+        self.transmitted("0-20000-0-63741")
+
+        (row,) = self.report()
+        notice = gap_report("transmitting-undeclared").describe_row(row)
+
+        self.assertNotIn("advertises no station registry", notice.summary)
+        self.assertIn("nor any centre's registry declares it", notice.summary)
 
     def test_the_report_reads_by_centre_and_then_by_identifier(self):
         uganda = self.node("ug-unma")

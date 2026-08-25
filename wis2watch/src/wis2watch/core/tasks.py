@@ -90,7 +90,7 @@ def run_sync_all_node_stations():
     from .models import WIS2Node
 
     node_ids = list(
-        WIS2Node.objects.exclude(stations_url="").values_list("id", flat=True)
+        WIS2Node.objects.advertising_a_station_registry().values_list("id", flat=True)
     )
 
     logger.info("[STATION SYNC] queueing %s nodes", len(node_ids))

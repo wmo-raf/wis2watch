@@ -204,6 +204,7 @@ class NodeDetail:
     datasets: list[NodeDatasetRow]
     retired_datasets: list[NodeDatasetRow]
     stations: list[NodeStationRow]
+    advertises_station_registry: bool
     sync_runs: list[SyncRunRow]
     origin: OriginState
 
@@ -252,6 +253,11 @@ def node_detail(node, *, now=None, runs_per_type=DEFAULT_RUNS_PER_TYPE):
         datasets=live,
         retired_datasets=retired,
         stations=node_stations(node, now=now),
+        # Carried beside the stations rather than inferred from them being
+        # empty. The two absences read alike and are not alike: a centre that
+        # answered and declared nothing is a registration to chase, and a
+        # centre with no address of its own is a catalogue record to fix.
+        advertises_station_registry=node.advertises_station_registry,
         sync_runs=_sync_runs(node, runs_per_type),
         origin=_origin(node),
     )

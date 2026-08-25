@@ -455,8 +455,16 @@
                 </div>
             {% endif %}
         </div>
+        {# Said before the table rather than only in the empty state: with no #}
+        {# registry read, every row below was found in the centre's traffic, #}
+        {# and "not declared" against any of them would be this tool's blind #}
+        {# spot reported as the centre's fault. #}
         <p class="section-note">
-            {% trans "Every station this centre declares or has been heard transmitting for, the longest quiet first. A station transmitting that the centre's registry declares nowhere is listed too — it is a registration gap, not an absence. The CSV export covers the registry's declarations alone." %}
+            {% if detail.advertises_station_registry %}
+                {% trans "Every station this centre declares or has been heard transmitting for, the longest quiet first. A station transmitting that the centre's registry declares nowhere is listed too — it is a registration gap, not an absence. The CSV export covers the registry's declarations alone." %}
+            {% else %}
+                {% trans "Every station this centre has been heard transmitting for, the longest quiet first. Its own registry is not among the sources: the catalogue records this centre's datasets come from advertise no address for it, so nothing has ever asked it what it declares." %}
+            {% endif %}
         </p>
 
         {% if detail.stations %}
@@ -501,7 +509,7 @@
                         </td>
                         <td>
                             <span class="badge badge-{{ row.standing }}">{{ row.standing_label }}</span>
-                            {% if row.standing == "gone_quiet" and not row.declared_by_registry %}
+                            {% if detail.advertises_station_registry and row.standing == "gone_quiet" and not row.declared_by_registry %}
                                 <div class="row-detail">{% trans "not declared by the registry" %}</div>
                             {% endif %}
                         </td>
@@ -511,7 +519,11 @@
             </table>
         {% else %}
             <div class="empty-state">
-                {% trans "No station is declared by this centre's registry, and none has been heard transmitting under its topics" %}
+                {% if detail.advertises_station_registry %}
+                    {% trans "No station is declared by this centre's registry, and none has been heard transmitting under its topics" %}
+                {% else %}
+                    {% trans "Nothing has been heard transmitting under this centre's topics, and its own registry has never been asked: the catalogue advertises no address for this centre" %}
+                {% endif %}
             </div>
         {% endif %}
     </div>

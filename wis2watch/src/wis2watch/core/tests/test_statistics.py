@@ -143,6 +143,16 @@ class StandingCountTests(SummaryTestCase):
         self.assertEqual(counts.never_transmitted, 1)
         self.assertEqual(counts.gone_quiet, 0)
 
+    def test_a_centre_with_a_registry_has_been_asked_what_it_declares(self):
+        """Nought declared means nought declared only if something asked."""
+        self.kenya.base_url = "https://wis2.example.ke"
+        self.kenya.save()
+
+        self.assertTrue(self.summary().now.advertises_station_registry)
+
+    def test_a_centre_with_no_address_of_its_own_was_never_asked(self):
+        self.assertFalse(self.summary().now.advertises_station_registry)
+
     def test_a_transmitting_station_nothing_declares_is_counted_apart(self):
         self.transmitted("0-20000-0-63999")
 

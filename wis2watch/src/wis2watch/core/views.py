@@ -119,6 +119,9 @@ def gap_report_table(request, slug):
         # page that runs one from the middle of its own layout is a page
         # nobody can account for.
         "bound_note": report.describe_bound(),
+        # And what a column of the rows that are listed cannot be read to
+        # mean, where anything. Read here for the same reason as the bound.
+        "caveat_note": report.describe_caveat(),
         "rows": page,
         "page_obj": page,
         "elided_page_range": paginator.get_elided_page_range(page.number),

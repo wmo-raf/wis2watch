@@ -96,6 +96,7 @@ class NowBlock:
     never_transmitted: int
     undeclared_transmitting: int
     declared_station_count: int
+    advertises_station_registry: bool
     unlocated_station_count: int
     buckets: list[Bucket]
     hourly: list[HourlyActivity]
@@ -231,6 +232,11 @@ def _now_block(node, *, now, stale_after):
         # make the two numbers describe different populations.
         undeclared_transmitting=standing(StationStanding.UNDECLARED),
         declared_station_count=sum(row.declared_by_registry for row in rows),
+        # Which is what turns a declared count of nought from a statement
+        # about the centre into a statement about this tool. Every ratio on
+        # the tab is drawn against that count, and the panel has to be able to
+        # say why it is falling back to what has been heard from instead.
+        advertises_station_registry=node.advertises_station_registry,
         unlocated_station_count=sum(not row.is_located for row in rows),
         buckets=buckets,
         hourly=hourly_activity(node, buckets),

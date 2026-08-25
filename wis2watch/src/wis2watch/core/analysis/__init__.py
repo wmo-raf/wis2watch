@@ -14,6 +14,7 @@ them.
 
 from .gaps import (
     GAP_REPORTS,
+    DeclaringCentre,
     GapReport,
     GapReportSummary,
     Notice,
@@ -29,6 +30,7 @@ from .gaps import (
     propagation_gaps_left_out,
     propagation_gaps_unsettled,
     stations_declared_but_silent,
+    stations_declared_but_silent_unasked_centres,
     stations_transmitting_undeclared,
     unattributed_rates,
     unregistered_centres,
@@ -148,7 +150,9 @@ __all__ = [
     "propagation_gaps_left_out",
     "propagation_gaps_unsettled",
     "silence_by_node",
+    "DeclaringCentre",
     "stations_declared_but_silent",
+    "stations_declared_but_silent_unasked_centres",
     "stations_transmitting_undeclared",
     "unattributed_rates",
     "unregistered_centres",

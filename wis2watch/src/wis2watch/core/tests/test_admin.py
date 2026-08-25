@@ -378,7 +378,11 @@ class GapReportViewTests(TestCase):
         self.client.force_login(
             get_user_model().objects.create_superuser("diagnostician", password="s3cret")
         )
-        self.node = WIS2Node.objects.create(centre_id="ke-kmd", name="Kenya Met")
+        # With an address of its own, so that a centre nobody could ask is
+        # something a test has to introduce rather than the default.
+        self.node = WIS2Node.objects.create(
+            centre_id="ke-kmd", name="Kenya Met", base_url="https://wis2.kmd.test"
+        )
 
     def declared_in_oscar(self):
         """A station the country declares and nothing has ever heard."""
@@ -523,6 +527,31 @@ class GapReportViewTests(TestCase):
 
         self.assertEqual(response.context["page_obj"].paginator.count, 0)
         self.assertContains(response, "not listed")
+
+    def test_a_report_whose_column_cannot_tell_two_absences_apart_says_so(self):
+        """A blank "declared by centre" is a gap or an unasked centre, not both."""
+        WIS2Node.objects.create(centre_id="bf-anam", name="Burkina Faso")
+        self.declared_in_oscar()
+
+        response = self.client.get(reverse("gap_report", args=["declared-but-silent"]))
+
+        self.assertContains(response, "advertises no station registry")
+
+    def test_a_report_naming_a_centre_nobody_asked_marks_the_row(self):
+        unasked = WIS2Node.objects.create(centre_id="bf-anam", name="Burkina Faso")
+        station = Station.objects.create(wigos_id="0-20000-0-65503")
+        StationSource.objects.create(
+            station=station,
+            source_type=StationSource.OBSERVED,
+            node=unasked,
+            last_seen=dj_timezone.now(),
+        )
+
+        response = self.client.get(
+            reverse("gap_report", args=["transmitting-undeclared"])
+        )
+
+        self.assertContains(response, "advertises no station registry")
 
     def test_a_report_nothing_is_called_is_not_found(self):
         response = self.client.get(reverse("gap_report", args=["stations-i-invented"]))
@@ -819,6 +848,24 @@ class NodeDetailViewTests(TestCase):
         )
 
         self.assertContains(response, "advertises no station registry")
+
+    def test_a_centre_nobody_asked_is_not_reported_as_declaring_nothing(self):
+        """The page's claim about the centre has to be one it can make."""
+        unasked = WIS2Node.objects.create(centre_id="bf-anam", name="Burkina Faso")
+
+        response = self.client.get(reverse("node_details", args=[unasked.id]))
+
+        self.assertContains(response, "its own registry has never been asked")
+        self.assertNotContains(response, "No station is declared by this centre")
+
+    def test_a_centre_that_was_asked_and_declared_nothing_says_so(self):
+        unanswered = WIS2Node.objects.create(
+            centre_id="zm-zmd", name="Zambia", base_url="https://wis2.zmd.test"
+        )
+
+        response = self.client.get(reverse("node_details", args=[unanswered.id]))
+
+        self.assertContains(response, "No station is declared by this centre")
 
     def test_the_statistics_view_is_one_click_away(self):
         self.assertContains(
