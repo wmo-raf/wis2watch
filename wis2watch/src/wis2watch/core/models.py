@@ -1778,6 +1778,19 @@ class HardFailureQuerySet(models.QuerySet):
         """
         return self.filter(resolved_at__isnull=True)
 
+    def standing(self, kind):
+        """The open failure of one kind, or nothing where that kind is fine.
+
+        At most one row can ever come back -- one open failure per kind is a
+        database constraint -- which is what lets this read as a question
+        rather than as a list. Asked wherever something has to know whether a
+        failure is standing this minute: the reconciliation, which is bringing
+        that row up to date; the announcing, which holds a message back while
+        a likelier cause is already the news; and the reports, one of which is
+        worth nothing while the registry it reads against is frozen.
+        """
+        return self.open().filter(kind=kind).first()
+
     def overlapping(self, start, end):
         """The spells that stood at any point between two instants.
 

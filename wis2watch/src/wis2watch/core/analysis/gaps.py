@@ -667,16 +667,19 @@ def _reportable_unregistered_centres():
 def _registry_is_frozen():
     """Whether the catalogue that writes the registry has stopped answering.
 
-    Read off the open hard failure rather than recomputed here. That row is
-    what the alert was sent about, so the report withholds exactly while
-    somebody is holding a message saying it would: a report that decided for
-    itself could withhold on a morning nobody was told anything.
+    Read off the open hard failure rather than recomputed here, so that one
+    answer serves the alert and the report and they cannot come apart: a
+    report that worked it out for itself would need the threshold too, and
+    two copies of a threshold meant to be revised is one revised copy and one
+    forgotten one.
+
+    Which is the row rather than the message, deliberately. A failure is
+    announced once it has outlasted the announcing threshold and to whoever is
+    configured to hear it, and neither of those has any bearing on whether
+    this report can stand behind what it lists. An installation with nobody to
+    mail still withholds, and says why on the page.
     """
-    return (
-        HardFailure.objects.open()
-        .filter(kind=HardFailure.CATALOGUE_WRITER_STALE)
-        .exists()
-    )
+    return bool(HardFailure.objects.standing(HardFailure.CATALOGUE_WRITER_STALE))
 
 
 def _unregistered_centre_row(centre, *, now):

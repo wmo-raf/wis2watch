@@ -767,6 +767,7 @@ class RegistryStaleTests(HardFailureTestCase):
         hours_ago,
         catalogue=None,
         found=180,
+        errored=0,
         status=SyncLog.SUCCESS,
         error="",
     ):
@@ -778,10 +779,15 @@ class RegistryStaleTests(HardFailureTestCase):
             sync_type=SyncLog.CATALOGUE,
             status=status,
             items_found=found,
+            items_errored=errored,
             error_message=error,
             started_at=ran_at,
             completed_at=ran_at + timedelta(seconds=30),
         )
+
+    def synced_again(self, *, hours_from_now=1):
+        """A run that brings records back, after a spell in which none did."""
+        return self.synced(hours_ago=-hours_from_now)
 
     def detail(self):
         return self.open_failure(self.KIND).detail
@@ -871,6 +877,30 @@ class RegistryStaleTests(HardFailureTestCase):
         self.assertEqual(len(self.announcements(self.KIND)), 1)
         self.assertIn("no records", self.detail())
 
+    def test_a_run_that_stepped_over_every_record_brings_nothing_back(self):
+        """Green enough to look current, and the registry is no further on.
+
+        A run reads records and stores them one at a time, stepping over any
+        it cannot apply. One that stepped over all of them answered, so no
+        check reading the status alone would call it a failure, and it left
+        the registry exactly where the last real run did.
+        """
+        self.synced(hours_ago=CATALOGUE_STALE_HOURS + 6)
+        self.synced(hours_ago=1, found=180, errored=180, status=SyncLog.PARTIAL)
+
+        self.check()
+
+        self.assertEqual(len(self.announcements(self.KIND)), 1)
+        self.assertIn("stepped over all 180 it read", self.detail())
+
+    def test_a_run_that_stepped_over_some_of_them_still_counts(self):
+        """The ordinary partial run: most of the region got through."""
+        self.synced(hours_ago=1, found=180, errored=3, status=SyncLog.PARTIAL)
+
+        self.check()
+
+        self.assertIsNone(self.open_failure(self.KIND))
+
     def test_a_sync_that_has_simply_stopped_running_is_found_too(self):
         """Nothing failed and nothing is empty: the schedule is not running."""
         self.synced(hours_ago=CATALOGUE_STALE_HOURS + 6)
@@ -908,11 +938,12 @@ class RegistryStaleTests(HardFailureTestCase):
         self.synced(hours_ago=CATALOGUE_STALE_HOURS + 1)
         self.check()
 
-        self.synced(hours_ago=-1)
+        self.synced_again()
         self.check(now=NOW + timedelta(hours=2))
 
-        (announced, recovered) = self.announcements(self.KIND)
+        (opened, recovered) = self.announcements(self.KIND)
 
+        self.assertNotIn("recovered", opened.subject)
         self.assertIn("recovered", recovered.subject)
         self.assertIsNone(self.open_failure(self.KIND))
 

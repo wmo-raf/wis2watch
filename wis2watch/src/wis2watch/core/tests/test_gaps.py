@@ -776,17 +776,27 @@ class FrozenRegistryTests(GapReportTestCase):
         self.assertEqual(self.unsettled(), set())
 
     def test_nothing_else_is_withheld_by_a_frozen_registry(self):
-        """The other four are about the region rather than about the registry."""
+        """The other four are about the region rather than about the registry.
+
+        A centre with no catalogue record is the one finding a frozen registry
+        makes unanswerable. A station OSCAR declares and nobody has heard is
+        still a station OSCAR declares and nobody has heard.
+        """
+        self.in_oscar("0-20000-0-63741")
+        self.seen("ml-meteo")
         self.registry_frozen()
 
-        counted = self.counted()
+        counted = {
+            summary.slug: summary.count for summary in gap_report_summaries(now=NOW)
+        }
         bounds = {
             summary.slug: summary.bound
             for summary in gap_report_summaries(now=NOW)
             if summary.slug != "unregistered-centres"
         }
 
-        self.assertEqual(counted, 0)
+        self.assertEqual(counted["declared-but-silent"], 1)
+        self.assertEqual(counted["unregistered-centres"], 0)
         self.assertEqual(set(bounds.values()), {None})
 
 

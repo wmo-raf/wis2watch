@@ -48,13 +48,14 @@ the last run that succeeded.** A catalogue answering 200 with nothing in it
 passes every check this tool makes — the fetch worked, the run is green, the
 `last_sync` stamp is fresh — and freezes the registry exactly as a refused
 connection does. So the clock is read out of the sync logs, off the newest run
-that did not fail and found more than nothing, and `last_sync` is left to mean
-what it has always meant.
+that did not fail and brought back more records than it stepped over, and
+`last_sync` is left to mean what it has always meant. A run every record of
+which errored reaches the registry no better than an empty answer does.
 
-**The threshold is four missed runs**, 24 hours against a six-hourly schedule,
-in a setting rather than a constant. One missed run is a blip the next run
-fixes. Like every other threshold here it is a first guess, meant to be
-revised once the region's rhythms are known.
+**The threshold is 24 hours against a six-hourly schedule** — three missed
+runs with the fourth due — in a setting rather than a constant. One missed run
+is a blip the next run fixes. Like every other threshold here it is a first
+guess, meant to be revised once the region's rhythms are known.
 
 **The detail says which of the three ways it is failing.** A run that failed
 is a catalogue or a network to chase; a run that answered with nothing is a
@@ -109,6 +110,19 @@ it: ADR-0003 accepted it while noting it served one report's one case.
 without them, and a divergence report computed while one is dark is quieting
 in the same way — but there is no divergence report yet to suppress.
 
+**Withholding follows the open row, not the message.** So an installation with
+no alert recipient configured still withholds, and says why on the page; and a
+fresh installation whose writer has not synced yet withholds through the day
+of grace before anything is announced. Both are honest — the report cannot
+stand behind what it would list either way — and the sentence beside it is
+what a reader gets instead of a mail.
+
+**Standing the writer down in the admin clears the spell**, and mails that it
+recovered. Deleting it, deactivating it, or clearing its writer flag all leave
+no writer designated, which this check reads as nothing to say rather than as
+a failure. The message is wrong about what happened; the operator holding it
+is the person who just did it.
+
 ## Not addressed here
 
 **Automatic failover to another catalogue.** Sole-writer is deliberate —
@@ -123,3 +137,10 @@ as well as a stale writer.
 **Any measure of a read-only catalogue's staleness.** Nothing reads it yet, and
 building the machinery ahead of the report that would use it would be guessing
 at what that report needs.
+
+**Letting a hard failure go rather than clearing it.** ADR-0003 built that for
+findings, where a report can say which of its own it can no longer answer for.
+The equivalent here is a spell that ends because the thing it was about
+stopped being watched — a writer stood down mid-spell — and it wants a
+mechanism the hard failures do not have. One misleading recovery message,
+addressed to whoever caused it, did not seem worth building one for.

@@ -439,8 +439,8 @@ WIS2WATCH_INGESTION_STALL_MINUTES = env.int("WIS2WATCH_INGESTION_STALL_MINUTES",
 # How long the registry may go without being rebuilt from the writing
 # catalogue before it is mailed about, in hours. In multiples of that sync's
 # own six-hourly schedule rather than in the minutes above: one missed run is
-# a blip the next run fixes, and four is a catalogue that is not coming back
-# on its own. The failure it catches is the quiet one -- nothing empties, the
+# a blip the next run fixes; three missed with a fourth due is a catalogue
+# that is not coming back on its own. The failure it catches is the quiet one -- nothing empties, the
 # picture simply stops moving while every surface goes on answering from it.
 WIS2WATCH_CATALOGUE_STALE_HOURS = env.int("WIS2WATCH_CATALOGUE_STALE_HOURS", 24)
 
