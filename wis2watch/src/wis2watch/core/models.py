@@ -1778,6 +1778,19 @@ class HardFailureQuerySet(models.QuerySet):
         """
         return self.filter(resolved_at__isnull=True)
 
+    def standing(self, kind):
+        """The open failure of one kind, or nothing where that kind is fine.
+
+        At most one row can ever come back -- one open failure per kind is a
+        database constraint -- which is what lets this read as a question
+        rather than as a list. Asked wherever something has to know whether a
+        failure is standing this minute: the reconciliation, which is bringing
+        that row up to date; the announcing, which holds a message back while
+        a likelier cause is already the news; and the reports, one of which is
+        worth nothing while the registry it reads against is frozen.
+        """
+        return self.open().filter(kind=kind).first()
+
     def overlapping(self, start, end):
         """The spells that stood at any point between two instants.
 
@@ -1795,9 +1808,16 @@ class HardFailure(models.Model):
 
     Everything else recorded here is a finding about the region. This is the
     other kind: the Global Broker connection lost, that connection proving
-    unreliable, or nothing at all being ingested. None of them says anything
+    unreliable, nothing at all being ingested, or the one catalogue that
+    writes the registry having stopped answering. None of them says anything
     about whether African centres are publishing, and each means that nothing
     the tool goes on to say about them can be believed until it is fixed.
+
+    The last of them fails in the opposite direction to the others, which is
+    why it belongs here rather than reading as a quieter kind of finding. A
+    broker that stops delivering empties the picture; a registry that stops
+    being rebuilt freezes it, and every surface goes on answering confidently
+    about the region as it stood when the catalogue was last reachable.
 
     A row per spell rather than per check, so that a failure lasting a day is
     one thing that happened rather than a thousand. ``notified_at`` is what
@@ -1823,11 +1843,13 @@ class HardFailure(models.Model):
     GLOBAL_BROKER_LOST = "global_broker_lost"
     GLOBAL_BROKER_UNRELIABLE = "global_broker_unreliable"
     INGESTION_STALLED = "ingestion_stalled"
+    CATALOGUE_WRITER_STALE = "catalogue_writer_stale"
 
     KIND_CHOICES = [
         (GLOBAL_BROKER_LOST, _("Global Broker connection lost")),
         (GLOBAL_BROKER_UNRELIABLE, _("Global Broker unreliable")),
         (INGESTION_STALLED, _("Ingestion stalled")),
+        (CATALOGUE_WRITER_STALE, _("Registry catalogue not syncing")),
     ]
 
     kind = models.CharField(max_length=50, choices=KIND_CHOICES)

@@ -2,8 +2,9 @@
 
 These are the only findings this tool makes about itself, and the only ones
 worth waking somebody for: the Global Broker connection not carrying the
-region, or nothing being ingested at all. Everything else the tool reports is
-a statement about the region, and none of those statements mean anything while
+region, nothing being ingested at all, or the one catalogue that writes the
+registry having stopped answering. Everything else the tool reports is a
+statement about the region, and none of those statements mean anything while
 one of these is standing.
 
 Two things are being checked here and they pull against each other. A failure
@@ -28,9 +29,11 @@ from django.test import TestCase, override_settings
 
 from wis2watch.core.alerts import check_hard_failures
 from wis2watch.core.models import (
+    GlobalDiscoveryCatalogue,
     HardFailure,
     MessageSource,
     NotificationMessage,
+    SyncLog,
     WIS2Node,
 )
 from wis2watch.core.tests.support import at
@@ -46,6 +49,7 @@ UNRELIABLE_MINUTES = 45
 UNRELIABLE_WINDOW_MINUTES = 120
 RELIABLE_MINUTES = 10
 STALL_MINUTES = 15
+CATALOGUE_STALE_HOURS = 24
 
 
 @override_settings(
@@ -54,6 +58,7 @@ STALL_MINUTES = 15
     WIS2WATCH_BROKER_UNRELIABLE_WINDOW_MINUTES=UNRELIABLE_WINDOW_MINUTES,
     WIS2WATCH_BROKER_RELIABLE_MINUTES=RELIABLE_MINUTES,
     WIS2WATCH_INGESTION_STALL_MINUTES=STALL_MINUTES,
+    WIS2WATCH_CATALOGUE_STALE_HOURS=CATALOGUE_STALE_HOURS,
 )
 class HardFailureTestCase(TestCase):
     def setUp(self):
@@ -521,6 +526,23 @@ class GlobalBrokerUnreliableTests(HardFailureTestCase):
         self.assertIsNone(self.open_failure(self.KIND))
         self.assertEqual(mail.outbox, [])
 
+    def test_the_message_reads_as_prose_rather_than_as_escaped_markup(self):
+        """These are text/plain, and a template escapes by default.
+
+        Everything interpolated into one is English written by this tool or
+        the text of an exception, neither of which is ever parsed as HTML. Not
+        turned off, a reader gets ``the region&#x27;s traffic`` in their mail
+        and stops trusting the sender before they reach the finding.
+        """
+        self.drops((110, 60))
+
+        self.check()
+
+        (announced,) = self.announcements(self.KIND)
+
+        self.assertIn("the region's traffic", announced.body)
+        self.assertNotIn("&#", announced.body)
+
 
 class FlappingBrokerTests(HardFailureTestCase):
     """A whole day of the connection this design was built for.
@@ -701,3 +723,235 @@ class UnannouncedFailureTests(HardFailureTestCase):
             self.check(now=NOW + timedelta(minutes=1))
 
         self.assertEqual(len(mail.outbox), 1)
+
+
+class RegistryStaleTests(HardFailureTestCase):
+    """The one catalogue that writes the registry, gone quiet.
+
+    Everything this tool knows exists comes from here, so the failure is not
+    that a page is empty -- it is that the picture stops moving while every
+    surface goes on reporting confidently against it. A centre that onboards
+    while it stands is never created, never subscribed to and never mentioned.
+
+    The threshold is what most of these are about. The sync runs every six
+    hours, so a missed run is not news, and the alert only means anything if
+    it waits long enough to be more than a blip and not so long that a week of
+    a frozen registry passes unremarked.
+    """
+
+    KIND = HardFailure.CATALOGUE_WRITER_STALE
+
+    def setUp(self):
+        super().setUp()
+
+        # A stall of its own would otherwise be found alongside every one of
+        # these, and it is the registry's alert being asserted on here.
+        self.ingested(minutes_ago=1)
+
+        self.writer = self.catalogue("io-wis2dev-12-test", is_writer=True)
+
+    # -- seeding ---------------------------------------------------------
+
+    def catalogue(self, centre_id, *, is_writer=False, is_active=True):
+        return GlobalDiscoveryCatalogue.objects.create(
+            centre_id=centre_id,
+            name=centre_id.upper(),
+            base_url=f"https://{centre_id}.example.int/oapi",
+            is_writer=is_writer,
+            is_active=is_active,
+        )
+
+    def synced(
+        self,
+        *,
+        hours_ago,
+        catalogue=None,
+        found=180,
+        errored=0,
+        status=SyncLog.SUCCESS,
+        error="",
+    ):
+        """One run of the catalogue sync, as the sync itself records it."""
+        ran_at = NOW - timedelta(hours=hours_ago)
+
+        return SyncLog.objects.create(
+            catalogue=catalogue or self.writer,
+            sync_type=SyncLog.CATALOGUE,
+            status=status,
+            items_found=found,
+            items_errored=errored,
+            error_message=error,
+            started_at=ran_at,
+            completed_at=ran_at + timedelta(seconds=30),
+        )
+
+    def synced_again(self, *, hours_from_now=1):
+        """A run that brings records back, after a spell in which none did."""
+        return self.synced(hours_ago=-hours_from_now)
+
+    def detail(self):
+        return self.open_failure(self.KIND).detail
+
+    # -- a registry that is being rebuilt ---------------------------------
+
+    def test_a_writer_synced_within_the_threshold_is_not_a_failure(self):
+        self.synced(hours_ago=CATALOGUE_STALE_HOURS - 1)
+
+        self.check()
+
+        self.assertIsNone(self.open_failure(self.KIND))
+
+    def test_no_writer_designated_at_all_is_not_reported_as_one_that_stopped(self):
+        """The same silence a broker nothing has been given gets.
+
+        An installation that has not been told which catalogue writes its
+        registry has not been set up; it is not one whose catalogue has
+        stopped answering, and saying so would greet every fresh install with
+        an alert about a failure that has not happened.
+        """
+        self.writer.delete()
+
+        self.check(now=NOW + timedelta(days=7))
+
+        self.assertIsNone(self.open_failure(self.KIND))
+
+    def test_a_writer_switched_off_in_the_admin_is_not_watched(self):
+        self.writer.is_active = False
+        self.writer.save()
+
+        self.check(now=NOW + timedelta(days=7))
+
+        self.assertIsNone(self.open_failure(self.KIND))
+
+    def test_a_reading_catalogue_going_quiet_is_not_a_hard_failure(self):
+        """The tool still works without them: divergence is all they are for."""
+        reader = self.catalogue("io-wis2dev-13-test")
+
+        self.synced(hours_ago=1)
+        self.synced(hours_ago=CATALOGUE_STALE_HOURS + 12, catalogue=reader)
+
+        self.check()
+
+        self.assertIsNone(self.open_failure(self.KIND))
+
+    # -- a registry that has stopped moving -------------------------------
+
+    def test_a_writer_past_the_threshold_is_announced(self):
+        self.synced(hours_ago=CATALOGUE_STALE_HOURS + 1)
+
+        self.check()
+
+        self.assertEqual(len(self.announcements(self.KIND)), 1)
+
+    def test_the_failure_is_dated_from_the_last_sync_that_brought_records_back(self):
+        self.synced(hours_ago=CATALOGUE_STALE_HOURS + 6)
+
+        self.check()
+
+        self.assertEqual(
+            self.open_failure(self.KIND).started_at,
+            NOW - timedelta(hours=CATALOGUE_STALE_HOURS + 6) + timedelta(seconds=30),
+        )
+
+    def test_the_failure_says_which_catalogue_and_why_the_last_run_failed(self):
+        self.synced(hours_ago=CATALOGUE_STALE_HOURS + 6)
+        self.synced(hours_ago=1, status=SyncLog.FAILED, found=0, error="Read timed out")
+
+        self.check()
+
+        self.assertIn("io-wis2dev-12-test", self.detail())
+        self.assertIn("Read timed out", self.detail())
+
+    def test_a_writer_answering_with_no_records_freezes_the_registry_too(self):
+        """A catalogue answering 200 with nothing in it is not an error.
+
+        No check anywhere else would call this a failure -- the fetch worked,
+        the run succeeded, the sync log is green -- and the registry stops
+        growing exactly as it does when the host refuses the connection.
+        """
+        self.synced(hours_ago=CATALOGUE_STALE_HOURS + 6)
+        self.synced(hours_ago=1, found=0)
+
+        self.check()
+
+        self.assertEqual(len(self.announcements(self.KIND)), 1)
+        self.assertIn("no records", self.detail())
+
+    def test_a_run_that_stepped_over_every_record_brings_nothing_back(self):
+        """Green enough to look current, and the registry is no further on.
+
+        A run reads records and stores them one at a time, stepping over any
+        it cannot apply. One that stepped over all of them answered, so no
+        check reading the status alone would call it a failure, and it left
+        the registry exactly where the last real run did.
+        """
+        self.synced(hours_ago=CATALOGUE_STALE_HOURS + 6)
+        self.synced(hours_ago=1, found=180, errored=180, status=SyncLog.PARTIAL)
+
+        self.check()
+
+        self.assertEqual(len(self.announcements(self.KIND)), 1)
+        self.assertIn("stepped over all 180 it read", self.detail())
+
+    def test_a_run_that_stepped_over_some_of_them_still_counts(self):
+        """The ordinary partial run: most of the region got through."""
+        self.synced(hours_ago=1, found=180, errored=3, status=SyncLog.PARTIAL)
+
+        self.check()
+
+        self.assertIsNone(self.open_failure(self.KIND))
+
+    def test_a_sync_that_has_simply_stopped_running_is_found_too(self):
+        """Nothing failed and nothing is empty: the schedule is not running."""
+        self.synced(hours_ago=CATALOGUE_STALE_HOURS + 6)
+
+        self.check()
+
+        self.assertIn("no sync has run since", self.detail())
+
+    # -- an installation that has never had a registry ---------------------
+
+    def test_a_writer_that_has_never_synced_is_given_the_threshold(self):
+        self.check()
+
+        self.assertIsNotNone(self.open_failure(self.KIND))
+        self.assertEqual(self.announcements(self.KIND), [])
+
+    def test_a_writer_that_never_starts_syncing_is_announced(self):
+        self.check()
+
+        self.check(now=NOW + timedelta(hours=CATALOGUE_STALE_HOURS + 1))
+
+        self.assertEqual(len(self.announcements(self.KIND)), 1)
+
+    # -- one spell, one message -------------------------------------------
+
+    def test_a_frozen_registry_is_announced_once_however_long_it_stands(self):
+        self.synced(hours_ago=CATALOGUE_STALE_HOURS + 1)
+
+        for day in range(4):
+            self.check(now=NOW + timedelta(days=day))
+
+        self.assertEqual(len(self.announcements(self.KIND)), 1)
+
+    def test_the_registry_being_rebuilt_is_reported_as_recovered(self):
+        self.synced(hours_ago=CATALOGUE_STALE_HOURS + 1)
+        self.check()
+
+        self.synced_again()
+        self.check(now=NOW + timedelta(hours=2))
+
+        (opened, recovered) = self.announcements(self.KIND)
+
+        self.assertNotIn("recovered", opened.subject)
+        self.assertIn("recovered", recovered.subject)
+        self.assertIsNone(self.open_failure(self.KIND))
+
+    def test_the_message_says_what_a_frozen_registry_costs(self):
+        self.synced(hours_ago=CATALOGUE_STALE_HOURS + 1)
+
+        self.check()
+
+        (announced,) = self.announcements(self.KIND)
+
+        self.assertIn("never created", announced.body)

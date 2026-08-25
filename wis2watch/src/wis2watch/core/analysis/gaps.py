@@ -31,6 +31,14 @@ readable rather than complete. OSCAR is notoriously stale, so only stations it
 still reports as fully operational count as declared. And a centre no vantage
 point of its own currently answers at has its propagation gaps withheld,
 because they are indistinguishable from this tool having stopped listening.
+
+A third withholds a whole report rather than rows of one, and does it for the
+same reason. Every one of these compares what is arriving against what the
+registry says should exist, so a registry that has stopped being rebuilt makes
+one of them wrong across the board: a centre the catalogue has never indexed
+and a centre whose record this tool has not read are the same centre from
+here. That is a hard failure rather than a finding, it is announced as one,
+and the report it invalidates says so and holds its rows until it clears.
 """
 
 from collections.abc import Callable
@@ -47,6 +55,7 @@ from django.utils.translation import ngettext
 from django_countries.fields import Country
 
 from ..models import (
+    HardFailure,
     HourlyRollup,
     MessageSource,
     PropagationGap,
@@ -385,18 +394,84 @@ def unregistered_centres(*, now=None):
         now: the instant each centre's time unregistered is measured up to.
 
     Returns:
-        list[UnregisteredCentreRow]: longest unregistered first.
+        list[UnregisteredCentreRow]: longest unregistered first, and nothing
+        at all while the registry these are missing from is frozen.
 
     What the wildcard sweep found by listening past the registry. A centre here
     is publishing to WIS2 while being invisible to everything that reads a
     catalogue -- including, but for the sweep, this tool.
+
+    Which makes the whole report a statement about the registry, and worth
+    nothing while the registry has stopped being rebuilt: the centres it names
+    then are the ones the writing catalogue has not been asked about, not the
+    ones no catalogue knows. Withheld rather than qualified, because a list of
+    named centres with a caveat above it is a list somebody acts on.
     """
     now = now or dj_timezone.now()
 
     return [
         _unregistered_centre_row(centre, now=now)
-        for centre in _open_unregistered_centres()
+        for centre in _reportable_unregistered_centres()
     ]
+
+
+def unregistered_centres_withheld(*, now=None):
+    """What the unregistered report is holding back, in a sentence.
+
+    Args:
+        now: unused; taken so that every bound is asked in the same way.
+
+    Returns:
+        str | None: what is withheld and why, or nothing when the registry is
+        current and the report is listing everything it holds.
+
+    Said even when nothing is being held. An empty report with nothing beside
+    it announces that every publishing centre in the region has a catalogue
+    record, which is the one thing this report cannot know while the catalogue
+    it would know it from is unreachable.
+    """
+    if not _registry_is_frozen():
+        return None
+
+    withheld = _open_unregistered_centres().count()
+
+    return ngettext(
+        "%(count)d centre is not listed. The catalogue that writes the "
+        "registry is not syncing, so a centre publishing with no record "
+        "cannot be told from one whose record this tool has not read.",
+        "%(count)d centres are not listed. The catalogue that writes the "
+        "registry is not syncing, so a centre publishing with no record "
+        "cannot be told from one whose record this tool has not read.",
+        withheld,
+    ) % {"count": withheld}
+
+
+def unregistered_centres_unsettled(*, now=None):
+    """The centres this report has stopped being able to answer for.
+
+    Args:
+        now: unused; taken so that every report is asked in the same way.
+
+    Returns:
+        set[str]: the centre IDs withheld while the registry is frozen, and an
+        empty set whenever it is current.
+
+    The same admission the sentence above makes to a reader, made to the
+    digest. A centre leaving this report ordinarily means the registry caught
+    up with it, which is news worth sending; a centre leaving it because the
+    registry stopped being rebuilt is not, and the grace period cannot tell
+    them apart -- a writer unreachable for a week outlasts any grace, and
+    every centre the sweep had found would be mailed out as registered.
+
+    Let go rather than held, so nothing is announced and the row is dropped.
+    A centre still unregistered once the catalogue answers again is found by
+    the next sweep and is news again then, which is the right time to say it:
+    it has survived the registry catching up.
+    """
+    if not _registry_is_frozen():
+        return set()
+
+    return set(_open_unregistered_centres().values_list("centre_id", flat=True))
 
 
 def unattributed_rates(*, now=None, window_hours=None):
@@ -579,6 +654,32 @@ def _open_unregistered_centres():
     return UnregisteredCentre.objects.unregistered().order_by(
         "first_seen_at", "centre_id"
     )
+
+
+def _reportable_unregistered_centres():
+    """The same, where the registry is current enough for them to mean anything."""
+    if _registry_is_frozen():
+        return UnregisteredCentre.objects.none()
+
+    return _open_unregistered_centres()
+
+
+def _registry_is_frozen():
+    """Whether the catalogue that writes the registry has stopped answering.
+
+    Read off the open hard failure rather than recomputed here, so that one
+    answer serves the alert and the report and they cannot come apart: a
+    report that worked it out for itself would need the threshold too, and
+    two copies of a threshold meant to be revised is one revised copy and one
+    forgotten one.
+
+    Which is the row rather than the message, deliberately. A failure is
+    announced once it has outlasted the announcing threshold and to whoever is
+    configured to hear it, and neither of those has any bearing on whether
+    this report can stand behind what it lists. An installation with nobody to
+    mail still withholds, and says why on the page.
+    """
+    return bool(HardFailure.objects.standing(HardFailure.CATALOGUE_WRITER_STALE))
 
 
 def _unregistered_centre_row(centre, *, now):
@@ -893,8 +994,10 @@ GAP_REPORTS = (
             "catalogue record."
         ),
         find_rows=unregistered_centres,
-        count_rows=lambda *, now=None: _open_unregistered_centres().count(),
+        count_rows=lambda *, now=None: _reportable_unregistered_centres().count(),
         describe_row=_unregistered_centre_notice,
+        describe_bound=unregistered_centres_withheld,
+        find_unsettled=unregistered_centres_unsettled,
     ),
     GapReport(
         slug="unattributed-messages",
