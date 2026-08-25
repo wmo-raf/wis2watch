@@ -45,12 +45,19 @@ the five reports answer with nothing, by the shared default: an absence in a
 report bounded by its filters is one that can end, and the grace period is
 already right for it.
 
-**The propagation report answers with the centres holding open gaps past the
-horizon**, by the same query that counts them in `propagation_gaps_left_out`.
-One horizon asked two ways cannot be allowed to differ: a centre counted as
-unlistable in one sentence and cleared in another is the bug in a new place.
-Centres whose own vantage points are dark are absent from both, for the same
-reason — their gaps are withheld rather than unanswerable.
+**The propagation report answers with the centres whose last word is an
+unanswerable gap.** The horizon is asked for by the same query that counts
+gaps in `propagation_gaps_left_out` — one horizon asked two ways cannot be
+allowed to disagree about what is past it. Centres whose own vantage points
+are dark are absent from both, for the same reason: their gaps are withheld
+rather than unanswerable.
+
+**A centre heard from since is not among them.** A gap the world turned out to
+carry is the only thing that settles anything here, so a centre holding one
+later than its last unanswerable gap has been observed publishing to a path
+that works, and its clearing is real. Without that, one gap left open a spring
+ago would silence every good word about that centre for the life of the
+installation — an unanswerable gap is never closed and never purged.
 
 **The digest lets those findings go silently.** They are excluded from
 `resolved`, their remembered rows are dropped, and nothing is said. A finding
@@ -66,9 +73,9 @@ records what was reported only once somebody has actually been told.
 **A centre whose gaps pass the horizon is no longer announced as cleared.** It
 is forgotten instead, so the same centre breaking again is announced as new.
 
-**Genuine recovery still clears.** A gap closed by a late arrival leaves
-nothing unanswerable behind it, so the centre falls out of the report with
-everything settled and is carried as cleared once the grace has run.
+**Genuine recovery still clears**, including at a centre that also holds an
+older gap nobody can check any more: the late arrival is later than the
+question, so the centre leaves the report having been heard from.
 
 **A centre that really did go quiet for the whole forensic window is not
 announced either.** That is the cost, and it is why the report's account of

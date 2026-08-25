@@ -30,7 +30,7 @@ from wis2watch.core.models import (
     UnregisteredCentre,
     WIS2Node,
 )
-from wis2watch.core.tests.support import at
+from wis2watch.core.tests.support import at, origin_broker
 
 NOW = at("2026-08-11T06:00:00")
 
@@ -349,29 +349,28 @@ class LetGoFindingTests(DigestTestCase):
     def watched(self, centre_id):
         """A centre with a vantage point of its own that still answers."""
         node = WIS2Node.objects.create(centre_id=centre_id, name=centre_id.upper())
-        MessageSource.objects.create(
-            name=f"{centre_id} origin broker",
-            source_type=MessageSource.ORIGIN_BROKER,
-            node=node,
-            centre_id=centre_id,
-            host=f"wis.{centre_id}.example.int",
-            is_reachable=True,
-        )
+        origin_broker(node, is_reachable=True)
 
         return node
 
-    def gap_at(self, node, *, notification_id="d9a1", published=None):
-        """A notification the centre published that the world has not carried."""
+    def gap_at(self, node, *, notification_id="d9a1", published=None, carried_at=None):
+        """A notification the centre published that the world has not carried.
+
+        ``carried_at`` is the world turning out to have it after all, which is
+        how a gap is closed: given, this one was answered rather than left
+        standing.
+        """
         published = published or NOW - timedelta(hours=2)
 
         return PropagationGap.objects.create(
             node=node,
-            origin_source=node.message_sources.first(),
+            origin_source=node.origin_source,
             notification_id=notification_id,
             topic=f"origin/a/wis2/{node.centre_id}/data/core/weather",
             published_at=published,
             observed_at_origin=published,
             detected_at=published + timedelta(minutes=20),
+            resolved_at=carried_at,
         )
 
     def remembered(self):
@@ -477,6 +476,29 @@ class LetGoFindingTests(DigestTestCase):
 
         self.assertIn("Cleared:", self.body())
         self.assertIn("ke-meteo", self.body())
+
+    def test_a_recovery_clears_at_a_centre_that_holds_an_older_unanswerable_gap(self):
+        """One gap left open a season ago cannot silence every good word since.
+
+        The old gap is past the horizon and always will be. What the tool has
+        seen since is a notification of that centre's the world turned out to
+        carry, so the centre leaves the report having been heard from -- which
+        is the clearing somebody has been waiting for.
+        """
+        node = self.watched("ke-meteo")
+        self.gap_at(node)
+        self.send()
+
+        published = PAST_THE_HORIZON - timedelta(days=2)
+        self.gap_at(
+            node,
+            notification_id="c4f2",
+            published=published,
+            carried_at=published + timedelta(hours=1),
+        )
+        change = self.changes_for("propagation-gaps", now=PAST_THE_HORIZON)
+
+        self.assertEqual([notice.key for notice in change.resolved], ["ke-meteo"])
 
     def test_a_centre_whose_own_broker_went_dark_still_gets_its_grace(self):
         """A different absence, and one that ends: nothing here changes it."""

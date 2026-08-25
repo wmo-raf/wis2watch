@@ -38,10 +38,10 @@ nothing new go missing for a fortnight is announced as a path somebody fixed,
 which nobody did.
 
 So a report is asked which of its findings have stopped being checkable
-rather than stopped, and those are let go without a word: nothing is
-announced, the row is dropped, and the same centre breaking again is news
-again. Everything else a report stops listing keeps its grace period, because
-every other absence is one that can end.
+rather than stopped -- which only it can know -- and those are let go without
+a word: nothing is announced, the row is dropped, and the same centre breaking
+again is news again. Everything else a report stops listing keeps its grace
+period, because every other absence is one that can end.
 
 What that costs is that a centre really going quiet for the whole forensic
 window is not announced either, which is why each report's own account of

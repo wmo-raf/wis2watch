@@ -38,7 +38,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from django.conf import settings
-from django.db.models import Exists, F, OuterRef, Q, Subquery, Sum
+from django.db.models import Exists, F, Max, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone as dj_timezone
 from django.utils.formats import date_format
@@ -325,29 +325,57 @@ def propagation_gaps_unsettled(*, now=None):
         now: the instant the horizon is worked out from.
 
     Returns:
-        set[str]: the centre IDs holding open gaps past the horizon, and an
-        empty set where every centre that has left the report left it because
-        its propagation recovered.
+        set[str]: the keys of the findings this report can no longer settle
+        either way -- centre IDs, as this report identifies a finding -- and
+        an empty set where every centre that has left the report left it
+        having been heard from.
 
     A centre leaves this report two ways that look identical from outside it.
-    Its gaps close, which is a path somebody fixed; or its gaps pass the
+    Its gaps close, which is a path that started working; or its gaps pass the
     horizon, which is this tool running out of evidence while the question
     stands. Whoever reads the report can tell them apart from the sentence
     beside it. Whatever reads it -- the digest -- cannot, and would otherwise
     announce the second as the first.
 
-    Only what the horizon left out, and by the same query that counts it in
-    ``propagation_gaps_left_out``: the two disagreeing would mean a centre
-    counted as unlistable in one sentence and cleared in another. Centres
-    whose own vantage points have gone dark are absent here for the same
-    reason they are absent from that sentence -- their gaps are withheld
-    rather than unanswerable, and that is an absence that ends.
+    The horizon is asked for by the same query that counts it in
+    ``propagation_gaps_left_out``: the two disagreeing about what is past it
+    would be this same mistake in a second place. Centres whose own vantage
+    points have gone dark are absent here for the reason they are absent from
+    that sentence too -- their gaps are withheld rather than unanswerable, and
+    that is an absence that ends.
+
+    What is asked on top of it is whether the centre has been heard from
+    since. A gap the world turned out to carry is the one thing that settles
+    anything here, and a centre with one of those later than its last
+    unanswerable gap has been observed publishing to a path that works. So
+    only a centre whose last word is a question nobody can ask any more is
+    named -- otherwise a single gap left open one spring would silence every
+    good word about that centre for the life of the installation.
     """
     now = now or dj_timezone.now()
 
-    return set(
-        _gaps_past_the_horizon(now=now).values_list("node__centre_id", flat=True)
+    unanswered = dict(
+        _gaps_past_the_horizon(now=now)
+        .values_list("node__centre_id")
+        .annotate(last=Max("published_at"))
     )
+
+    if not unanswered:
+        return set()
+
+    carried = dict(
+        PropagationGap.objects.filter(
+            node__centre_id__in=unanswered, resolved_at__isnull=False
+        )
+        .values_list("node__centre_id")
+        .annotate(last=Max("published_at"))
+    )
+
+    return {
+        centre_id
+        for centre_id, unanswered_at in unanswered.items()
+        if centre_id not in carried or carried[centre_id] < unanswered_at
+    }
 
 
 def unregistered_centres(*, now=None):
@@ -749,8 +777,8 @@ def _leaves_nothing_unsettled(*, now=None):
 
     None of them, for every report whose findings it can still answer for.
     A report that stops listing something is saying the thing has gone, and
-    the only one of the five that can mean something else by it is the
-    propagation report, whose evidence expires under it.
+    only a report whose evidence expires under it -- the propagation report --
+    can mean anything else by it.
     """
     return set()
 
