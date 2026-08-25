@@ -8,7 +8,7 @@ stations are declared to the world and have never once transmitted, a centre
 publishing that no catalogue has indexed, data announced to a broker the rest
 of the world never hears.
 
-Five reports, because there are five ways the picture can be wrong that no
+Six reports, because there are six ways the picture can be wrong that no
 single view of one centre can show:
 
 * what a country declares in OSCAR and has never been heard from;
@@ -16,8 +16,20 @@ single view of one centre can show:
   declares;
 * what a centre published that the Global Broker never carried;
 * which centres publish with no catalogue record at all;
+* whose own station registry has stopped answering, or never did;
 * how much of each centre's traffic says nothing about which station it came
   from.
+
+The last of those is the only one that is a finding about this tool's reach
+rather than about the region alone, and it earns its place beside the others
+for the reason all of them are here: nobody was looking. A registry that fails
+every hourly run leaves a failed sync log every hour, and until something read
+them the failure was visible only to whoever opened that centre's page already
+suspecting it -- which for fifty-four countries is nobody. It is a pattern
+over time rather than one bad run, so it is reported where the patterns are
+rather than announced as a hard failure: one centre's dead registry costs one
+of the three station pictures for one centre, and the tool's answers about
+everywhere else stay good.
 
 Every one of them is a list of named entities rather than a count. "Seventeen
 stations are silent" is not a finding anybody can act on; a WIGOS identifier, a
@@ -52,13 +64,14 @@ territory instead.
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from django.conf import settings
-from django.db.models import Exists, F, Max, OuterRef, Q, Subquery, Sum
+from django.db.models import Exists, F, Max, Min, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone as dj_timezone
 from django.utils.formats import date_format
+from django.utils.translation import gettext
 from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django_countries.fields import Country
@@ -69,6 +82,7 @@ from ..models import (
     MessageSource,
     PropagationGap,
     StationSource,
+    SyncLog,
     UnregisteredCentre,
     WIS2Node,
     evidence_horizon,
@@ -83,6 +97,19 @@ from .silence import hours_between
 #: over a day.
 DEFAULT_ATTRIBUTION_WINDOW_HOURS = 168
 
+#: How long a centre's registry may fail every run before the report names it,
+#: in hours. Against an hourly sync that is some fifty consecutive failures --
+#: far past a host restarting overnight or a certificate renewed badly at
+#: lunchtime, and still soon enough that a centre is told in the same week its
+#: registry went. Deliberately not one of the alerting thresholds: this is not
+#: a failure of the tool, and nobody is being interrupted for it.
+DEFAULT_REGISTRY_UNANSWERED_HOURS = 48
+
+#: How much of a run's error the digest will quote. Enough for a read timeout,
+#: a refused connection or an HTTP status to be recognised, and not enough for
+#: a registry answering with a page of HTML to fill the mail.
+ERROR_EXCERPT_CHARS = 200
+
 
 def default_attribution_window_hours():
     """Over how many hours the unattributed share is worked out."""
@@ -90,6 +117,15 @@ def default_attribution_window_hours():
         settings,
         "WIS2WATCH_ATTRIBUTION_WINDOW_HOURS",
         DEFAULT_ATTRIBUTION_WINDOW_HOURS,
+    )
+
+
+def default_registry_unanswered_hours():
+    """How long a registry may fail every run before the report names it."""
+    return getattr(
+        settings,
+        "WIS2WATCH_REGISTRY_UNANSWERED_HOURS",
+        DEFAULT_REGISTRY_UNANSWERED_HOURS,
     )
 
 
@@ -270,6 +306,77 @@ class UnattributedRateRow:
     def percent(self):
         """The same share as a percentage, for a table cell."""
         return self.rate * 100
+
+
+class RegistryStanding:
+    """Whether a registry that is not answering ever did.
+
+    Two states rather than one, because they send somebody to two different
+    places. A registry that answered and stopped is a host that has moved or
+    died, and the address this tool holds was right when it was learned: the
+    errand is to find where the registry went, and the centre is the only one
+    who knows. A registry that has never answered is an address that was
+    wrong from the moment it was derived -- read off the host a centre serves
+    its metadata from, which is not always the host its API answers on -- and
+    the errand is to establish where the API is at all.
+
+    Told apart by history alone, so a centre onboarded last week and a centre
+    whose sync logs happen not to reach back far enough would read the same.
+    Nothing prunes sync logs, so the second does not arise.
+    """
+
+    NEVER_ANSWERED = "never_answered"
+    STOPPED = "stopped"
+
+    CHOICES = [
+        (NEVER_ANSWERED, _("Has never answered")),
+        (STOPPED, _("Stopped answering")),
+    ]
+
+    LABELS = dict(CHOICES)
+
+    @classmethod
+    def of(cls, last_answered_at):
+        """Which of the two a registry is, from when it last answered."""
+        return cls.STOPPED if last_answered_at else cls.NEVER_ANSWERED
+
+    @classmethod
+    def label(cls, standing):
+        """What that is called, for a table cell or an email."""
+        return cls.LABELS.get(standing, standing)
+
+
+@dataclass(frozen=True)
+class UnansweredRegistryRow:
+    """A centre's own station registry that has failed every run for days.
+
+    The address is on the row because it is the finding. What has gone wrong
+    is that this tool is asking somewhere nothing answers, and whether that is
+    the centre's host or this tool's guess at it is exactly what an operator
+    reads the address to decide.
+
+    Beside it, what the last run said went wrong: a read timeout, a refused
+    connection and a 404 are three different conversations, and a report that
+    said only "failing" would send somebody to open the sync logs it was
+    supposed to have read for them.
+    """
+
+    node_id: int
+    centre_id: str
+    name: str
+    country_code: str
+    country_name: str
+    stations_url: str
+    standing: str
+    last_answered_at: datetime | None
+    unanswered_since: datetime
+    hours_unanswered: float
+    last_error: str
+
+    @property
+    def standing_label(self):
+        """Whether it ever answered, for a table cell."""
+        return RegistryStanding.label(self.standing)
 
 
 def stations_declared_but_silent(*, now=None):
@@ -613,6 +720,222 @@ def unattributed_rates(*, now=None, window_hours=None):
     ]
 
     return sorted(rows, key=lambda row: (-row.rate, -row.message_count, row.centre_id))
+
+
+def registries_not_answering(*, now=None, unanswered_hours=None):
+    """Centres whose own station registry has failed every run for days.
+
+    Args:
+        now: the instant each registry's silence is measured up to.
+        unanswered_hours: how long a registry must have been failing before it
+            is named.
+
+    Returns:
+        list[UnansweredRegistryRow]: longest unanswered first, and among
+        equals by centre ID.
+
+    One of the three station pictures this tool compares is what a centre's
+    own registry declares, and it is the only one asked for directly. Each
+    hourly attempt leaves a sync log whether it worked or not, so a registry
+    that has failed since March has left some thousands of failed runs and
+    said nothing to anybody -- the failure is legible only to somebody who
+    opens that centre's page already suspecting it.
+
+    What is reported is the pattern rather than the run. A centre whose host
+    restarted overnight fails twice and is not a finding; a centre nothing has
+    got an answer out of for days has a registry this tool cannot read, and
+    everything downstream is quietly answering about that centre with two
+    pictures instead of three.
+
+    A centre nobody asked is not here. It has no address to fail against, no
+    sync log and no registry to be silent -- which is the distinction
+    ``advertises_station_registry`` exists to keep, and naming it here would
+    report a centre for a failure that never happened.
+    """
+    now = now or dj_timezone.now()
+    hours = (
+        default_registry_unanswered_hours()
+        if unanswered_hours is None
+        else unanswered_hours
+    )
+
+    unanswered = list(_registries_not_answering(now=now, hours=hours))
+    errors = _last_registry_errors(node.pk for node in unanswered)
+
+    return [
+        _unanswered_registry_row(node, error=errors.get(node.pk, ""), now=now)
+        for node in unanswered
+    ]
+
+
+def registries_not_answering_caveat(*, now=None):
+    """What this report cannot say when nothing at all is answering.
+
+    Args:
+        now: unused; taken so that every caveat is asked in the same way.
+
+    Returns:
+        str | None: that every registry is failing at once and what that
+        probably means, or nothing whenever any of them is answering.
+
+    A handful of the region's registries failing is the region. Every one of
+    them failing at once is very much more likely to be here -- an outbound
+    route lost, a proxy retired, a certificate store gone stale -- and the
+    report cannot tell the two apart from the sync logs, because they leave
+    identical ones.
+
+    Said rather than withheld, unlike the registry-frozen case above. These
+    rows stay true either way: the tool really is failing to read those
+    registries, and that is worth showing whoever can go and look. What would
+    be wrong is letting somebody take thirty of them to thirty centres, and a
+    sentence prevents that where withholding the lot would also hide the only
+    evidence of the fault.
+
+    Nothing is said of a single centre failing on its own. One registry down
+    is one registry down whichever way it is counted, and "every registry is
+    failing" over a set of one is a coincidence dressed as a pattern.
+    """
+    asked = _registries_asked()
+    failing = _registries_failing_now(asked).count()
+
+    if failing < 2 or failing < asked.count():
+        return None
+
+    return gettext(
+        "None of the %(count)d centres this tool asks is answering. That is "
+        "more likely to be a fault here -- an outbound route, a proxy, a "
+        "certificate store -- than every registry in the region failing at "
+        "once, so check that one of these addresses answers from this host "
+        "before taking any of them to a centre."
+    ) % {"count": failing}
+
+
+def _registries_asked():
+    """Every centre whose own registry has actually been asked, with what came back.
+
+    Three instants off one pass over the sync logs, all of them filtered to
+    the station sync: a centre's message archive answering this morning says
+    nothing whatever about its registry, and an unfiltered ``Max`` would read
+    it as though it did.
+
+    ``first_asked_at`` is what times a registry that has never answered. There
+    is no last-answered instant to count from, and timing it from the first
+    failure would say the same thing -- the two are one run apart -- while
+    reading as though something had once been different.
+
+    The set this starts from is the set the hourly beat queues, both of them
+    ``advertising_a_station_registry``. That is what entitles the sentence
+    above to say "the centres this tool asks" and mean it: a centre in here is
+    one something is still going to every hour, so its newest run is as recent
+    as the schedule, and a stale answer can only mean the schedule itself has
+    stopped -- in which case nothing is being asked and there is nothing for
+    that sentence to be about.
+    """
+    asked = Q(sync_logs__sync_type=SyncLog.NODE_STATIONS)
+    answered = asked & ~Q(sync_logs__status=SyncLog.FAILED)
+
+    return (
+        WIS2Node.objects.advertising_a_station_registry()
+        .annotate(
+            first_asked_at=Min("sync_logs__started_at", filter=asked),
+            last_run_at=Max("sync_logs__started_at", filter=asked),
+            last_answered_at=Max("sync_logs__started_at", filter=answered),
+        )
+        .filter(last_run_at__isnull=False)
+    )
+
+
+def _registries_not_answering(*, now, hours):
+    """The centres whose registry has failed every run since long enough ago.
+
+    "Every run since" needs no counting. The newest run being later than the
+    newest run that answered is exactly the statement that nothing since that
+    answer got one, whatever number of runs sits in between -- so a week in
+    which the schedule itself was down cannot be read as a week of failures.
+
+    A partial run answered. What the report is about is whether this tool can
+    reach the registry at all; a run that read it and stepped over a record it
+    could not store reached it, and is the node page's finding rather than
+    this one's.
+    """
+    return (
+        _registries_failing_now(_registries_asked())
+        .annotate(unanswered_since=Coalesce("last_answered_at", "first_asked_at"))
+        .filter(unanswered_since__lte=now - timedelta(hours=hours))
+        .order_by("unanswered_since", "centre_id")
+    )
+
+
+def _registries_failing_now(registries):
+    """Those of them whose newest run is one that failed.
+
+    The one place "nothing has answered since" is spelled, because the report
+    and the sentence above it both ask it and an answer they disagreed about
+    would be a page saying every registry is failing over a table of the ones
+    that are not.
+
+    Written as two arms rather than as the negation of "the newest run
+    answered", which would be the same statement in SQL only for a registry
+    that has answered at some point: there is no instant to compare against
+    for one that never has, and a comparison with nothing is neither true nor
+    false, so the negation would quietly drop exactly the registries this
+    report was built to find.
+    """
+    return registries.filter(
+        Q(last_answered_at__isnull=True) | Q(last_run_at__gt=F("last_answered_at"))
+    )
+
+
+def _last_registry_errors(node_ids):
+    """What the newest failed run said went wrong, per centre.
+
+    Asked of the reported centres together rather than per row, so that a page
+    of findings is one query rather than one each. A failed run that never got
+    as far as recording why -- a worker killed mid-fetch -- carries nothing,
+    and the row says nothing rather than inventing a cause.
+    """
+    return dict(
+        SyncLog.objects.filter(
+            node_id__in=list(node_ids),
+            sync_type=SyncLog.NODE_STATIONS,
+            status=SyncLog.FAILED,
+        )
+        .order_by("node_id", "-started_at")
+        .distinct("node_id")
+        .values_list("node_id", "error_message")
+    )
+
+
+def _unanswered_registry_row(node, *, error, now):
+    """One unreadable registry as a finding."""
+    return UnansweredRegistryRow(
+        node_id=node.pk,
+        centre_id=node.centre_id,
+        name=node.name,
+        country_code=node.country.code if node.country else "",
+        country_name=node.country.name if node.country else "",
+        stations_url=node.stations_url,
+        standing=RegistryStanding.of(node.last_answered_at),
+        last_answered_at=node.last_answered_at,
+        unanswered_since=node.unanswered_since,
+        hours_unanswered=hours_between(node.unanswered_since, now),
+        last_error=_error_excerpt(error),
+    )
+
+
+def _error_excerpt(message):
+    """An error as much of one line of it as a reader needs.
+
+    Registries fail in prose. A refused connection is a phrase; a proxy
+    answering with an HTML error page is a screenful, and a report or an email
+    that quoted it whole would bury the twenty findings around it.
+    """
+    excerpt = " ".join(message.split())
+
+    if len(excerpt) <= ERROR_EXCERPT_CHARS:
+        return excerpt
+
+    return excerpt[: ERROR_EXCERPT_CHARS - 1].rstrip() + "\u2026"
 
 
 def _silent_declarations():
@@ -994,6 +1317,39 @@ def _unattributed_rate_notice(row):
     )
 
 
+def _unanswered_registry_notice(row):
+    """A registry this tool cannot read, in a sentence.
+
+    Two sentences, because a registry that stopped and a registry that never
+    started are two errands. The first names when it last worked, which is
+    what dates the change at the centre; the second says plainly that this
+    tool has never had an answer out of the address, which is as much a
+    question about the address as about the centre.
+
+    The error is quoted because it is the whole of the diagnosis a reader can
+    make without opening anything: a refused connection is a host that is
+    gone, a read timeout is one that is there and not serving, and a 404 is an
+    address off by a path.
+    """
+    if row.standing == RegistryStanding.NEVER_ANSWERED:
+        silence = "has never answered"
+    else:
+        silence = (
+            f"has not answered since "
+            f"{date_format(row.last_answered_at, 'DATETIME_FORMAT')}"
+        )
+
+    because = f": {row.last_error}" if row.last_error else ""
+
+    return Notice(
+        key=row.centre_id,
+        summary=(
+            f"{row.centre_id}'s station registry at {row.stations_url} "
+            f"{silence}{because}"
+        ),
+    )
+
+
 def _bounds_nothing(*, now=None):
     """What a report bounded by its filters rather than by truncation says.
 
@@ -1026,7 +1382,7 @@ def _leaves_nothing_unsettled(*, now=None):
 class GapReport:
     """One report: what it finds, and how to ask for it.
 
-    The five are held as a list rather than as five hard-wired pages so that
+    The six are held as a list rather than as six hard-wired pages so that
     the index, the routing, the report itself and the digest all read from one
     place. A report that exists but is not on the index is a finding nobody
     sees, which is the failure this whole module exists to prevent -- and one
@@ -1091,8 +1447,8 @@ class GapReportSummary:
     bound: str | None = None
 
 
-#: The five reports, in the order the index shows them: what is declared and
-#: missing, what is arriving and unaccounted for, then the three about the
+#: The six reports, in the order the index shows them: what is declared and
+#: missing, what is arriving and unaccounted for, then the four about the
 #: centres themselves.
 GAP_REPORTS = (
     GapReport(
@@ -1149,6 +1505,23 @@ GAP_REPORTS = (
         find_unsettled=unregistered_centres_unsettled,
     ),
     GapReport(
+        slug="registries-not-answering",
+        title=_("Registries that are not answering"),
+        description=_(
+            "Centres whose own station registry has failed every run for days "
+            "on end, saying which have never answered at all and which "
+            "answered once and stopped. A centre advertising no registry is "
+            "not here: nothing has ever asked it."
+        ),
+        find_rows=registries_not_answering,
+        count_rows=lambda *, now=None: _registries_not_answering(
+            now=now or dj_timezone.now(),
+            hours=default_registry_unanswered_hours(),
+        ).count(),
+        describe_row=_unanswered_registry_notice,
+        describe_caveat=registries_not_answering_caveat,
+    ),
+    GapReport(
         slug="unattributed-messages",
         title=_("Unattributed messages"),
         description=_(
@@ -1174,7 +1547,7 @@ def gap_report_summaries(*, now=None):
     """Every report with how much it has found, for the index.
 
     Counted rather than listed: the index exists to say which report is worth
-    opening, and building five reports in full to show five numbers would make
+    opening, and building six reports in full to show six numbers would make
     the cheapest page in the tool the most expensive.
     """
     now = now or dj_timezone.now()

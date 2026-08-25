@@ -27,6 +27,7 @@ from wis2watch.core.models import (
     ReportedFinding,
     Station,
     StationSource,
+    SyncLog,
     UnregisteredCentre,
     WIS2Node,
 )
@@ -114,6 +115,45 @@ class DigestTestCase(TestCase):
                 node=node,
                 message_count=unattributed,
             )
+
+    def registry_not_answering(self, centre_id, *, answered_hours_ago=None):
+        """A centre whose own registry has failed every run for days.
+
+        ``answered_hours_ago`` is when the last run that worked was, or None
+        for a registry nothing has ever got an answer out of.
+        """
+        node = WIS2Node.objects.create(
+            centre_id=centre_id,
+            name=centre_id.upper(),
+            base_url=f"https://{centre_id}.example.int",
+        )
+
+        if answered_hours_ago is not None:
+            SyncLog.objects.create(
+                node=node,
+                sync_type=SyncLog.NODE_STATIONS,
+                status=SyncLog.SUCCESS,
+                started_at=NOW - timedelta(hours=answered_hours_ago),
+            )
+
+        SyncLog.objects.create(
+            node=node,
+            sync_type=SyncLog.NODE_STATIONS,
+            status=SyncLog.FAILED,
+            started_at=NOW - timedelta(hours=200),
+            error_message="connection refused",
+        )
+
+        return node
+
+    def registry_answered(self, node, *, at_):
+        """The run that ends a registry's silence."""
+        return SyncLog.objects.create(
+            node=node,
+            sync_type=SyncLog.NODE_STATIONS,
+            status=SyncLog.SUCCESS,
+            started_at=at_,
+        )
 
     # -- reading ---------------------------------------------------------
 
@@ -597,6 +637,66 @@ class LetGoFindingTests(DigestTestCase):
         self.send()
 
         self.assertNotIn("not listed", self.body())
+
+
+class UnansweredRegistryTests(DigestTestCase):
+    """A registry that has stopped being readable, in the morning mail.
+
+    The whole point of the report: the failures were being recorded hourly
+    and read by nobody. A digest line is what turns a sync log into somebody
+    knowing.
+    """
+
+    def test_a_registry_that_has_failed_every_run_is_carried(self):
+        self.registry_not_answering("cm-meteocameroon", answered_hours_ago=300)
+
+        change = self.changes_for("registries-not-answering")
+
+        self.assertIn("cm-meteocameroon", change.new[0].summary)
+        self.assertIn("connection refused", change.new[0].summary)
+
+    def test_a_registry_that_has_never_answered_says_so(self):
+        self.registry_not_answering("ly-lnmc")
+
+        change = self.changes_for("registries-not-answering")
+
+        self.assertIn("has never answered", change.new[0].summary)
+
+    def test_a_registry_answering_again_is_carried_as_cleared(self):
+        """Which is the one piece of good news this report can bring."""
+        node = self.registry_not_answering("cm-meteocameroon", answered_hours_ago=300)
+        self.send()
+
+        self.registry_answered(node, at_=TOMORROW - timedelta(hours=1))
+        self.send(now=PAST_THE_GRACE)
+
+        self.assertIn("cm-meteocameroon", self.body())
+        self.assertIn("cleared", self.body().lower())
+
+    def test_the_digest_reads_as_prose_rather_than_as_escaped_markup(self):
+        """These are text/plain, and a template escapes by default.
+
+        This report's line is the first to carry any of it: an apostrophe in
+        the centre's name for its own registry, an ampersand in the query
+        string of the address, and whatever an unreachable host said for
+        itself. Not turned off, a reader gets ``ke-meteo&#x27;s`` in their
+        morning mail and stops trusting the sender before reaching the
+        finding.
+        """
+        self.registry_not_answering("cm-meteocameroon", answered_hours_ago=300)
+
+        self.send()
+
+        self.assertIn("cm-meteocameroon's station registry", self.body())
+        self.assertIn("items?f=json", self.body())
+        self.assertNotIn("&#", self.body())
+        self.assertNotIn("&amp;", self.body())
+
+    def test_the_same_dead_registry_is_not_carried_every_morning(self):
+        self.registry_not_answering("cm-meteocameroon", answered_hours_ago=300)
+        self.send()
+
+        self.assertIsNone(self.changes_for("registries-not-answering", now=TOMORROW))
 
 
 class BoundedEmailTests(DigestTestCase):

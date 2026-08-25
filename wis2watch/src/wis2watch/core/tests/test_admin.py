@@ -367,7 +367,7 @@ class NodeOverviewViewTests(TestCase):
 
 
 class GapReportViewTests(TestCase):
-    """The five reports, and the ways somebody arrives at one.
+    """The six reports, and the ways somebody arrives at one.
 
     What the reports find is the analysis seam's business; what is guarded here
     is that each of them can actually be reached and rendered, since a finding
@@ -443,6 +443,16 @@ class GapReportViewTests(TestCase):
             node=self.node,
             message_count=4,
         )
+        # A registry asked a fortnight ago and failing ever since, which is
+        # the row with the most in it: an address, a standing and a reason.
+        for days_ago, status in ((14, SyncLog.SUCCESS), (13, SyncLog.FAILED)):
+            SyncLog.objects.create(
+                node=self.node,
+                sync_type=SyncLog.NODE_STATIONS,
+                status=status,
+                started_at=dj_timezone.now() - timedelta(days=days_ago),
+                error_message="connection refused" if status == SyncLog.FAILED else "",
+            )
 
     def test_the_index_lists_every_report(self):
         response = self.client.get(reverse("gap_reports"))

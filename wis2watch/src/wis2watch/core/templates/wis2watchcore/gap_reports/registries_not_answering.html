@@ -1,0 +1,56 @@
+{% extends "wis2watchcore/gap_reports/base.html" %}
+
+{% load i18n %}
+
+{% block report_note %}
+    <p class="report-note">
+        {% trans "One of the three station pictures this tool compares is what a centre's own registry declares, and it is the only one asked for directly. Each hourly attempt leaves a sync log whether it worked or not; these are the centres where none of them has worked for days." %}
+    </p>
+{% endblock %}
+
+{% block table_head %}
+    <th>{% trans "Centre" %}</th>
+    <th>{% trans "Country" %}</th>
+    <th>{% trans "Registry address" %}</th>
+    <th>{% trans "Standing" %}</th>
+    <th>{% trans "Last answered" %}</th>
+    <th>{% trans "Not answering for" %}</th>
+{% endblock %}
+
+{% block table_row %}
+    <td><code>{{ row.centre_id }}</code></td>
+    <td>{{ row.country_name|default:"—" }}</td>
+    <td class="wrapping">
+        <code>{{ row.stations_url }}</code>
+        {% if row.last_error %}
+            <div class="row-detail">{{ row.last_error }}</div>
+        {% endif %}
+    </td>
+    <td>
+        <span class="badge badge-warning">{{ row.standing_label }}</span>
+    </td>
+    <td>
+        {% if row.last_answered_at %}
+            {{ row.last_answered_at|date:"Y-m-d H:i" }}
+        {% else %}
+            {% trans "Never" %}
+        {% endif %}
+    </td>
+    {% comment %}
+        Always a number, unlike the other reports' spans: a registry is only
+        here because it was asked and did not answer, so there is always an
+        instant to count from.
+    {% endcomment %}
+    <td>
+        {% blocktrans with hours=row.hours_unanswered|floatformat:1 %}{{ hours }}h{% endblocktrans %}
+    </td>
+{% endblock %}
+
+{% comment %}
+    Not "every registry is answering", which the caveat above can be
+    contradicting at the very moment this shows: registries all failing since
+    this morning have not been failing long enough to be listed here.
+{% endcomment %}
+{% block empty_message %}
+    {% trans "No centre's own registry has been failing long enough to name" %}
+{% endblock %}
