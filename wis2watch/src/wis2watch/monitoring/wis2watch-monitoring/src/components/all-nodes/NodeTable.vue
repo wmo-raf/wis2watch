@@ -119,14 +119,22 @@
                 {{ row.country_name || '—' }}
               </span>
 
-              <!-- Whichever verdict this view draws, marked the same way. -->
-              <span
-                  v-else-if="column.key === verdict"
-                  class="nodes__standing"
-                  :class="`nodes__standing--${row[verdict]}`"
-              >
-                {{ word(verdict, row[verdict]) }}
-              </span>
+              <!-- Whichever verdict this view draws, marked the same way,
+                   and on the glance table the one verdict that is about part
+                   of a centre says how much of it. `rows.js` decides whether
+                   there is a line; this only draws one where there is. -->
+              <template v-else-if="column.key === verdict">
+                <span
+                    class="nodes__standing"
+                    :class="`nodes__standing--${row[verdict]}`"
+                >
+                  {{ word(verdict, row[verdict]) }}
+                </span>
+
+                <span v-if="subline(row, view, verdict)" class="nodes__subline">
+                  {{ subline(row, view, verdict) }}
+                </span>
+              </template>
 
               <span v-else-if="column.key === 'last_seen_at'">
                 {{ formatInstant(row.last_seen_at) }}
@@ -157,7 +165,14 @@
                    line. Rows that deep destroy the reading down a column that
                    a worst-first table exists for -- and the broker's error
                    arrives here whole, where that page cut it at sixty
-                   characters. -->
+                   characters.
+
+                   These columns are the detailed table's only, where the
+                   Silence badge and the dataset count are already on the row.
+                   The glance table has neither, which is why its status cell
+                   above draws the overdue count as a line rather than hiding
+                   it behind a hover nobody knows is there. One sentence,
+                   `rows.js`'s, in both places. -->
               <span
                   v-else
                   class="nodes__badge"
@@ -233,6 +248,7 @@ import {
     population,
     ranksFrom,
     sortRows,
+    subline,
     verdictFor,
 } from './rows.js'
 
@@ -395,6 +411,15 @@ function arrow(key) {
 .nodes {
   --nodes-row: 2.25rem;
   --nodes-visible-rows: 12.5;
+
+  /* The standing dot and the gap after it, named because two rules need the
+     same answer: the dot draws itself with them, and the sub-line under it
+     indents by their sum so its first character sits under the label's rather
+     than under the dot. Spelled once, because a sub-line indented by a number
+     somebody typed is a sub-line that goes crooked the day the dot changes
+     size. */
+  --nodes-dot: 0.5rem;
+  --nodes-dot-gap: 0.35rem;
 }
 
 /* The admin's own form styles reach these -- Wagtail sets margins on labels
@@ -574,19 +599,29 @@ function arrow(key) {
   text-decoration: none;
 }
 
-/* The same mark the station rows carry, on the same two colours, because a
-   reader scanning this column has already learned this vocabulary one page
-   over. Four marks from two colours: filled red is nothing arriving, ringed
-   red is arriving and faulty, ringed teal is well but not compliant, filled
-   teal is well. */
+/* The same mark the station rows carry, because a reader scanning this column
+   has already learned this vocabulary one page over.
+
+   Four marks from three colours, in the order the standings rank: filled red
+   is nothing arriving, filled amber is arriving but not all of it and not on
+   time, ringed teal is well but not compliant, filled teal is well.
+
+   The point of the third colour is that the scale now runs the same way the
+   rows do. Amber covers ranks two to four and red covers nought and one, so
+   reading down a worst-first column the colour never goes backwards -- which
+   it did while `silent`, `not_cached` and `no_broker` were a *ringed* red
+   sitting above a filled one. Two reds separated by two pixels of inset
+   shadow, on a half-rem dot, asked a reader to see a distinction the sort
+   order was already making louder. Red, amber, teal is read without being
+   taught. */
 .nodes__standing::before,
 .nodes__badge--worst::before {
   content: '';
   display: inline-block;
-  width: 0.5rem;
-  height: 0.5rem;
+  width: var(--nodes-dot);
+  height: var(--nodes-dot);
   border-radius: 50%;
-  margin-right: 0.35rem;
+  margin-right: var(--nodes-dot-gap);
   background: var(--stat-live);
 }
 
@@ -596,20 +631,52 @@ function arrow(key) {
   background: var(--stat-silent);
 }
 
+/* Arriving, and faulty: datasets past their cadence, data the caches never
+   picked up, a centre with no broker to watch. Filled rather than ringed --
+   the ring existed to say "arriving, but" while spending only red, and amber
+   says it on its own. A second encoding of a meaning the colour already
+   carries is one a reader has to hold in mind for nothing. */
 .nodes__standing--silent::before,
 .nodes__standing--not_cached::before,
 .nodes__standing--no_broker::before {
-  background: transparent;
-  box-shadow: inset 0 0 0 2px var(--stat-silent);
+  background: var(--stat-slipping);
 }
 
 /* Publishing perfectly well over a transport it is not obliged to offer.
    Outlined rather than filled, so it reads as "on, with a question about it"
-   without spending a third colour -- the same device the station table uses
-   for a station nothing declares. */
+   without spending a *fourth* colour -- the same device the station table
+   uses for a station nothing declares, and the reason this one stays teal:
+   the question is about compliance, not about whether data is arriving. */
 .nodes__standing--archive_only::before {
   background: transparent;
   box-shadow: inset 0 0 0 2px var(--stat-live);
+}
+
+/* What the status is folded from, on the rows that have a fault to explain.
+   Muted ink and not amber: the dot is the finding and this is its evidence,
+   and a row that shouts twice for one fault is a row on a table whose whole
+   design is that only faults are coloured. Amber is also a mark colour and
+   not a text one -- 3.2:1 against the light surface clears what a dot is held
+   to and misses what type is. */
+.nodes__subline {
+  display: block;
+  /* Under the label, not under the dot. The dot is the verdict's own mark and
+     the line is the verdict's evidence; starting it at the cell edge hangs it
+     off the mark instead of off the words it explains, and reads as a second
+     column that lost its heading. */
+  padding-left: calc(var(--nodes-dot) + var(--nodes-dot-gap));
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  color: var(--stat-ink-muted);
+}
+
+/* Two lines do not fit the stated row height -- they come to a little over it
+   -- so the one cell that has them buys its own breathing room rather than
+   every row paying for it. `:has()` and not a class, because whether there is
+   a second line is `rows.js`'s answer and the template already asks it once. */
+.nodes__table td:has(.nodes__subline) {
+  padding-block: 0.35rem;
 }
 
 .nodes__empty {
