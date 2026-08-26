@@ -4,7 +4,12 @@ from wagtail.admin.menu import MenuItem
 from wagtail.snippets.models import register_snippet
 
 from wis2watch.core.viewsets import DatasetViewSet, admin_viewsets
-from .panels import TransmissionStatusPanel
+from .panels import (
+    DatasetsSummaryItem,
+    NodesSummaryItem,
+    StationsSummaryItem,
+    TransmissionStatusPanel,
+)
 from .views import (
     gap_report_index,
     gap_report_table,
@@ -68,11 +73,35 @@ def construct_homepage_panels(request, panels):
     panels.append(TransmissionStatusPanel())
 
 
+#: Wagtail's own header tiles, all three counting a CMS this tool's operators
+#: have no menu entry for. Stripped for the same reason the dashboard panels
+#: below them are.
+WAGTAIL_SUMMARY_ITEMS = (
+    "PagesSummaryItem",
+    "DocumentsSummaryItem",
+    "ImagesSummaryItem",
+)
+
+
 @hooks.register('construct_homepage_summary_items')
 def construct_homepage_summary_items(request, summary_items):
-    hidden_summary_items = ["PagesSummaryItem", "DocumentsSummaryItem", "ImagesSummaryItem"]
-    
-    summary_items[:] = [item for item in summary_items if item.__class__.__name__ not in hidden_summary_items]
+    """How big the region is, above the table that says how it is doing.
+
+    Strip and then append, rather than assigning the three outright: a tile
+    contributed by another app is not this hook's to discard silently, and the
+    panels hook above already works this way.
+    """
+    summary_items[:] = [
+        item
+        for item in summary_items
+        if item.__class__.__name__ not in WAGTAIL_SUMMARY_ITEMS
+    ]
+
+    summary_items.extend([
+        NodesSummaryItem(request),
+        DatasetsSummaryItem(request),
+        StationsSummaryItem(request),
+    ])
 
 
 @hooks.register('register_admin_menu_item')
@@ -108,6 +137,9 @@ register_snippet(DatasetViewSet)
 def register_icons(icons):
     return icons + [
         'wagtailfontawesomesvg/solid/circle-nodes.svg',
+        # The stations tile's. Wagtail's own set has no pin -- `thumbtack` is
+        # the nearest and reads as a note rather than a place.
+        'wagtailfontawesomesvg/solid/map-pin.svg',
     ]
 
 

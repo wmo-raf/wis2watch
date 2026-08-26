@@ -252,8 +252,13 @@ class HardFailureViewSet(ModelViewSet):
         return ReadOnlyPermissionPolicy(self.model)
 
 
+#: The registered instance, named so that anything wanting to speak about the
+#: nodes listing -- its URL, or who may open it -- asks the object that renders
+#: it rather than a second one built to look the same.
+wis2node_viewset = WIS2NodeViewSet()
+
 admin_viewsets = [
-    WIS2NodeViewSet(),
+    wis2node_viewset,
     MessageSourceViewSet(),
     GlobalDiscoveryCatalogueViewSet(),
     OutgoingEmailViewSet(),

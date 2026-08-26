@@ -1,0 +1,25 @@
+{% load i18n humanize wagtailadmin_tags %}
+
+{% comment %}
+    One tile in the admin home's header strip, whichever tile it is.
+
+    Written once rather than once per tile, for the reason
+    `includes/all_nodes_panel.html` already gives: two copies of a thing is how
+    one of them keeps a screen-reader suffix and the other loses it.
+
+    Takes `icon`, `label`, `total` and `link` from `ScopeSummaryItem`, which
+    has already picked singular or plural for the noun. The number is rendered
+    here rather than folded into the label so that `intcomma` can reach it --
+    eight thousand stations without a separator is a number nobody reads.
+
+    Markup follows Wagtail's own `site_summary_pages.html`, so the tile sits in
+    `w-summary__list` looking like one of them.
+{% endcomment %}
+
+<li>
+    {% icon name=icon %}
+    <a href="{{ link }}">
+        {{ total|intcomma }} {{ label }}
+        <span class="w-sr-only">{% trans "under watch" %}</span>
+    </a>
+</li>
