@@ -94,15 +94,58 @@ Two separate CSS contexts — use the right tokens for each:
 
 **Never mix them.** Wagtail 7 removed the old unprefixed `--color-*` aliases entirely — use `--w-color-*` only.
 
-Key `--w-color-*` tokens for admin templates:
+Key `--w-color-*` tokens for admin templates. **The last column is the one that bites** —
+see [Theme-aware vs fixed](#theme-aware-vs-fixed) below:
 
-- Borders: `--w-color-border-furniture`
-- Muted text / secondary: `--w-color-grey-400`, `--w-color-text-meta` (the semantic one — prefer it
-  for supporting prose and figure captions)
-- Subtle backgrounds / Panel headers bg: `--w-color-grey-50`, `--w-color-grey-100`
-- Menus: `--w-color-surface-menus`, `--w-color-surface-field`, `--w-color-surface-page`
-- Labels / primary text: `--w-color-text-label`
-- White: `--w-color-white`
-- Status colours: `--w-color-info-100`, `--w-color-positive-100`, `--w-color-warning-100`, `--w-color-critical-200`
-- Brand/action colours: `--w-color-primary` (dark indigo — used for structural framing, e.g. the
-  derived-products stage brackets), `--w-color-secondary` (teal — used for action links/chips)
+| Purpose                              | Token                                                                                                                          | Follows the theme? |
+|--------------------------------------|--------------------------------------------------------------------------------------------------------------------------------|--------------------|
+| Borders                              | `--w-color-border-furniture`                                                                                                   | yes                |
+| Muted text / secondary               | `--w-color-text-meta` — prefer this for supporting prose and figure captions                                                    | yes                |
+| Muted text, raw                      | `--w-color-grey-400`                                                                                                            | **no**             |
+| Subtle backgrounds / panel header bg | `--w-color-grey-50`, `--w-color-grey-100`                                                                                       | **no**             |
+| Surfaces                             | `--w-color-surface-page`, `--w-color-surface-field`, `--w-color-surface-menus`, `--w-color-surface-header`, `--w-color-surface-dashboard-panel` | yes |
+| Labels / primary text                | `--w-color-text-label`                                                                                                          | yes                |
+| White                                | `--w-color-white`                                                                                                               | **no**             |
+| Status colours                       | `--w-color-info-100`, `--w-color-positive-100`, `--w-color-warning-100`, `--w-color-critical-200`                               | **no**             |
+| Brand / action                       | `--w-color-primary` (dark indigo — structural framing, e.g. the derived-products stage brackets), `--w-color-secondary` (teal — action links/chips) | **no** |
+
+### Theme-aware vs fixed
+
+Wagtail defines the **raw palette once** and never touches it again. `.w-theme-dark`
+remaps only the ~49 *semantic* tokens layered on top of it — `--w-color-surface-page`
+becomes `--w-color-grey-600`, `--w-color-surface-dashboard-panel` becomes
+`--w-color-grey-800`, and so on. The greys, the status colours and the brand colours
+stay exactly where they were.
+
+So `--w-color-grey-50` resolves to **96.9% lightness in every theme**, dark included.
+Used bare as a panel header background it lays a near-white bar across a dark panel.
+
+**Prefer the semantic token wherever one exists.** Where none does — a panel header
+ground is the real case — name the dark counterpart yourself:
+
+```css
+.my-panel > .w-panel__header {
+    background: var(--w-color-grey-50);
+}
+
+.w-theme-dark .my-panel > .w-panel__header {
+    background: var(--w-color-surface-header);
+}
+
+@media (prefers-color-scheme: dark) {
+    .w-theme-system .my-panel > .w-panel__header {
+        background: var(--w-color-surface-header);
+    }
+}
+```
+
+**Two selectors, always.** Wagtail's default is `w-theme-system`, under which the
+operating system decides and the class on `<html>` never changes at all — so naming only
+`.w-theme-dark` leaves the surface light for everybody who never opened the setting,
+which is most people. The same scar is written into
+`monitoring/wis2watch-monitoring/src/components/node-statistics/charts/roles.css` and
+into `core.js`'s PrimeVue selectors.
+
+A quick way to check a token before relying on it: search Wagtail's `core.css` for the
+`.w-theme-dark{…}` block and see whether the token is redefined inside it. If it is not,
+it is fixed.
