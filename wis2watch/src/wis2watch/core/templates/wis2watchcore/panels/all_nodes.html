@@ -68,6 +68,28 @@
         border-start-end-radius: 5px;
     }
 
+    /* Wagtail hangs a dashboard panel's header 1.25rem past the panel's own
+       left edge -- `margin-inline-start: -1.25rem`, above 50em only -- and
+       then pays it back with 1.25rem of padding, so the first child lands
+       exactly on the panel's content edge and the overhang is invisible.
+
+       It stops being invisible the moment the header has a ground: the
+       background paints the whole border box, overhang included, and a grey
+       tongue sticks out past the panel's rounded corner.
+
+       Both halves are cancelled rather than just the margin, so nothing moves.
+       The margin was buying room for `.w-panel__anchor--prefix`, which is
+       `opacity: 0` until the header is hovered and which sat on the content
+       edge anyway; the first *visible* element, the toggle, is 25px inside the
+       panel either way. Scoped to the same query Wagtail scopes the margin to,
+       because below it there is no overhang to correct. */
+    @media screen and (min-width: 50em) {
+        #node-overview-section > .w-panel__header {
+            margin-inline-start: 0;
+            padding-inline-start: 0;
+        }
+    }
+
     .w-theme-dark #node-overview-section > .w-panel__header {
         background: var(--w-color-surface-header);
     }
