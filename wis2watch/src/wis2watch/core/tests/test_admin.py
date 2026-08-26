@@ -2,6 +2,7 @@ from datetime import timedelta
 from unittest import mock
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone as dj_timezone
@@ -21,10 +22,16 @@ from wis2watch.core.models import (
     UnregisteredCentre,
     WIS2Node,
 )
+from wis2watch.core.panels import (
+    DatasetsSummaryItem,
+    NodesSummaryItem,
+    StationsSummaryItem,
+)
 from wis2watch.core.viewsets import (
     GlobalDiscoveryCatalogueViewSet,
     MessageSourceViewSet,
     WIS2NodeViewSet,
+    wis2node_viewset,
 )
 
 from .support import at
@@ -106,6 +113,102 @@ class AdminSmokeTests(TestCase):
             "Awaiting your review",
         ):
             self.assertNotIn(heading, html)
+
+    def test_the_admin_home_says_how_big_the_region_is(self):
+        """The strip states the scope the panel below it only assumes.
+
+        Seven silent rows mean one thing out of nine centres and another out
+        of ninety, and the health table never says which. Each tile is also a
+        route, so the destination is asserted beside the number -- the stations
+        one especially, since the hidden snippets menu leaves this as the only
+        way to reach that listing at all.
+        """
+        WIS2Node.objects.create(centre_id="ke-kmd", name="Kenya")
+        WIS2Node.objects.create(centre_id="tz-tma", name="Tanzania")
+        Station.objects.create(wigos_id="0-20000-0-63741", name="Nairobi")
+
+        html = self.client.get(reverse("wagtailadmin_home")).content.decode()
+
+        self.assertIn(
+            f'<a href="{reverse(wis2node_viewset.get_url_name("index"))}">', html
+        )
+        self.assertIn("2 Nodes", html)
+        self.assertIn(
+            f'<a href="{reverse(Station.snippet_viewset.get_url_name("list"))}">', html
+        )
+        self.assertIn("1 Station", html)
+
+    def test_a_tile_counts_exactly_what_its_page_lists(self):
+        """The invariant the whole strip rests on.
+
+        A tile reading 1,204 above a page showing 1,190 is the classic failure
+        of a summary strip, and it arrives silently -- somebody narrows a
+        listing, and the header goes on quoting the unnarrowed count. Asserted
+        against each listing's own paginator rather than against a second call
+        to ``.count()``, so that narrowing either side fails here.
+        """
+        node = WIS2Node.objects.create(centre_id="ke-kmd", name="Kenya")
+        WIS2Node.objects.create(centre_id="tz-tma", name="Tanzania")
+        Dataset.objects.create(
+            node=node,
+            identifier="urn:wmo:md:ke-kmd:surface",
+            title="Surface weather",
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy="origin/a/wis2/ke-kmd/surface-based-obs",
+            raw_json={},
+        )
+        Station.objects.create(wigos_id="0-20000-0-63741", name="Nairobi")
+
+        for item_class in (NodesSummaryItem, DatasetsSummaryItem, StationsSummaryItem):
+            with self.subTest(tile=item_class.__name__):
+                item = item_class(self.client.request().wsgi_request)
+                total = item.get_context_data({})["total"]
+
+                listing = self.client.get(
+                    reverse(item.viewset.get_url_name(item.url_name))
+                )
+
+                self.assertEqual(listing.status_code, 200)
+                self.assertEqual(
+                    total, listing.context["page_obj"].paginator.count
+                )
+
+    def test_a_single_node_is_not_described_as_nodes(self):
+        """One tile, one noun, and the noun agrees with the number.
+
+        The strip's labels are picked in Python because the markup is written
+        once for all three tiles, which rules out a per-tile ``blocktrans``.
+        This is what says the substitute works.
+        """
+        WIS2Node.objects.create(centre_id="ke-kmd", name="Kenya")
+
+        html = self.client.get(reverse("wagtailadmin_home")).content.decode()
+
+        self.assertIn("1 Node\n", html)
+        self.assertNotIn("1 Nodes", html)
+
+    def test_a_tile_is_hidden_from_whoever_cannot_open_its_page(self):
+        """A link to a 403 is worse than no link.
+
+        Wagtail gates its own pages tile the same way. Asserted with a user who
+        may reach the admin at all and nothing beyond it, which is the shape
+        any restricted group here would take.
+        """
+        onlooker = get_user_model().objects.create_user(
+            "onlooker", password="s3cret", is_staff=True
+        )
+        onlooker.user_permissions.add(
+            Permission.objects.get(
+                content_type__app_label="wagtailadmin", codename="access_admin"
+            )
+        )
+        self.client.force_login(onlooker)
+
+        html = self.client.get(reverse("wagtailadmin_home")).content.decode()
+
+        self.assertNotIn("Nodes\n", html)
+        self.assertNotIn("Datasets\n", html)
+        self.assertNotIn("Stations\n", html)
 
     def test_the_monitoring_map_loads(self):
         response = self.client.get(reverse("ingest_map"))
