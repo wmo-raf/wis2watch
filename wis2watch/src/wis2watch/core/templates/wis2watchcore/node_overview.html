@@ -11,6 +11,23 @@
     hand. The only difference this template states is the view.
 {% endcomment %}
 
+{% block extra_css %}
+    {{ block.super }}
+    <style>
+        /* Wagtail's dashboard panel carries a bottom margin and no top one:
+           on the admin home the space above it comes from the `w-dashboard`
+           wrapper, which a page like this does not have, so the panel butted
+           straight into the slim header.
+
+           The same expression its own bottom margin uses, so the panel sits
+           symmetrically in the page and follows the reader's density setting
+           rather than pinning a gap Wagtail would have scaled. */
+        .all-nodes-panel {
+            margin-top: calc(1rem + 1rem * var(--w-density-factor));
+        }
+    </style>
+{% endblock %}
+
 {% block main_content %}
     {% trans "Node overview" as heading %}
     {% include "wis2watchcore/includes/all_nodes_panel.html" with panel_id="node-overview" heading=heading view="detail" %}
