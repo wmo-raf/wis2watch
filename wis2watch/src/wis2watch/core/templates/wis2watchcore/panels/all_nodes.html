@@ -39,6 +39,68 @@
     has somewhere to land.
 {% endcomment %}
 
+<style>
+    /* The panel's header, given a ground of its own so it reads as a header
+       rather than as the first thing in the content. `--w-color-grey-50` is
+       the convention's subtle-background token; see
+       `.claude/docs/template_conventions.md`.
+
+       **It is not theme-aware.** Wagtail defines the raw grey scale once --
+       grey-50 is 96.9% lightness in every theme -- and `.w-theme-dark`
+       remaps only the *semantic* tokens onto other greys. Used bare, this
+       would lay a near-white bar across a dark panel. So the dark ground is
+       named too, and it is `--w-color-surface-header`, which is Wagtail's own
+       answer for a header surface and lands one step lighter than the
+       dashboard panel's own grey-800 ground.
+
+       Two selectors for the dark case, which is the scar `charts/roles.css`
+       and `core.js` both carry: Wagtail's default is `w-theme-system`, where
+       the OS decides and the class never changes at all, so naming only
+       `.w-theme-dark` leaves the header light for everybody who never opened
+       the setting -- which is most people.
+
+       The top corners are rounded to the panel's own 5px, or the ground
+       squares off a corner the border is still drawing round. */
+    #node-overview-section > .w-panel__header {
+        background: var(--w-color-grey-50);
+        border-bottom: 1px solid var(--w-color-border-furniture);
+        border-start-start-radius: 5px;
+        border-start-end-radius: 5px;
+    }
+
+    /* Wagtail hangs a dashboard panel's header 1.25rem past the panel's own
+       left edge -- `margin-inline-start: -1.25rem`, above 50em only -- and
+       then pays it back with 1.25rem of padding, so the first child lands
+       exactly on the panel's content edge and the overhang is invisible.
+
+       It stops being invisible the moment the header has a ground: the
+       background paints the whole border box, overhang included, and a grey
+       tongue sticks out past the panel's rounded corner.
+
+       Both halves are cancelled rather than just the margin, so nothing moves.
+       The margin was buying room for `.w-panel__anchor--prefix`, which is
+       `opacity: 0` until the header is hovered and which sat on the content
+       edge anyway; the first *visible* element, the toggle, is 25px inside the
+       panel either way. Scoped to the same query Wagtail scopes the margin to,
+       because below it there is no overhang to correct. */
+    @media screen and (min-width: 50em) {
+        #node-overview-section > .w-panel__header {
+            margin-inline-start: 0;
+            padding-inline-start: 0;
+        }
+    }
+
+    .w-theme-dark #node-overview-section > .w-panel__header {
+        background: var(--w-color-surface-header);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .w-theme-system #node-overview-section > .w-panel__header {
+            background: var(--w-color-surface-header);
+        }
+    }
+</style>
+
 {% fragment as header_controls %}
     {% dropdown toggle_icon="arrow-down" toggle_label=_("Gap reports") classname="w-inline-block" %}
         {% for report in gap_reports %}
