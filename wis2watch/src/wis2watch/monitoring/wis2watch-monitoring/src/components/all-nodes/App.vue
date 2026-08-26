@@ -1,5 +1,35 @@
 <template>
   <div class="all-nodes">
+    <!-- The refresh control, in the panel header where Wagtail puts a panel's
+         actions, rather than under the table where it started. It is rendered
+         here rather than in the Django template because its state is the
+         island's: it spins while a request is in flight and is disabled for
+         the duration, and reflecting that onto a server-rendered node would
+         mean poking attributes at foreign DOM.
+
+         Present from mount and never removed, including while the first read
+         is still in the air and after one has failed. The error below keeps a
+         "Try again" of its own: the two are one action at two moments -- this
+         is the standing control a reader reaches for on seeing the stamp is
+         old, that one appears where their eye already is when it broke. -->
+    <Teleport to="#all-nodes-refresh">
+      <button
+          type="button"
+          class="button button--icon text-replace all-nodes__refresh"
+          :aria-label="inFlight ? 'Refreshing' : 'Refresh'"
+          :disabled="inFlight"
+          @click="load"
+      >
+        <svg
+            class="icon"
+            :class="inFlight ? 'icon-spinner' : 'icon-rotate'"
+            aria-hidden="true"
+        >
+          <use :href="inFlight ? '#icon-spinner' : '#icon-rotate'"/>
+        </svg>
+      </button>
+    </Teleport>
+
     <p v-if="loading" class="all-nodes__note" role="status">
       Reading the region…
     </p>
@@ -20,22 +50,15 @@
     <template v-else>
       <NodeTable :rows="payload.rows" :vocabularies="payload.vocabularies"/>
 
-      <!-- How old this is, and how to make it newer. The homepage is a tab
-           people leave open for hours, and a triage table that is quietly
-           ninety minutes stale is worse than none: it is read with exactly the
-           confidence a fresh one earns. The stamp is the honest part; the
-           button is what makes the stamp something a reader can act on. -->
+      <!-- How old this is. The button that acts on it is in the header; this
+           stays here because it is not an action -- it is a fact about the
+           rows, and it belongs against the thing it describes. The homepage is
+           a tab people leave open for hours, and a triage table that is
+           quietly ninety minutes stale is worse than none: it is read with
+           exactly the confidence a fresh one earns. -->
       <p class="all-nodes__stamp" role="status">
-        <span>Traffic over {{ payload.window.label.toLowerCase() }}, as of
-          {{ formatInstant(payload.generated_at) }}.</span>
-        <button
-            type="button"
-            class="all-nodes__retry"
-            :disabled="refreshing"
-            @click="load"
-        >
-          {{ refreshing ? 'Refreshing…' : 'Refresh' }}
-        </button>
+        Traffic over {{ payload.window.label.toLowerCase() }}, as of
+        {{ formatInstant(payload.generated_at) }}.
       </p>
     </template>
   </div>
@@ -56,12 +79,12 @@
  * tab left open in the organisation would run the region's query on it
  * forever, and the rollups underneath only move once an hour.
  *
- * The gap reports are deliberately not here. They are static links, they are
- * rendered by the panel's own template, and they therefore survive this island
- * failing entirely -- which is exactly when a reader most needs the report
- * that says what is missing from the picture.
+ * This root carries the panel's own gutter, because Wagtail's dashboard panel
+ * pads its *header* and leaves its content flush to the border. `--nodes-
+ * gutter` is published here rather than written twice, so the table below can
+ * escape it by exactly as much as it was inset.
  */
-import {onMounted, ref} from 'vue'
+import {computed, onMounted, ref} from 'vue'
 import Message from 'primevue/message'
 
 import NodeTable from './NodeTable.vue'
@@ -90,11 +113,17 @@ const loading = ref(true)
 const refreshing = ref(false)
 const error = ref('')
 
+//: Whether a request is in the air at all, first read or later one. The two
+//: are separate states below because they do different things to the body --
+//: one holds it open, the other leaves the rows alone -- but the header
+//: button makes no such distinction: something is loading, so it spins.
+const inFlight = computed(() => loading.value || refreshing.value)
+
 async function load() {
   // The first read holds the panel open with a line of its own; a refresh
-  // leaves the rows on screen and marks the button instead. A table that
-  // blanked itself every time somebody checked whether it was current would
-  // be a table nobody checks.
+  // leaves the rows on screen and spins the header button instead. A table
+  // that blanked itself every time somebody checked whether it was current
+  // would be a table nobody checks.
   if (payload.value) {
     refreshing.value = true
   } else {
@@ -129,6 +158,16 @@ onMounted(load)
 </script>
 
 <style scoped>
+/* Wagtail's dashboard panel pads its header by 1.25rem and gives its content
+   no padding at all, so an island dropped into it sits flush against the
+   border while the heading above is inset. The gutter is put back here, and
+   published as a custom property so the table can escape it by exactly the
+   amount it was inset by rather than by a number written twice. */
+.all-nodes {
+  --nodes-gutter: 1.25rem;
+  padding: var(--nodes-gutter);
+}
+
 .all-nodes__note {
   font-size: 0.85rem;
   color: var(--w-color-text-meta);
@@ -143,13 +182,9 @@ onMounted(load)
 }
 
 .all-nodes__stamp {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 0.5rem;
   font-size: 0.8rem;
   color: var(--w-color-text-meta);
-  margin: 0.5rem 0 0;
+  margin: var(--nodes-gutter) 0 0;
 }
 
 .all-nodes__retry {
@@ -162,9 +197,27 @@ onMounted(load)
   cursor: pointer;
 }
 
-.all-nodes__retry:disabled {
+/* Teleported into the panel header, so it is styled by Wagtail's own
+   `.w-panel__controls .button--icon` rule and needs only what that rule does
+   not say: what a disabled one looks like, and that the spinner turns. */
+.all-nodes__refresh:disabled {
   color: var(--w-color-text-meta);
-  text-decoration: none;
   cursor: default;
+}
+
+.all-nodes__refresh .icon-spinner {
+  animation: all-nodes-spin 1s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .all-nodes__refresh .icon-spinner {
+    animation: none;
+  }
+}
+
+@keyframes all-nodes-spin {
+  to {
+    transform: rotate(1turn);
+  }
 }
 </style>

@@ -1,133 +1,143 @@
 <template>
   <div class="nodes">
-    <div class="nodes__controls">
-      <label class="nodes__field">
-        <span class="nodes__field-label">Search</span>
-        <input
-            v-model="search"
-            type="search"
-            class="nodes__input"
-            placeholder="Centre ID or country"
-        >
-      </label>
-
-      <label class="nodes__field">
-        <span class="nodes__field-label">Standing</span>
-        <select v-model="standing" class="nodes__input">
-          <option value="">All standings</option>
-          <option v-for="option in standings" :key="option.key" :value="option.key">
-            {{ option.label }}
-          </option>
-        </select>
-      </label>
-
-      <button v-if="filtering" type="button" class="nodes__clear" @click="clear">
-        Clear filter
-      </button>
-    </div>
-
-    <!-- What is on screen, and of how much. A count of rows with nothing
-         saying how many there were is the number a reader quietly mistakes
-         for the region. The degenerate case has its own sentence on purpose:
-         a filter that matched everything is not the same as no filter, and a
-         reader who cannot tell them apart reads a full table as the whole
+    <!-- A fresh install before the first catalogue sync. Its own sentence
+         rather than the population line's, and the controls are not drawn at
+         all: there is nothing to filter, and two empty fields over an empty
+         table invite a reader to conclude their filter is what hid the
          region. -->
-    <p class="nodes__population" role="status">
-      <template v-if="counted.state === 'none'">
-        No centres are registered yet. The catalogue sync populates them, and a
-        fresh install has none until the first sync lands.
-      </template>
-      <template v-else-if="counted.state === 'all'">
-        All <strong>{{ formatCount(counted.total) }}</strong> centres, none hidden.
-      </template>
-      <template v-else-if="counted.state === 'narrowed'">
-        <strong>{{ formatCount(counted.shown) }}</strong> of
-        {{ formatCount(counted.total) }} centres &mdash;
-        {{ formatCount(counted.hidden) }} hidden by the filter.
-      </template>
-      <template v-else>
-        All <strong>{{ formatCount(counted.total) }}</strong> centres match the
-        filter, so it is hiding none of them.
-      </template>
+    <p v-if="!rows.length" class="nodes__empty">
+      No centres are registered yet. The catalogue sync populates them, and a
+      fresh install has none until the first sync lands.
     </p>
 
-    <div v-if="rows.length" class="nodes__scroll">
-      <table class="nodes__table">
-        <colgroup>
-          <col v-for="column in COLUMNS" :key="column.key" :style="{width: column.width}">
-        </colgroup>
-
-        <thead>
-        <tr>
-          <th
-              v-for="column in COLUMNS"
-              :key="column.key"
-              scope="col"
-              :class="[`nodes__cell--${column.align || 'text'}`]"
-              :aria-sort="ariaSort(column.key)"
+    <template v-else>
+      <div class="nodes__controls">
+        <label class="nodes__field">
+          <span class="nodes__field-label">Search</span>
+          <input
+              v-model="search"
+              type="search"
+              class="nodes__input nodes__input--search"
+              placeholder="Centre ID or country"
           >
-            <button
-                v-if="column.value"
-                type="button"
-                class="nodes__sort"
-                :class="{'nodes__sort--on': sort === column.key}"
-                @click="sortBy(column.key)"
+        </label>
+
+        <label class="nodes__field">
+          <span class="nodes__field-label">Standing</span>
+          <select v-model="standing" class="nodes__input nodes__input--standing">
+            <option value="">All standings</option>
+            <option v-for="option in standings" :key="option.key" :value="option.key">
+              {{ option.label }}
+            </option>
+          </select>
+        </label>
+
+        <button v-if="filtering" type="button" class="nodes__clear" @click="clear">
+          Clear filter
+        </button>
+
+        <!-- What is on screen, and of how much, on the same line as the
+             controls that decided it: cause and effect together, and the row
+             is balanced by something worth reading rather than by stretching
+             a text field across the panel.
+
+             The degenerate case has its own sentence on purpose. A filter that
+             matched everything is not the same as no filter, and a reader who
+             cannot tell them apart reads a full table as the whole region. -->
+        <p class="nodes__population" role="status">
+          <template v-if="counted.state === 'all'">
+            All <strong>{{ formatCount(counted.total) }}</strong> centres, none hidden.
+          </template>
+          <template v-else-if="counted.state === 'narrowed'">
+            <strong>{{ formatCount(counted.shown) }}</strong> of
+            {{ formatCount(counted.total) }} centres &mdash;
+            {{ formatCount(counted.hidden) }} hidden by the filter.
+          </template>
+          <template v-else>
+            All <strong>{{ formatCount(counted.total) }}</strong> centres match the
+            filter, so it is hiding none of them.
+          </template>
+        </p>
+      </div>
+
+      <div v-if="shown.length" class="nodes__scroll">
+        <table class="nodes__table">
+          <colgroup>
+            <col v-for="column in COLUMNS" :key="column.key" :style="{width: column.width}">
+          </colgroup>
+
+          <thead>
+          <tr>
+            <th
+                v-for="column in COLUMNS"
+                :key="column.key"
+                scope="col"
+                :class="[`nodes__cell--${column.align || 'text'}`]"
+                :aria-sort="ariaSort(column.key)"
             >
-              {{ column.label }}
-              <span aria-hidden="true">{{ arrow(column.key) }}</span>
-            </button>
-            <span v-else>{{ column.label }}</span>
-          </th>
-        </tr>
-        </thead>
+              <button
+                  v-if="column.value"
+                  type="button"
+                  class="nodes__sort"
+                  :class="{'nodes__sort--on': sort === column.key}"
+                  @click="sortBy(column.key)"
+              >
+                {{ column.label }}
+                <span aria-hidden="true">{{ arrow(column.key) }}</span>
+              </button>
+              <span v-else>{{ column.label }}</span>
+            </th>
+          </tr>
+          </thead>
 
-        <tbody>
-        <tr v-for="row in shown" :key="row.node_id">
-          <td class="nodes__cell--text">
-            <!-- The code is the handle, and it leads to the centre's own
-                 diagnostic page -- the same landing the overview table has
-                 always used, so the two send a reader to one place. The whole
-                 row is deliberately not a link: this table has sortable heads
-                 and two controls directly above it, and a full-row hit target
-                 on a surface people are fiddling with is how a reader leaves
-                 the homepage by accident. -->
-            <a :href="row.detail_url" class="nodes__centre">
-              <code>{{ row.centre_id }}</code>
-            </a>
-          </td>
-          <td class="nodes__cell--text">{{ row.country_name || '—' }}</td>
-          <td class="nodes__cell--text">
-            <span class="nodes__standing" :class="`nodes__standing--${row.standing}`">
-              {{ word('standing', row.standing) }}
-            </span>
-          </td>
-          <td class="nodes__cell--text">{{ formatInstant(row.last_seen_at) }}</td>
-          <td class="nodes__cell--number">{{ formatQuiet(row.hours_quiet) }}</td>
-          <td class="nodes__cell--number">{{ formatCount(row.messages_in_window) }}</td>
-          <td>
-            <Sparkline
-                :values="row.sparkline"
-                :name="row.centre_id"
-                :standing-label="word('standing', row.standing)"
-                :height="SPARK_HEIGHT"
-            />
-          </td>
-          <td v-for="field in BADGES" :key="field" class="nodes__cell--text">
-            <span class="nodes__badge" :class="{'nodes__badge--worst': isWorst(field, row[field])}">
-              {{ word(field, row[field]) }}
-            </span>
-          </td>
-        </tr>
-        </tbody>
-      </table>
-    </div>
+          <tbody>
+          <tr v-for="row in shown" :key="row.node_id">
+            <td class="nodes__cell--text">
+              <!-- The code is the handle, and it leads to the centre's own
+                   diagnostic page -- the same landing the overview table has
+                   always used, so the two send a reader to one place. The whole
+                   row is deliberately not a link: this table has sortable heads
+                   and two controls directly above it, and a full-row hit target
+                   on a surface people are fiddling with is how a reader leaves
+                   the homepage by accident. -->
+              <a :href="row.detail_url" class="nodes__centre">
+                <code>{{ row.centre_id }}</code>
+              </a>
+            </td>
+            <td class="nodes__cell--text">{{ row.country_name || '—' }}</td>
+            <td class="nodes__cell--text">
+              <span class="nodes__standing" :class="`nodes__standing--${row.standing}`">
+                {{ word('standing', row.standing) }}
+              </span>
+            </td>
+            <td class="nodes__cell--text">{{ formatInstant(row.last_seen_at) }}</td>
+            <td class="nodes__cell--number">{{ formatQuiet(row.hours_quiet) }}</td>
+            <td class="nodes__cell--number">{{ formatCount(row.messages_in_window) }}</td>
+            <td>
+              <Sparkline
+                  :values="row.sparkline"
+                  :name="row.centre_id"
+                  :standing-label="word('standing', row.standing)"
+                  :height="SPARK_HEIGHT"
+              />
+            </td>
+            <td v-for="field in BADGES" :key="field" class="nodes__cell--text">
+              <span class="nodes__badge" :class="{'nodes__badge--worst': isWorst(field, row[field])}">
+                {{ word(field, row[field]) }}
+              </span>
+            </td>
+          </tr>
+          </tbody>
+        </table>
+      </div>
 
-    <p v-if="rows.length && !shown.length" class="nodes__empty">
-      No centre matches this filter. All {{ formatCount(rows.length) }} of them are
-      still here &mdash;
-      <button type="button" class="nodes__clear" @click="clear">clear it</button>
-      to see them.
-    </p>
+      <p v-else class="nodes__empty">
+        No centre matches this filter. All {{ formatCount(rows.length) }} of them are
+        still here &mdash;
+        <button type="button" class="nodes__clear" @click="clear">clear it</button>
+        to see them.
+      </p>
+    </template>
   </div>
 </template>
 
@@ -285,6 +295,17 @@ function arrow(key) {
 </script>
 
 <style scoped>
+/* One row's height, stated rather than left to the content, because the
+   scroll region's own height is counted in rows: twelve and a half of them,
+   so the clipped row at the bottom is a deliberate "there is more below"
+   rather than wherever a round number of rem happened to land. The half row
+   and the scrollbar are the only two things telling a reader the region
+   scrolls at all. */
+.nodes {
+  --nodes-row: 2.25rem;
+  --nodes-visible-rows: 12.5;
+}
+
 /* The admin's own form styles reach these -- Wagtail sets margins on labels
    and a height on selects that inputs do not get -- so every one of them is
    stated here rather than inherited. Two controls side by side whose baselines
@@ -295,21 +316,25 @@ function arrow(key) {
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 0.75rem;
-  margin: 0 0 0.75rem;
+  margin: 0 0 var(--nodes-gutter);
 }
 
 .nodes__field {
   display: flex;
   flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.25rem;
   margin: 0;
 }
 
+/* Wagtail's own label values -- .875rem, 600, the label colour -- read off its
+   tokens rather than borrowed from `w-field__label`. This codebase reads
+   tokens and never Wagtail's component classes: a token survives a refactor,
+   a class that gets renamed drops silently to browser default. */
 .nodes__field-label {
-  font-size: 0.75rem;
-  line-height: 1.2;
-  font-weight: 400;
-  color: var(--w-color-text-meta);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--w-color-text-label);
   margin: 0;
   padding: 0;
 }
@@ -325,33 +350,53 @@ function arrow(key) {
   border-radius: 0.25rem;
   background: var(--w-color-surface-page);
   color: var(--w-color-text-context);
-  min-width: 12rem;
+}
+
+/* Sized to their jobs rather than to each other. Free text gets room to type
+   in; the dropdown gets enough for "Not reaching the caches", because a select
+   that truncates its own values is worse than a wide one. */
+.nodes__input--search {
+  width: 18rem;
+  max-width: 100%;
+}
+
+.nodes__input--standing {
+  width: 14rem;
+  max-width: 100%;
 }
 
 .nodes__clear {
   background: none;
   border: 0;
-  padding: 0.3rem 0;
+  padding: 0 0 0.5rem;
   font-size: 0.8rem;
   color: var(--w-color-text-link-default);
   text-decoration: underline;
   cursor: pointer;
 }
 
+/* Pushed to the far end of the controls row, which is what balances it: the
+   dead space to the right of two filters is filled by the sentence saying what
+   those filters just did. */
 .nodes__population {
+  margin: 0 0 0.35rem auto;
   font-size: 0.85rem;
   color: var(--w-color-text-context);
-  margin: 0 0 0.5rem;
+  text-align: end;
 }
 
-/* Bounded on purpose. Every centre is in here and nothing is hidden, but a
-   region of forty centres drawn at full height is a homepage that is nothing
-   but this table. */
+/* Full bleed, escaping the gutter this island's root put back. Wagtail's own
+   dashboard listings run edge to edge and inset their text instead, and the
+   doubled frame -- a bordered box inside a bordered panel -- is what made this
+   read as a table dumped in a panel rather than as a panel.
+
+   The rules above and below are the region's own. The header has Wagtail's
+   `w-panel__divider` doing that job already, so there is none under it. */
 .nodes__scroll {
-  max-height: 26rem;
+  max-height: calc(var(--nodes-row) * (var(--nodes-visible-rows) + 1));
   overflow: auto;
-  border: 1px solid var(--w-color-border-furniture);
-  border-radius: 0.25rem;
+  margin-inline: calc(var(--nodes-gutter) * -1);
+  border-block: 1px solid var(--w-color-border-furniture);
 }
 
 .nodes__table {
@@ -362,22 +407,48 @@ function arrow(key) {
 
 .nodes__table th,
 .nodes__table td {
-  padding: 0.35rem 0.6rem;
+  height: var(--nodes-row);
+  padding: 0 0.6rem;
   text-align: left;
   white-space: nowrap;
   border-bottom: 1px solid var(--w-color-border-furniture);
 }
 
+/* The text lines up with the heading above and the stamp below; the rules run
+   past it to the panel's own border. */
+.nodes__table th:first-child,
+.nodes__table td:first-child {
+  padding-inline-start: var(--nodes-gutter);
+}
+
+.nodes__table th:last-child,
+.nodes__table td:last-child {
+  padding-inline-end: var(--nodes-gutter);
+}
+
+.nodes__table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
 /* The heads stay put while the region scrolls under them. On a table sorted
-   worst-first, a reader who has scrolled to the quiet end and cannot see
-   which column is which has lost the thing they scrolled for. */
+   worst-first, a reader who has scrolled to the quiet end and cannot see which
+   column is which has lost the thing they scrolled for. The background is
+   opaque and spans the whole cell, or rows show through as they pass under. */
 .nodes__table thead th {
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--w-color-surface-page);
+  background: var(--w-color-surface-dashboard-panel, var(--w-color-surface-page));
   font-weight: 600;
   color: var(--w-color-text-meta);
+  /* The rule under the heads, drawn as an inset shadow rather than left to
+     the shared `border-bottom` above. Under `border-collapse: collapse` a
+     cell's borders are painted with the *table*, not with the cell, so a
+     sticky head keeps its background and its text and leaves its border
+     behind at the top of the scroll -- every row has a line under it except
+     the one row that most needs separating from the data. A shadow is painted
+     with the element, so it travels. */
+  box-shadow: inset 0 -1px 0 var(--w-color-border-furniture);
 }
 
 .nodes__cell--number {
@@ -443,6 +514,6 @@ function arrow(key) {
 .nodes__empty {
   font-size: 0.85rem;
   color: var(--w-color-text-meta);
-  margin: 0.75rem 0 0;
+  margin: 0;
 }
 </style>

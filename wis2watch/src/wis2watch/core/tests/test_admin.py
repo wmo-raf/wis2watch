@@ -74,6 +74,21 @@ class AdminSmokeTests(TestCase):
         for report in GAP_REPORTS:
             self.assertIn(reverse("gap_report", args=[report.slug]), html)
 
+    def test_the_panel_leaves_the_island_somewhere_to_put_its_refresh(self):
+        """The header's teleport target, which is load-bearing and invisible.
+
+        The refresh button is the island's, because its state is, and it is
+        moved into Wagtail's own header controls at mount. Delete this span and
+        nothing raises: the button simply never appears, on the one panel where
+        knowing how old the rows are is the point.
+        """
+        html = self.client.get(reverse("wagtailadmin_home")).content.decode()
+
+        self.assertIn('id="all-nodes-refresh"', html)
+        # And the slot it sits in, which Wagtail only renders when the panel
+        # passes header controls at all.
+        self.assertIn("w-panel__controls", html)
+
     def test_the_admin_home_shows_nothing_about_a_page_tree(self):
         """Wagtail's own dashboard panels are gone, and stay gone.
 
