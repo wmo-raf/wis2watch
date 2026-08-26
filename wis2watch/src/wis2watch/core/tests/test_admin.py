@@ -271,7 +271,22 @@ class AdminSmokeTests(TestCase):
 
 
 class NodeOverviewViewTests(TestCase):
-    """The headline screen, rendered from the findings the analysis returns."""
+    """The detailed overview, which is now a frame around an island.
+
+    Everything this page used to render server-side is drawn by the same
+    component the homepage panel mounts, from the same endpoint, so what was
+    asserted against HTML here is asserted against the payload in
+    ``api.tests.test_statistics`` and against the derivation in
+    ``core.tests.test_node_statistics``. What is left to guard is what only
+    this page can get wrong: that it mounts, that it asks for the detailed
+    view rather than the glance, and that the reports beside it survive the
+    island failing.
+
+    The page's old ``?staleness=`` and ``?order=`` parameters are gone with the
+    server-side table. Filtering and sorting are the client's now, over rows it
+    already holds, and its state syncs to the address bar under the keys the
+    statistics tab already uses.
+    """
 
     def setUp(self):
         self.client.force_login(
@@ -283,151 +298,57 @@ class NodeOverviewViewTests(TestCase):
             node=self.talking, last_message_at=dj_timezone.now()
         )
 
-    def test_the_overview_lists_every_centre(self):
+    def test_the_overview_page_loads(self):
         response = self.client.get(reverse("node_overview"))
 
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, "dj-anm")
-        self.assertContains(response, "ke-kmd")
 
-    def test_a_centre_never_heard_from_says_so_rather_than_showing_a_number(self):
-        response = self.client.get(reverse("node_overview"))
+    def test_the_page_mounts_the_island_and_names_where_to_read(self):
+        html = self.client.get(reverse("node_overview")).content.decode()
 
-        self.assertContains(response, "never heard from")
+        self.assertIn('id="all-nodes"', html)
+        self.assertIn(f'data-statistics-url="{reverse("nodes_statistics")}"', html)
 
-    def test_each_centre_is_a_link_to_its_own_page(self):
-        """The table says which centre to look at; the page says what stopped."""
-        response = self.client.get(reverse("node_overview"))
+    def test_the_page_asks_for_the_detailed_view(self):
+        """The one thing this mount point declares that the panel's does not.
 
-        for node in (self.quiet, self.talking):
-            with self.subTest(centre_id=node.centre_id):
-                self.assertContains(
-                    response, reverse("node_details", args=[node.id])
-                )
+        Both surfaces are the same bundle reading the same payload; the view is
+        the whole of the difference. Lose this attribute and the page silently
+        becomes a second copy of the homepage panel -- the plumbing columns
+        gone, and nothing raising.
+        """
+        html = self.client.get(reverse("node_overview")).content.decode()
 
-    def test_the_staleness_asked_for_reaches_the_findings(self):
-        """What the analysis does with it is its own tests' business."""
-        response = self.client.get(reverse("node_overview"), {"staleness": "never_seen"})
+        self.assertIn('data-view="detail"', html)
 
-        self.assertEqual([row.centre_id for row in response.context["rows"]], ["dj-anm"])
+    def test_the_page_names_the_gap_reports_without_any_javascript(self):
+        """Rendered by the template rather than the island, on purpose.
 
-    def test_the_order_asked_for_reaches_the_findings(self):
-        response = self.client.get(reverse("node_overview"), {"order": "centre"})
+        They are what a reader most needs when the table beside them will not
+        load -- a page whose only route to "what is missing entirely" went
+        through the fetch that just failed would offer nothing at exactly the
+        wrong moment.
+        """
+        html = self.client.get(reverse("node_overview")).content.decode()
 
-        self.assertEqual(response.context["order"], "centre")
+        self.assertIn(reverse("gap_reports"), html)
 
-    def test_a_centre_whose_own_broker_does_not_answer_shows_why(self):
-        """The screen has to say it, or the finding stays in the database."""
-        MessageSource.objects.create(
-            name="dj-anm origin broker",
-            source_type=MessageSource.ORIGIN_BROKER,
-            node=self.quiet,
-            centre_id="dj-anm",
-            host="wis.dj-anm.example.int",
-            is_reachable=False,
-            last_error="Could not reach wis.dj-anm.example.int:1883",
-        )
+        for report in GAP_REPORTS:
+            self.assertIn(reverse("gap_report", args=[report.slug]), html)
 
-        response = self.client.get(reverse("node_overview"))
+    def test_the_page_no_longer_renders_a_table_of_its_own(self):
+        """The drift this change exists to end.
 
-        self.assertContains(response, "Not reachable")
-        self.assertContains(response, "Could not reach wis.dj-anm.example.int:1883")
+        Two all-centres tables computed twice is how the homepage and this page
+        come to disagree about which centre is stale, and the moment a reader
+        notices, neither is believed. There is one derivation now and one
+        endpoint, and the proof is that no centre's name reaches this page's
+        HTML at all.
+        """
+        html = self.client.get(reverse("node_overview")).content.decode()
 
-    def test_a_centre_advertising_no_broker_of_its_own_is_not_called_unreachable(self):
-        response = self.client.get(reverse("node_overview"))
-
-        self.assertContains(response, "No broker advertised")
-        self.assertNotContains(response, "Not reachable")
-
-    def test_a_centre_with_a_dataset_past_its_expectation_says_so_on_the_screen(self):
-        """A finding nobody can see is a finding that stayed in the database."""
-        dataset = Dataset.objects.create(
-            node=self.talking,
-            identifier="urn:wmo:md:ke-kmd:synop",
-            title="Surface observations",
-            wmo_data_policy="core",
-            wmo_topic_hierarchy="origin/a/wis2/ke-kmd/data/core/weather/synop",
-            raw_json={},
-            expected_interval_override_hours=6,
-        )
-        source = MessageSource.objects.create(
-            name="Global Broker",
-            source_type=MessageSource.GLOBAL_BROKER,
-            host="globalbroker.example.int",
-        )
-        HourlyRollup.objects.create(
-            hour=at("2026-08-01T00:00:00"),
-            source=source,
-            node=self.talking,
-            dataset=dataset,
-            message_count=3,
-        )
-
-        response = self.client.get(reverse("node_overview"))
-
-        self.assertContains(response, "Silent")
-        self.assertContains(response, "1 of 1 datasets overdue")
-
-    def test_a_centre_with_nothing_to_judge_is_not_called_silent_on_the_screen(self):
-        response = self.client.get(reverse("node_overview"))
-
-        self.assertContains(response, "Not judged")
-        self.assertNotContains(response, "Silent")
-
-    def published_core_data(self, *, cached):
-        """A centre whose core data the caches did or did not carry."""
-        broker = MessageSource.objects.create(
-            name="Global Broker",
-            source_type=MessageSource.GLOBAL_BROKER,
-            host="globalbroker.example.int",
-        )
-        dataset = Dataset.objects.create(
-            node=self.talking,
-            identifier="urn:wmo:md:ke-kmd:synop",
-            title="Surface observations",
-            wmo_data_policy=Dataset.CORE,
-            wmo_topic_hierarchy="origin/a/wis2/ke-kmd/data/core/weather/synop",
-            raw_json={},
-        )
-        seen_at = dj_timezone.now().replace(minute=0, second=0, microsecond=0)
-
-        for source in (broker, *([self.cache_of(broker)] if cached else [])):
-            HourlyRollup.objects.create(
-                hour=seen_at,
-                source=source,
-                node=self.talking,
-                dataset=dataset,
-                message_count=3,
-            )
-
-    def cache_of(self, broker):
-        return MessageSource.objects.create(
-            name=f"Global Cache via {broker.name}",
-            source_type=MessageSource.GLOBAL_CACHE,
-            carried_by=broker,
-            host=broker.host,
-        )
-
-    def test_a_centre_the_caches_carried_says_so_on_the_screen(self):
-        self.published_core_data(cached=True)
-
-        response = self.client.get(reverse("node_overview"))
-
-        self.assertContains(response, "Cached")
-
-    def test_a_centre_whose_core_data_no_cache_carried_says_so_on_the_screen(self):
-        """The last link in the chain, and a finding only this column can show."""
-        self.published_core_data(cached=False)
-
-        response = self.client.get(reverse("node_overview"))
-
-        self.assertContains(response, "Not cached")
-
-    def test_a_centre_that_has_published_nothing_is_not_reported_as_uncached(self):
-        response = self.client.get(reverse("node_overview"))
-
-        self.assertContains(response, "Nothing to cache")
-        self.assertNotContains(response, "Not cached")
+        self.assertNotIn("dj-anm", html)
+        self.assertNotIn("ke-kmd", html)
 
 
 class GapReportViewTests(TestCase):

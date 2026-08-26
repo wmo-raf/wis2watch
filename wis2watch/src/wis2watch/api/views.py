@@ -13,8 +13,10 @@ from rest_framework.status import HTTP_400_BAD_REQUEST
 from wis2watch.core.analysis import (
     CachePickup,
     NodeStanding,
+    OriginReachability,
     OriginWatch,
     Silence,
+    TransmissionStanding,
     UnknownStation,
     UnknownWindow,
     Window,
@@ -78,10 +80,19 @@ def nodes_api(request):
 #: that way, so there is no second ordering here to fall out of step with the
 #: first.
 VOCABULARIES = {
+    # Two verdicts, because two tables ask different questions of one row. The
+    # glance table draws `transmission` and the detailed one draws `standing`;
+    # both travel on every row so that one request serves both and neither can
+    # be computed from rows the other never saw.
+    "transmission": TransmissionStanding,
     "standing": NodeStanding,
     "origin_watch": OriginWatch,
     "cache_pickup": CachePickup,
     "silence": Silence,
+    # Not a column of its own. It is what the origin badge says under itself on
+    # the detailed page -- what the centre's own broker last reported, beside
+    # the state that says whether the centre can be judged at all.
+    "origin_broker_reachability": OriginReachability,
 }
 
 
@@ -133,7 +144,13 @@ def nodes_statistics_api(request):
             "rows": [
                 {
                     **row,
-                    "detail_url": reverse("node_details", args=[row["node_id"]]),
+                    # The statistics tab rather than the diagnostic one, which
+                    # is what #118 linked to. Going back in time is that tab's
+                    # job -- 24 hours to ninety days, already built -- and it is
+                    # the question both tables leave a reader with: this centre
+                    # looks wrong today, what has it been doing? The diagnostic
+                    # view is one tab click further on.
+                    "node_url": reverse("node_statistics", args=[row["node_id"]]),
                 }
                 for row in payload["rows"]
             ],

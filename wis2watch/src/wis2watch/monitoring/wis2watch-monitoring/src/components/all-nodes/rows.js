@@ -70,6 +70,15 @@ export const COLUMNS = [
         value: (row) => (row.country_name || '').toLowerCase(),
     },
     {
+        key: 'transmission',
+        label: 'Status',
+        width: '11rem',
+        vocabulary: 'transmission',
+        // The glance table's verdict: whether data is flowing, and nothing
+        // about the plumbing that carried it.
+        value: (row, ranks) => rankOf(ranks, 'transmission', row.transmission),
+    },
+    {
         key: 'standing',
         label: 'Standing',
         width: '11rem',
@@ -114,6 +123,20 @@ export const COLUMNS = [
         width: '8rem',
     },
     {
+        key: 'dataset_count',
+        label: 'Datasets',
+        width: '6rem',
+        align: 'number',
+        value: (row) => row.dataset_count,
+    },
+    {
+        key: 'station_count',
+        label: 'Stations',
+        width: '6rem',
+        align: 'number',
+        value: (row) => row.station_count,
+    },
+    {
         key: 'origin_watch',
         label: 'Origin',
         width: '11rem',
@@ -140,6 +163,80 @@ export const COLUMNS = [
 export const COLUMN_BY_KEY = Object.fromEntries(
     COLUMNS.map((column) => [column.key, column])
 )
+
+/**
+ * Which columns each surface draws, and in what order.
+ *
+ * Two tables from one component, because they are one table asking two
+ * questions. The glance on the admin's front page asks whether data is
+ * flowing; the overview page asks what is wrong. Neither is a subset of the
+ * other by accident -- the glance drops the plumbing on purpose, and the
+ * detailed page draws a different verdict in the same slot.
+ *
+ * Named lists rather than a boolean, and rather than a column list handed in
+ * from a template. A boolean toggling five things is the union-of-two-feature-
+ * sets prop this codebase already refused once; a list in a `data-` attribute
+ * is a place to typo a key into a silently missing column. Two lists side by
+ * side can be read against each other, which is the only way anybody will
+ * notice the day they drift.
+ */
+export const VIEWS = {
+    glance: [
+        'centre_id',
+        'country_name',
+        'transmission',
+        'last_seen_at',
+        'hours_quiet',
+        'messages_in_window',
+        'sparkline',
+    ],
+    detail: [
+        'centre_id',
+        'country_name',
+        'standing',
+        'last_seen_at',
+        'hours_quiet',
+        'messages_in_window',
+        'sparkline',
+        'dataset_count',
+        'station_count',
+        'origin_watch',
+        'cache_pickup',
+        'silence',
+    ],
+}
+
+/**
+ * Which verdict each view draws, and therefore filters by.
+ *
+ * Beside `VIEWS` rather than worked out in the component, because it *is* the
+ * views' own business: the two tables put a different verdict in the same slot,
+ * and a filter narrowing by the column a table is not drawing is a filter that
+ * hides rows for a reason nobody can see.
+ */
+export const VERDICT_FOR_VIEW = {
+    glance: 'transmission',
+    detail: 'standing',
+}
+
+/** Which verdict a view draws. */
+export function verdictFor(view) {
+    return VERDICT_FOR_VIEW[view] || VERDICT_FOR_VIEW.glance
+}
+
+/**
+ * The columns one view draws.
+ *
+ * Falls back to the glance rather than to everything, because a view name
+ * nobody recognises is a mount point somebody mistyped, and the smaller table
+ * is the safer thing to render while they work out why.
+ *
+ * @param {string} view - `glance` or `detail`.
+ * @returns {Array<object>} the column descriptors, in drawing order.
+ */
+export function columnsFor(view) {
+    return (VIEWS[view] || VIEWS.glance).map((key) => COLUMN_BY_KEY[key])
+}
 
 /**
  * Every vocabulary as a rank map, so a badge can be sorted by position.
@@ -221,10 +318,12 @@ export function sortRows(rows, {sort, direction, ranks} = {}) {
  *
  * @param {object} row - the centre.
  * @param {{search: string, standing: string}} narrowing - what is set.
+ * @param {string} verdict - which verdict field the standing filter reads,
+ *   since the two views put a different one in the same slot.
  * @returns {boolean} whether it is shown.
  */
-export function matches(row, {search = '', standing = ''} = {}) {
-    if (standing && row.standing !== standing) {
+export function matches(row, {search = '', standing = ''} = {}, verdict = 'standing') {
+    if (standing && row[verdict] !== standing) {
         return false
     }
 
@@ -300,4 +399,45 @@ export function nextSort({sort, direction} = {}, key) {
     }
 
     return {sort: '', direction: 'asc'}
+}
+
+
+/**
+ * What a badge says under itself, where it has more to say.
+ *
+ * The overview page carried these as extra lines under two of its badges --
+ * what the centre's own broker last reported, and how many of its datasets
+ * are overdue. They come back as the badge's own tooltip rather than as lines
+ * of their own: rows two and three deep destroy the reading down a column
+ * that a worst-first table exists for, and the broker's error arrives here
+ * *whole*, where the page it replaces cut it at sixty characters.
+ *
+ * Empty where there is nothing to add, which the caller renders as no tooltip
+ * at all rather than as an empty one.
+ *
+ * @param {object} row - the centre.
+ * @param {string} field - which badge is asking.
+ * @param {object} labels - every vocabulary's label map, by field.
+ * @returns {string} the tooltip, or an empty string.
+ */
+export function badgeTitle(row, field, labels) {
+    if (field === 'origin_watch') {
+        const said = labels?.origin_broker_reachability?.[row.origin_broker_reachability]
+        // The state above says whether the centre can be judged at all; this
+        // says what its broker is doing about the obligation to be dialable,
+        // which is a different conversation with a different person.
+        const parts = said ? [`Broker: ${said}`] : []
+
+        if (row.origin_last_error) {
+            parts.push(row.origin_last_error)
+        }
+
+        return parts.join(' \u2014 ')
+    }
+
+    if (field === 'silence' && row.judged_dataset_count) {
+        return `${row.silent_dataset_count} of ${row.judged_dataset_count} datasets overdue`
+    }
+
+    return ''
 }

@@ -19,6 +19,7 @@ from django.test import TestCase
 
 from wis2watch.core.analysis import (
     NodeStanding,
+    TransmissionStanding,
     all_nodes_statistics,
 )
 from wis2watch.core.models import (
@@ -184,6 +185,130 @@ class StandingTests(AllNodesTestCase):
         )
         self.assertEqual(NodeStanding.RANK[NodeStanding.NEVER_SEEN], 0)
         self.assertEqual(NodeStanding.RANK[NodeStanding.HEALTHY], 6)
+
+
+class TransmissionTests(AllNodesTestCase):
+    """Whether data is flowing, which is the only thing the front page asks.
+
+    A second verdict on the same row rather than a narrowing of the first,
+    because the two surfaces ask different questions and a row has to answer
+    both from one pass. What is guarded here is that it ignores the plumbing --
+    the whole reason it exists -- and that it stays a coarsening of the full
+    standing rather than drifting into a rival ordering.
+    """
+
+    def transmission(self, centre_id):
+        return self.by_centre()[centre_id].transmission
+
+    def test_a_centre_nothing_has_ever_been_heard_from_says_so_first(self):
+        self.node("bj-meteobenin")
+
+        self.assertEqual(
+            self.transmission("bj-meteobenin"), TransmissionStanding.NEVER_SEEN
+        )
+
+    def test_a_centre_gone_quiet_is_stale(self):
+        self.node("bi-igebu", last_seen=NOW - timedelta(days=7))
+
+        self.assertEqual(self.transmission("bi-igebu"), TransmissionStanding.STALE)
+
+    def test_a_centre_with_a_dataset_overdue_says_so_however_much_it_publishes(self):
+        """The label says "Datasets overdue" and never that the centre is quiet.
+
+        On the live region this lands on centres sending three hundred
+        notifications an hour and last heard from six minutes ago: one dataset
+        past its own cadence is enough. A verdict that read as silence there
+        would be a verdict nobody believed twice.
+        """
+        node = self.well("dz-meteoalgerie")
+        synop = Dataset.objects.create(
+            node=node,
+            identifier="urn:wmo:md:dz-meteoalgerie:synop",
+            title="synop",
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy="origin/a/wis2/dz-meteoalgerie/data/core/synop",
+            raw_json={},
+        )
+        CadenceBaseline.objects.create(
+            dataset=synop,
+            interval_hours=6,
+            observations=20,
+            learned_at=NOW - timedelta(days=1),
+        )
+        self.rollup(node, NOW - timedelta(days=3), 1, dataset=synop)
+        # And publishing hard, right now.
+        self.rollup(node, LAST_HOUR, 310)
+
+        row = self.by_centre()["dz-meteoalgerie"]
+
+        self.assertEqual(row.transmission, TransmissionStanding.SILENT)
+        self.assertEqual(row.messages_in_window, 310)
+        self.assertEqual(
+            TransmissionStanding.LABELS[row.transmission], "Datasets overdue"
+        )
+
+    def test_a_centre_answering_only_at_its_archive_is_still_transmitting(self):
+        """The whole point of the second verdict.
+
+        Twenty-eight of thirty-two centres in the region fall back to their
+        archives. Folding that in put twenty-one of them under "Archive only"
+        on a panel whose job is to say whether data is flowing.
+        """
+        node = self.node("ma-marocmeteo", last_seen=NOW - timedelta(hours=1))
+        origin_broker(node, is_reachable=False)
+        origin_api(node, is_reachable=True)
+
+        row = self.by_centre()["ma-marocmeteo"]
+
+        self.assertEqual(row.transmission, TransmissionStanding.TRANSMITTING)
+        self.assertEqual(row.standing, NodeStanding.ARCHIVE_ONLY)
+
+    def test_a_centre_nothing_watches_is_still_transmitting(self):
+        self.node("cd-mettelsat", last_seen=NOW - timedelta(hours=1))
+
+        row = self.by_centre()["cd-mettelsat"]
+
+        self.assertEqual(row.transmission, TransmissionStanding.TRANSMITTING)
+        self.assertEqual(row.standing, NodeStanding.NO_BROKER)
+
+    def test_uncached_core_data_does_not_make_a_centre_stop_transmitting(self):
+        node = self.well("ke-meteo")
+        synop = Dataset.objects.create(
+            node=node,
+            identifier="urn:wmo:md:ke-meteo:synop",
+            title="synop",
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy="origin/a/wis2/ke-meteo/data/core/synop",
+            raw_json={},
+        )
+        self.rollup(node, LAST_HOUR, 12, dataset=synop)
+
+        row = self.by_centre()["ke-meteo"]
+
+        self.assertEqual(row.transmission, TransmissionStanding.TRANSMITTING)
+        self.assertEqual(row.standing, NodeStanding.NOT_CACHED)
+
+    def test_it_is_a_coarsening_of_the_full_standing_and_not_a_rival(self):
+        """Its three faults are the full standing's three worst, same names.
+
+        This is what lets one server order serve both tables, and what stops
+        the two surfaces disagreeing about which centre to look at first.
+        """
+        self.assertEqual(
+            [key for key, _label in TransmissionStanding.CHOICES][:3],
+            [key for key, _label in NodeStanding.CHOICES][:3],
+        )
+        self.assertEqual(
+            TransmissionStanding.RANK[TransmissionStanding.TRANSMITTING],
+            len(NodeStanding.CHOICES) - 4,
+        )
+
+    def test_three_of_its_four_labels_are_the_full_standings_own(self):
+        """One vocabulary across two tables, not two."""
+        for key in ("never_seen", "stale", "silent"):
+            self.assertEqual(
+                TransmissionStanding.LABELS[key], NodeStanding.LABELS[key]
+            )
 
 
 class CoverageTests(AllNodesTestCase):

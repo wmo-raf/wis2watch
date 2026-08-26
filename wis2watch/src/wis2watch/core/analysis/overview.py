@@ -212,6 +212,82 @@ class NodeStanding:
         return cls.HEALTHY
 
 
+class TransmissionStanding:
+    """Whether a centre's data is flowing, and nothing else.
+
+    ``NodeStanding`` beside this folds four judgements; this folds two. The
+    difference is not detail, it is *subject*. Cache pickup is what happened
+    downstream after a centre published, and origin watch is how this tool is
+    reading the centre at all -- both are true and neither answers "is data
+    coming out of this centre right now", which is the only question the
+    admin's front page is asking.
+
+    Measured before it was written, which is the argument for it existing.
+    Twenty-eight of thirty-two centres in the region fall back to their
+    archives, so a worst-of over all four put twenty-one of them under "Archive
+    only" and left exactly one row reading healthy -- on a panel whose whole
+    job is to say whether data is flowing. Folded from staleness and silence
+    alone, the same region reads two never heard from, one gone quiet, seven
+    with datasets overdue, and twenty-two transmitting.
+
+    The plumbing is not hidden by this, it is *elsewhere*: the overview page
+    carries ``NodeStanding`` and all four badges, and that is the page somebody
+    opens to ask what is wrong rather than whether anything is.
+
+    Three of the four labels are ``NodeStanding``'s own, word for word, so a
+    reader moving between the two tables is learning one vocabulary and not
+    two. ``TRANSMITTING`` is ``StationStanding``'s word for the same idea one
+    level down.
+    """
+
+    NEVER_SEEN = "never_seen"
+    STALE = "stale"
+    SILENT = "silent"
+    TRANSMITTING = "transmitting"
+
+    #: What has stopped, then what has slipped, then what is flowing.
+    CHOICES = [
+        (NEVER_SEEN, _("Never heard from")),
+        (STALE, _("Gone quiet")),
+        (SILENT, _("Datasets overdue")),
+        (TRANSMITTING, _("Transmitting")),
+    ]
+
+    LABELS = dict(CHOICES)
+
+    #: Derived from ``CHOICES`` rather than written out again, for the reason
+    #: ``NodeStanding.RANK`` is: two spellings of one order is one of them
+    #: being wrong later.
+    RANK = {standing: rank for rank, (standing, _label) in enumerate(CHOICES)}
+
+    @classmethod
+    def of(cls, row):
+        """What one centre's traffic amounts to, ignoring its plumbing.
+
+        The same worst-of reading as ``NodeStanding``, over the first two of
+        its four judgements. ``SILENT`` lands on centres publishing hundreds of
+        notifications an hour -- one dataset overdue against its own cadence is
+        enough -- which is why its label says "Datasets overdue" and not
+        anything about the centre being quiet.
+
+        Args:
+            row (NodeOverviewRow): the centre's row, already judged.
+
+        Returns:
+            str: one of this class's standings.
+        """
+        if row.staleness == Staleness.NEVER_SEEN:
+            return cls.NEVER_SEEN
+
+        if row.staleness == Staleness.STALE:
+            return cls.STALE
+
+        if row.silence == Silence.SILENT:
+            return cls.SILENT
+
+        return cls.TRANSMITTING
+
+
 @dataclass(frozen=True)
 class NodeOverviewRow:
     """One centre's line in the overview."""

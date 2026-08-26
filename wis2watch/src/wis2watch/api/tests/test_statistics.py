@@ -165,6 +165,10 @@ class AllNodesEndpointTests(StatisticsEndpointTestCase):
                 "node_id",
                 "centre_id",
                 "country_name",
+                # Two verdicts, because two tables ask different questions of
+                # one row. Both travel always: one request serves both, and
+                # neither table can be computed from rows the other never saw.
+                "transmission",
                 "standing",
                 "last_seen_at",
                 "hours_quiet",
@@ -173,22 +177,101 @@ class AllNodesEndpointTests(StatisticsEndpointTestCase):
                 "origin_watch",
                 "cache_pickup",
                 "silence",
-                "detail_url",
+                # Drawn by the detailed table only, and carried always for the
+                # same reason the second verdict is.
+                "dataset_count",
+                "station_count",
+                "origin_broker_reachability",
+                "origin_last_error",
+                "silent_dataset_count",
+                "judged_dataset_count",
+                "node_url",
             },
         )
         # Reversed on this side rather than assembled in a bundle that is
         # built ahead of time and committed, which is ADR-0001's rule for
         # anything reversible and is no different for travelling in JSON.
+        #
+        # The *statistics* tab, not the diagnostic one: going back in time is
+        # that tab's job, and it is the question both tables leave a reader
+        # with.
         self.assertEqual(
-            row["detail_url"], reverse("node_details", args=[self.kenya.pk])
+            row["node_url"], reverse("node_statistics", args=[self.kenya.pk])
         )
+
+    def test_a_centre_whose_own_broker_does_not_answer_carries_why(self):
+        """What the overview page used to print under its Origin badge.
+
+        It is a tooltip on that badge now rather than a second line, and it
+        arrives whole -- the page cut the error at sixty characters.
+        """
+        MessageSource.objects.create(
+            name="ke-meteo origin broker",
+            source_type=MessageSource.ORIGIN_BROKER,
+            node=self.kenya,
+            centre_id="ke-meteo",
+            host="wis.ke-meteo.example.int",
+            is_reachable=False,
+            last_error="Connection timed out after 30 seconds of waiting",
+        )
+
+        row = self.region()["rows"][0]
+
+        self.assertEqual(row["origin_broker_reachability"], "unreachable")
+        self.assertEqual(
+            row["origin_last_error"],
+            "Connection timed out after 30 seconds of waiting",
+        )
+
+    def test_a_centre_advertising_no_broker_is_not_called_unreachable(self):
+        """A fault that has not been observed is not a fault."""
+        row = self.region()["rows"][0]
+
+        self.assertEqual(row["origin_broker_reachability"], "not_advertised")
+
+    def test_the_two_verdicts_agree_about_what_is_worst(self):
+        """The glance verdict is a coarsening of the full one, not a rival.
+
+        Its three faults are the three worst ranks of the full standing under
+        the same three names, and `transmitting` is exactly the ranks below
+        them. That is what lets one server order serve both tables -- and what
+        stops the two surfaces disagreeing about which centre to look at first.
+        """
+        found = self.region()
+        ranks = {
+            field: {entry["key"]: rank for rank, entry in enumerate(entries)}
+            for field, entries in found["vocabularies"].items()
+        }
+
+        for row in found["rows"]:
+            transmitting = row["transmission"] == "transmitting"
+
+            if transmitting:
+                # Every plumbing fault, and the clean bill, sit below the three
+                # the glance verdict knows about.
+                self.assertGreaterEqual(ranks["standing"][row["standing"]], 3)
+            else:
+                self.assertEqual(row["transmission"], row["standing"])
 
     def test_the_words_are_the_servers_and_travel_once(self):
         vocabularies = self.region()["vocabularies"]
 
         self.assertEqual(
             set(vocabularies),
-            {"standing", "origin_watch", "cache_pickup", "silence"},
+            {
+                "transmission",
+                "standing",
+                "origin_watch",
+                "cache_pickup",
+                "silence",
+                # Not a column of its own -- it is what the origin badge says
+                # under itself on the detailed page.
+                "origin_broker_reachability",
+            },
+        )
+        self.assertEqual(
+            [entry["key"] for entry in vocabularies["transmission"]],
+            ["never_seen", "stale", "silent", "transmitting"],
         )
         # Worst first, which is the order the rows arrive in and the order a
         # filter control offers. A client that sorted these itself would be a

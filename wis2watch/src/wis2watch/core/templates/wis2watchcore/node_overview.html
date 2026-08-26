@@ -1,291 +1,34 @@
 {% extends "wagtailadmin/generic/base.html" %}
 
-{% load i18n wagtailadmin_tags %}
+{% load i18n %}
+
+{% comment %}
+    The overview page's mount of the all-centres table: the detailed view,
+    which asks what is wrong rather than whether anything is.
+
+    The same panel the admin home renders, from the same include, so the two
+    surfaces are one thing seen twice rather than two things kept in step by
+    hand. The only difference this template states is the view.
+{% endcomment %}
 
 {% block extra_css %}
     {{ block.super }}
     <style>
-        .overview-filters {
-            display: flex;
-            gap: 10px;
-            align-items: center;
-            margin: 20px 0;
-            flex-wrap: wrap;
-        }
+        /* Wagtail's dashboard panel carries a bottom margin and no top one:
+           on the admin home the space above it comes from the `w-dashboard`
+           wrapper, which a page like this does not have, so the panel butted
+           straight into the slim header.
 
-        .overview-filter {
-            padding: 4px 12px;
-            border-radius: 3px;
-            border: 1px solid #ddd;
-            color: #333;
-            text-decoration: none;
-            font-size: 0.9em;
-        }
-
-        .overview-filter.selected {
-            background: #333;
-            border-color: #333;
-            color: #fff;
-        }
-
-        .overview-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: #fff;
-        }
-
-        .overview-table th {
-            background: #f5f5f5;
-            padding: 10px;
-            text-align: left;
-            font-weight: 600;
-            color: #555;
-            border-bottom: 2px solid #ddd;
-            font-size: 0.9em;
-        }
-
-        .overview-table td {
-            padding: 10px;
-            border-bottom: 1px solid #eee;
-            font-size: 0.9em;
-        }
-
-        .overview-table td.numeric,
-        .overview-table th.numeric {
-            text-align: right;
-        }
-
-        .badge {
-            display: inline-block;
-            padding: 3px 10px;
-            border-radius: 3px;
-            font-size: 0.85em;
-            font-weight: 500;
-        }
-
-        .badge-active {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .badge-stale {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .badge-never_seen {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .badge-reachable,
-        .badge-watched_at_broker {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        /* The fallback is amber rather than green: the centre can be judged,
-           and the broker it is obliged to run is not answering. */
-        .badge-watched_at_archive {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .badge-unreachable,
-        .badge-unwatched {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .badge-not_attempted,
-        .badge-not_advertised,
-        .badge-nothing_to_cache,
-        .badge-unknown {
-            background: #eee;
-            color: #555;
-        }
-
-        .badge-picked_up {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .badge-not_picked_up {
-            background: #fff3cd;
-            color: #856404;
-        }
-
-        .badge-silent {
-            background: #f8d7da;
-            color: #721c24;
-        }
-
-        .badge-on_schedule {
-            background: #d4edda;
-            color: #155724;
-        }
-
-        .silence-detail {
-            margin-top: 4px;
-            color: #555;
-            font-size: 0.8em;
-        }
-
-        .broker-error {
-            margin-top: 4px;
-            color: #721c24;
-            font-size: 0.8em;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 50px;
-            color: #999;
-        }
-
-        .overview-reports {
-            display: flex;
-            gap: 10px;
-            align-items: baseline;
-            flex-wrap: wrap;
-            margin: 20px 0 0;
-            padding-bottom: 15px;
-            border-bottom: 1px solid #ddd;
-        }
-
-        .overview-reports-label {
-            font-weight: 600;
-            color: #555;
+           The same expression its own bottom margin uses, so the panel sits
+           symmetrically in the page and follows the reader's density setting
+           rather than pinning a gap Wagtail would have scaled. */
+        .all-nodes-panel {
+            margin-top: calc(1rem + 1rem * var(--w-density-factor));
         }
     </style>
 {% endblock %}
 
 {% block main_content %}
-    {% comment %}
-        The gap reports named here as well as on their own index, because this
-        table is what somebody has open when they start wondering what else is
-        wrong -- and a report nobody arrives at reports nothing.
-    {% endcomment %}
-    <div class="overview-reports">
-        <span class="overview-reports-label">
-            <a href="{% url 'gap_reports' %}">{% trans "Gap reports" %}</a>:
-        </span>
-        {% for report in gap_reports %}
-            <a href="{% url 'gap_report' report.slug %}">{{ report.title }}</a>
-        {% endfor %}
-    </div>
-
-    <div class="overview-filters">
-        <span>{% trans "Staleness" %}:</span>
-        <a class="overview-filter {% if not staleness %}selected{% endif %}"
-           href="?order={{ order }}">{% trans "All" %}</a>
-        {% for value, label in staleness_choices %}
-            <a class="overview-filter {% if staleness == value %}selected{% endif %}"
-               href="?staleness={{ value }}&order={{ order }}">{{ label }}</a>
-        {% endfor %}
-
-        <span>{% trans "Order" %}:</span>
-        <a class="overview-filter {% if order == 'staleness' %}selected{% endif %}"
-           href="?staleness={{ staleness|default_if_none:'' }}&order=staleness">
-            {% trans "Most stale first" %}
-        </a>
-        <a class="overview-filter {% if order == 'centre' %}selected{% endif %}"
-           href="?staleness={{ staleness|default_if_none:'' }}&order=centre">
-            {% trans "Centre ID" %}
-        </a>
-    </div>
-
-    {% if rows %}
-        <table class="listing overview-table">
-            <thead>
-            <tr>
-                <th>{% trans "Centre" %}</th>
-                <th>{% trans "Country" %}</th>
-                <th>{% trans "Last seen" %}</th>
-                <th>{% trans "Quiet for" %}</th>
-                <th class="numeric"
-                    title="{% trans 'Notifications from this centre seen at the Global Broker' %}">
-                    {% blocktrans %}Global Broker ({{ volume_hours }}h){% endblocktrans %}
-                </th>
-                <th class="numeric">{% trans "Datasets" %}</th>
-                <th class="numeric">{% trans "Stations" %}</th>
-                <th title="{% trans "Which of this centre's own transports this tool is hearing it through. Its archive is polled only where its broker will not answer, so a centre watched there is being watched and is failing to run a broker anyone can dial." %}">
-                    {% trans "Origin" %}
-                </th>
-                <th title="{% trans "Whether the Global Caches carried this centre's core data. Only core data is cached, so a centre publishing none has nothing to pick up." %}">
-                    {% trans "Global Cache" %}
-                </th>
-                <th title="{% trans 'Each dataset judged against its own learned or stated cadence' %}">
-                    {% trans "Silence" %}
-                </th>
-                <th>{% trans "Status" %}</th>
-            </tr>
-            </thead>
-            <tbody>
-            {% for row in rows %}
-                <tr>
-                    <td>
-                        <a href="{% url 'node_details' row.node_id %}">
-                            <code>{{ row.centre_id }}</code>
-                        </a>
-                    </td>
-                    <td>{{ row.country_name|default:"—" }}</td>
-                    <td>{{ row.last_seen_at|date:"Y-m-d H:i"|default:"—" }}</td>
-                    <td>
-                        {% if row.last_seen_at %}
-                            {% blocktrans with hours=row.hours_since_last_seen|floatformat:1 %}{{ hours }}h{% endblocktrans %}
-                        {% else %}
-                            {% trans "never heard from" %}
-                        {% endif %}
-                    </td>
-                    <td class="numeric">{{ row.recent_message_count }}</td>
-                    <td class="numeric">{{ row.dataset_count }}</td>
-                    <td class="numeric">{{ row.station_count }}</td>
-                    <td>
-                        <span class="badge badge-{{ row.origin_watch }}">
-                            {{ row.origin_watch_label }}
-                        </span>
-                        {% if not row.is_watched_at_broker %}
-                            <div class="silence-detail"
-                                 title="{% trans "What this centre's own broker is doing. A centre is obliged to run one anything can dial, whether or not this tool can see the centre another way." %}">
-                                {% blocktrans with reachability=row.origin_broker_reachability_label %}Broker: {{ reachability }}{% endblocktrans %}
-                            </div>
-                        {% endif %}
-                        {% if row.origin_last_error %}
-                            <div class="broker-error" title="{{ row.origin_last_error }}">
-                                {{ row.origin_last_error|truncatechars:60 }}
-                            </div>
-                        {% endif %}
-                    </td>
-                    <td>
-                        <span class="badge badge-{{ row.cache_pickup }}">
-                            {{ row.cache_pickup_label }}
-                        </span>
-                        {% if row.core_message_count %}
-                            <div class="silence-detail"
-                                 title="{% trans 'Every Global Cache carrying a centre republishes its data, so cached copies outnumber the publications they were made from' %}">
-                                {% blocktrans with cached=row.cache_message_count core=row.core_message_count %}{{ core }} core published, {{ cached }} cached copies{% endblocktrans %}
-                            </div>
-                        {% endif %}
-                    </td>
-                    <td>
-                        <span class="badge badge-{{ row.silence }}">{{ row.silence_label }}</span>
-                        {% if row.judged_dataset_count %}
-                            <div class="silence-detail">
-                                {% blocktrans with silent=row.silent_dataset_count judged=row.judged_dataset_count %}{{ silent }} of {{ judged }} datasets overdue{% endblocktrans %}
-                            </div>
-                        {% endif %}
-                    </td>
-                    <td>
-                        <span class="badge badge-{{ row.staleness }}">{{ row.staleness_label }}</span>
-                    </td>
-                </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-    {% else %}
-        <div class="empty-state">
-            <p>{% trans "No centres to show" %}</p>
-        </div>
-    {% endif %}
+    {% trans "Node overview" as heading %}
+    {% include "wis2watchcore/includes/all_nodes_panel.html" with panel_id="node-overview" heading=heading view="detail" %}
 {% endblock %}

@@ -1,0 +1,128 @@
+{% load i18n vue_utils wagtailadmin_tags %}
+
+{% comment %}
+    The all-centres table as a panel, wherever it is mounted.
+
+    Both surfaces render exactly this: the admin home passes `view="glance"`
+    and the overview page passes `view="detail"`, and that attribute is the
+    whole of the difference between them -- it picks the column list and which
+    of the two verdicts every row carries goes in the status slot. The payload
+    is identical either way, so the two tables cannot disagree about a centre.
+
+    Written once rather than in each template that mounts it. Two copies of a
+    panel is how one of them keeps its header ground and the other loses it,
+    and how the refresh button ends up in the header on one surface and
+    floating above the table on the other.
+
+    Takes `panel_id`, `heading`, `view` and `statistics_url`, plus the reports
+    from the view's context.
+
+    ## The header
+
+    Wagtail's own `header_controls` slot. Two things go in it, by different
+    routes because they are different kinds of thing.
+
+    The **gap reports** are static links, rendered here, so they survive the
+    island failing entirely -- which is precisely the moment a reader most
+    needs the report that says what is missing from the picture. A dropdown
+    rather than the six spelled out: the titles run to a hundred and sixty
+    characters, which beside a heading and a button wraps the header onto a
+    second line and makes the links the largest thing in it.
+
+    The **refresh button** is the island's, because its state is: it spins
+    while a request is in flight and is disabled for the duration. It arrives
+    by `<Teleport>` into the empty span below, which is why that span exists.
+    Wagtail only renders `w-panel__controls` when this fragment is non-empty,
+    so the dropdown above is also what guarantees the teleport has somewhere
+    to land.
+{% endcomment %}
+
+<style>
+    /* The panel's header, given a ground of its own so it reads as a header
+       rather than as the first thing in the content. `--w-color-grey-50` is
+       the convention's subtle-background token; see
+       `.claude/docs/template_conventions.md`.
+
+       **It is not theme-aware.** Wagtail defines the raw grey scale once --
+       grey-50 is 96.9% lightness in every theme -- and `.w-theme-dark` remaps
+       only the *semantic* tokens onto other greys. Used bare, this would lay a
+       near-white bar across a dark panel. So the dark ground is named too, as
+       `--w-color-surface-header`, which is Wagtail's own answer for a header
+       surface and lands one step lighter than the dashboard panel's own
+       grey-800 ground.
+
+       Two selectors for the dark case, which is the scar `charts/roles.css`
+       and `core.js` both carry: Wagtail's default is `w-theme-system`, where
+       the OS decides and the class never changes at all, so naming only
+       `.w-theme-dark` leaves the header light for everybody who never opened
+       the setting -- which is most people.
+
+       Scoped to a class of our own rather than to a panel id, because two
+       surfaces mount this and neither should have to know the other's id. */
+    .all-nodes-panel > .w-panel__header {
+        background: var(--w-color-grey-50);
+        border-bottom: 1px solid var(--w-color-border-furniture);
+        border-start-start-radius: 5px;
+        border-start-end-radius: 5px;
+    }
+
+    .w-theme-dark .all-nodes-panel > .w-panel__header {
+        background: var(--w-color-surface-header);
+    }
+
+    @media (prefers-color-scheme: dark) {
+        .w-theme-system .all-nodes-panel > .w-panel__header {
+            background: var(--w-color-surface-header);
+        }
+    }
+
+    /* Wagtail hangs a dashboard panel's header 1.25rem past the panel's own
+       left edge -- above 50em only -- and then pays it back with 1.25rem of
+       padding, so the first child lands exactly on the panel's content edge
+       and the overhang is invisible.
+
+       It stops being invisible the moment the header has a ground: the
+       background paints the whole border box, overhang included, and a grey
+       tongue sticks out past the panel's rounded corner.
+
+       Both halves are cancelled rather than just the margin, so nothing moves.
+       The margin was buying room for `.w-panel__anchor--prefix`, which is
+       `opacity: 0` until the header is hovered and which sat on the content
+       edge anyway. Scoped to the same query Wagtail scopes the margin to,
+       because below it there is no overhang to correct. */
+    @media screen and (min-width: 50em) {
+        .all-nodes-panel > .w-panel__header {
+            margin-inline-start: 0;
+            padding-inline-start: 0;
+        }
+    }
+</style>
+
+{% fragment as header_controls %}
+    {% dropdown toggle_icon="arrow-down" toggle_label=_("Gap reports") classname="w-inline-block" %}
+        {% for report in gap_reports %}
+            <a href="{% url 'gap_report' report.slug %}">{{ report.title }}</a>
+        {% endfor %}
+        {# The index carries a count per report, which the list above cannot. #}
+        <a href="{{ gap_reports_url }}">{% trans "All gap reports" %}</a>
+    {% enddropdown %}
+
+    {% comment %}
+        Where the island teleports its refresh button. Empty on purpose: if the
+        bundle never loads there is nothing to refresh, and an inert button
+        saying otherwise would be worse than no button.
+
+        A block comment rather than the brace-hash kind, which Django's lexer
+        only recognises on a single line -- spread one over three and it is not
+        a comment at all, and every word of it renders into the panel header.
+    {% endcomment %}
+    <span id="all-nodes-refresh"></span>
+{% endfragment %}
+
+{% panel id=panel_id heading=heading icon="list-ul" classname="w-panel--dashboard all-nodes-panel" header_controls=header_controls %}
+    <div id="all-nodes"
+         data-statistics-url="{{ statistics_url }}"
+         data-view="{{ view }}"></div>
+{% endpanel %}
+
+<script type="module" crossorigin src="{% vue_bundle_url 'all-nodes' %}"></script>

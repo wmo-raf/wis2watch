@@ -11,10 +11,8 @@ from wagtail.admin.paginator import WagtailPaginator
 from .analysis import (
     GAP_REPORTS,
     UNATTRIBUTED_MESSAGES_SLUG,
-    Staleness,
     attribution_window_label,
     default_attribution_window_hours,
-    default_volume_hours,
     gap_report,
     gap_report_summaries,
     node_detail,
@@ -33,32 +31,40 @@ GAP_REPORT_PAGE_SIZE = 50
 
 
 def node_overview_table(request):
-    """The state of the region on one screen.
+    """Every centre of the region, and everything the tool judges about it.
 
-    The findings are computed whole and then rendered; the view's only job is
-    to read what was asked for off the query string, so that "sorted by
-    staleness" means the same thing here as it does anywhere else it is asked.
+    A frame. It settles nothing and computes nothing: the island asks for the
+    rows itself, from the same endpoint the homepage panel reads, so the two
+    tables cannot come to disagree about a centre by having been computed
+    twice.
+
+    The homepage's panel and this page are one component asking two questions.
+    That one shows whether data is flowing and stops there; this one shows the
+    plumbing too -- which of a centre's own transports is answering, whether
+    the Global Caches carried it, how many of its datasets are overdue. This
+    is the page somebody opens to ask *what is wrong*, having seen on the front
+    page *that* something is.
+
+    Both are the last 24 hours, and neither offers a window. Going back in time
+    is the node statistics tab's job -- 24 hours to ninety days, over a real
+    time series -- and it is where the centre code in the first column leads.
     """
-    staleness = request.GET.get("staleness") or None
-    order = request.GET.get("order") or "staleness"
-
-    rows = node_overview(staleness=staleness, order=order)
-
     context = {
         "breadcrumbs_items": [
             {"url": reverse_lazy("wagtailadmin_home"), "label": _("Home")},
             {"url": "", "label": _("Overview")},
         ],
-        "page_title": _("Node overview"),
-        "rows": rows,
-        "volume_hours": default_volume_hours(),
-        "staleness": staleness,
-        "order": order,
-        "staleness_choices": Staleness.CHOICES,
+        # `header_title` rather than `page_title`: the admin's slim header --
+        # which is what a page with breadcrumbs gets -- reads that one, and it
+        # is also what fills the browser tab.
+        "header_title": _("Node overview"),
+        "header_icon": "list-ul",
+        "statistics_url": reverse_lazy("nodes_statistics"),
         # Named here rather than only on their own index, because a report
         # nobody arrives at reports nothing: this table is what somebody has
         # open when they start wondering what else is wrong.
         "gap_reports": GAP_REPORTS,
+        "gap_reports_url": reverse_lazy("gap_reports"),
     }
 
     return render(request, 'wis2watchcore/node_overview.html', context)
