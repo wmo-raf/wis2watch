@@ -464,6 +464,11 @@ class StationRowsResponseTests(StationRowsEndpointTestCase):
                 "messages_in_window",
                 "active_buckets",
                 "presence",
+                # Added with the station baseline in #112, and missing from
+                # this set until #118 ran the whole suite: the row grew a
+                # field and the contract that is supposed to catch exactly
+                # that was not brought with it.
+                "baseline_hours",
             },
         )
 
