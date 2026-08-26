@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 from unittest import mock
 
@@ -113,6 +114,41 @@ class AdminSmokeTests(TestCase):
             "Awaiting your review",
         ):
             self.assertNotIn(heading, html)
+
+    def test_the_admin_home_does_not_offer_to_search_a_page_tree(self):
+        """The header's search box searched somewhere nobody can go.
+
+        `construct_main_menu` hides the explorer, so a search of the page tree
+        was a search of an unreachable place -- sitting directly under the
+        strip of counts, which is the one thing in that header anybody wants.
+
+        Removing it meant restating Wagtail's `content` block, and a restated
+        block goes stale silently. This is the assertion that notices.
+        """
+        html = self.client.get(reverse("wagtailadmin_home")).content.decode()
+
+        # The form's action specifically, not the explorer's URL anywhere on
+        # the page: the sidebar's own JSON config names it too, and always did.
+        self.assertNotIn(
+            f'action="{reverse("wagtailadmin_explore_root")}"', html
+        )
+
+    def test_the_admin_home_still_welcomes_the_reader(self):
+        """The title survives the block that was restated around it.
+
+        Wagtail builds `header_title` inside the very block this admin
+        replaces, so omitting that fragment renders the base view's generic
+        "Dashboard" and leaves `branding_welcome` defined but unreachable --
+        a regression with nothing to fail. This is that something.
+        """
+        html = self.client.get(reverse("wagtailadmin_home")).content.decode()
+
+        heading = " ".join(
+            re.search(r"<h1[^>]*>(.*?)</h1>", html, re.S).group(1).split()
+        )
+
+        self.assertIn("Welcome to", heading)
+        self.assertNotEqual("Dashboard", heading)
 
     def test_the_admin_home_says_how_big_the_region_is(self):
         """The strip states the scope the panel below it only assumes.

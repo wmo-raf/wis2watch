@@ -1,12 +1,53 @@
 {% extends "wagtailadmin/home.html" %}
 {% load i18n wagtailadmin_tags wis2watch_tags %}
 
-{% block branding_welcome %}
-    {% trans "Welcome to" %}
-    {% if 'WAGTAIL_SITE_NAME'|django_settings %}
-        {{ 'WAGTAIL_SITE_NAME'|django_settings }}
-    {% else %}
-        {% trans "WIS2Watch" %}
-    {% endif %}
-{% endblock %}
+{% comment %}
+    The admin home, with the page-explorer search taken out of its header.
 
+    Wagtail puts a search box under the welcome title that searches the page
+    tree. `construct_main_menu` hides the explorer, so on this admin that box
+    is a search of somewhere nobody can go -- and it sat directly beneath the
+    strip of counts, which is the one thing in that header anybody wants.
+
+    Wagtail wraps it in no block of its own, so removing it means restating
+    `content`. **That is a copy of Wagtail's own block**, and copies go stale:
+    an upgrade that changes what the dashboard header holds will not reach us
+    here. `AdminSmokeTests` asserts what this page must and must not carry, so
+    a Wagtail upgrade that matters fails loudly rather than quietly.
+
+    `header_title` is built here rather than left to the view. Wagtail's own
+    `content` defines it as a fragment wrapping `branding_welcome`, so a
+    restated block that omits it renders the base view's generic "Dashboard"
+    and leaves `branding_welcome` defined but unreachable.
+{% endcomment %}
+
+{% block content %}
+    {% fragment as header_title %}
+        {% block branding_welcome %}
+            {% trans "Welcome to" %}
+            {% if 'WAGTAIL_SITE_NAME'|django_settings %}
+                {{ 'WAGTAIL_SITE_NAME'|django_settings }}
+            {% else %}
+                {% trans "WIS2Watch" %}
+            {% endif %}
+        {% endblock %}
+    {% endfragment %}
+
+    {% component upgrade_notification %}
+    <div class="w-dashboard w-px-6 sm:w-px-[3.75rem] w-mt-16 sm:w-mt-10 lg:w-mt-[3.75rem]">
+        <header class="w-flex w-flex-col lg:w-flex-row">
+            <div class="lg:w-pr-20 lg:w-grow w-mb-12">
+                <h1 class="w-h1 w-mt-0">{{ header_title }}</h1>
+                {% component site_summary %}
+            </div>
+            {% include "wagtailadmin/home/account_summary.html" %}
+        </header>
+        {% if panels %}
+            {% for panel in panels %}
+                {% component panel fallback_render_method=True %}
+            {% endfor %}
+        {% else %}
+            <p>{% trans "This is your dashboard on which helpful information about content you've created will be displayed." %}</p>
+        {% endif %}
+    </div>
+{% endblock %}
