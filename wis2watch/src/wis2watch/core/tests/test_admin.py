@@ -43,6 +43,55 @@ class AdminSmokeTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
 
+    def test_the_admin_home_carries_the_all_centres_panel(self):
+        """The reason somebody logs in is on the page they log in to.
+
+        The mount point and the URL it reads, because between them they are
+        the whole of what the server contributes: everything else on this
+        panel arrives from the API afterwards, which is what keeps a login
+        from waiting on the region's query.
+        """
+        response = self.client.get(reverse("wagtailadmin_home"))
+        html = response.content.decode()
+
+        self.assertIn('id="all-nodes"', html)
+        self.assertIn(
+            f'data-statistics-url="{reverse("nodes_statistics")}"', html
+        )
+
+    def test_the_panel_names_the_gap_reports_without_any_javascript(self):
+        """Rendered by the template rather than the island, on purpose.
+
+        They are what a reader most needs when the table above them will not
+        load -- a panel whose only route to "what is missing entirely" went
+        through the fetch that just failed would offer nothing at exactly the
+        wrong moment.
+        """
+        html = self.client.get(reverse("wagtailadmin_home")).content.decode()
+
+        self.assertIn(reverse("gap_reports"), html)
+
+        for report in GAP_REPORTS:
+            self.assertIn(reverse("gap_report", args=[report.slug]), html)
+
+    def test_the_admin_home_shows_nothing_about_a_page_tree(self):
+        """Wagtail's own dashboard panels are gone, and stay gone.
+
+        The menu already hides the explorer, documents, images, snippets and
+        reports, so these four panels are about a page tree this tool's
+        operators cannot reach. The assertion is really about a Wagtail
+        upgrade quietly reintroducing one of them under a new heading.
+        """
+        html = self.client.get(reverse("wagtailadmin_home")).content.decode()
+
+        for heading in (
+            "Your locked pages",
+            "Your most recent edits",
+            "Your pages in a workflow",
+            "Awaiting your review",
+        ):
+            self.assertNotIn(heading, html)
+
     def test_the_monitoring_map_loads(self):
         response = self.client.get(reverse("ingest_map"))
 

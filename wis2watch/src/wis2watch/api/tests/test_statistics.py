@@ -96,6 +96,131 @@ class AccessTests(StatisticsEndpointTestCase):
         self.assertEqual(self.client.get(reverse("nodes_api")).status_code, 200)
 
 
+class AllNodesEndpointTests(StatisticsEndpointTestCase):
+    """The region in one response, for the panel on the admin home.
+
+    The envelope is what is guarded here rather than the findings, which
+    ``core.tests.test_node_statistics`` covers against a seeded database. What
+    this can see and those cannot is the shape that crosses the wire: the
+    vocabularies the client words its cells from, and the link each row is
+    reached by. Both are Python's on purpose, and a field renamed on this side
+    is a panel that silently draws keys instead of words.
+    """
+
+    def url(self):
+        return reverse("nodes_statistics")
+
+    def region(self):
+        response = self.client.get(self.url())
+
+        self.assertEqual(response.status_code, 200)
+
+        return response.json()
+
+    def test_a_reader_who_is_not_signed_in_is_refused(self):
+        self.client.logout()
+
+        self.assertEqual(self.client.get(self.url()).status_code, 403)
+
+    def test_a_signed_in_account_with_no_admin_access_is_refused(self):
+        self.client.force_login(
+            get_user_model().objects.create_user("outsider", password="s3cret")
+        )
+
+        self.assertEqual(self.client.get(self.url()).status_code, 403)
+
+    def test_the_envelope_carries_the_frame_the_rows_are_read_against(self):
+        found = self.region()
+
+        self.assertEqual(
+            set(found),
+            {
+                "generated_at",
+                "stale_after_hours",
+                "window",
+                "hours",
+                "rows",
+                "vocabularies",
+            },
+        )
+        self.assertEqual(len(found["hours"]), 24)
+        self.assertEqual(found["window"]["key"], "24h")
+
+    def test_every_registered_centre_is_a_row(self):
+        WIS2Node.objects.create(centre_id="bj-meteobenin", name="Benin")
+
+        found = self.region()
+
+        self.assertEqual(
+            {row["centre_id"] for row in found["rows"]},
+            {"ke-meteo", "bj-meteobenin"},
+        )
+
+    def test_a_row_carries_keys_and_the_link_it_is_reached_by(self):
+        row = self.region()["rows"][0]
+
+        self.assertEqual(
+            set(row),
+            {
+                "node_id",
+                "centre_id",
+                "country_name",
+                "standing",
+                "last_seen_at",
+                "hours_quiet",
+                "messages_in_window",
+                "sparkline",
+                "origin_watch",
+                "cache_pickup",
+                "silence",
+                "detail_url",
+            },
+        )
+        # Reversed on this side rather than assembled in a bundle that is
+        # built ahead of time and committed, which is ADR-0001's rule for
+        # anything reversible and is no different for travelling in JSON.
+        self.assertEqual(
+            row["detail_url"], reverse("node_details", args=[self.kenya.pk])
+        )
+
+    def test_the_words_are_the_servers_and_travel_once(self):
+        vocabularies = self.region()["vocabularies"]
+
+        self.assertEqual(
+            set(vocabularies),
+            {"standing", "origin_watch", "cache_pickup", "silence"},
+        )
+        # Worst first, which is the order the rows arrive in and the order a
+        # filter control offers. A client that sorted these itself would be a
+        # second opinion about which standing is the concerning one.
+        self.assertEqual(
+            [entry["key"] for entry in vocabularies["standing"]],
+            [
+                "never_seen",
+                "stale",
+                "silent",
+                "not_cached",
+                "no_broker",
+                "archive_only",
+                "healthy",
+            ],
+        )
+        self.assertEqual(vocabularies["standing"][0]["label"], "Never heard from")
+
+    def test_every_standing_a_row_can_carry_is_in_the_vocabulary(self):
+        """A filter offering a standing no row has is fine; the reverse is not.
+
+        A row spelled in a word the envelope never sent is a cell the client
+        can only draw as a raw key, and a filter that cannot select it.
+        """
+        found = self.region()
+        offered = {entry["key"] for entry in found["vocabularies"]["standing"]}
+
+        self.assertLessEqual(
+            {row["standing"] for row in found["rows"]}, offered
+        )
+
+
 class SummaryResponseTests(StatisticsEndpointTestCase):
     """The shape the island binds to."""
 

@@ -7,6 +7,13 @@
  * place rather than a red that four components each chose for themselves and
  * slowly disagreed on.
  *
+ * The all-centres table on the admin homepage is the second island to read
+ * these, which is why the role blocks below name two roots. It draws the same
+ * sparkline against the same two standings, and a second island picking its
+ * own red is exactly the drift the file exists to stop. Only the *roles* are
+ * shared; the `.stat-*` rules below them are this tab's chart internals and
+ * stay scoped to it.
+ *
  * Panel chrome is deliberately not in here. A panel's border and its heading
  * are Wagtail's furniture, and the tab keeps the page's own ground rather
  * than laying a second one over it, so those read `--w-color-*` exactly as
@@ -34,7 +41,8 @@
  * people. Hence the same two selectors here.
  */
 
-.node-statistics {
+.node-statistics,
+.all-nodes {
     /* Axis furniture, from the surface scale the rest of the island is
        already painted with. */
     --stat-ink: var(--p-text-color);
@@ -105,7 +113,8 @@
    would collapse them, at the price of every role falling back to unset --
    charts with no colour at all -- on a browser that does not have it. The
    duplication is the cheaper failure. Keep the two lists identical. */
-.w-theme-dark .node-statistics {
+.w-theme-dark .node-statistics,
+.w-theme-dark .all-nodes {
     --stat-grid: var(--p-surface-600);
     --stat-live: var(--p-teal-400);
     --stat-on-live: var(--p-surface-900);
@@ -118,7 +127,8 @@
 }
 
 @media (prefers-color-scheme: dark) {
-    .w-theme-system .node-statistics {
+    .w-theme-system .node-statistics,
+    .w-theme-system .all-nodes {
         --stat-grid: var(--p-surface-600);
         --stat-live: var(--p-teal-400);
         --stat-on-live: var(--p-surface-900);

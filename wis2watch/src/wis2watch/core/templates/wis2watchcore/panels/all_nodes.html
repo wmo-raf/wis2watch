@@ -1,0 +1,45 @@
+{% load i18n vue_utils wagtailadmin_tags %}
+
+{% comment %}
+    The mount point for the all-centres island, the reports beside it, and
+    nothing else.
+
+    Under `panels/` because `wis2watchcore/node_overview.html` is the overview
+    *page*'s template. Two files of that name in one app is how somebody edits
+    the wrong one.
+
+    The bundle is loaded here rather than through the panel's `media`, which is
+    where Wagtail would otherwise put it: Django's `Media` renders a plain
+    `<script src>` and has no way to say `type="module" crossorigin`, which an
+    island entry has to be. A module script is deferred, so it runs after this
+    mount point has been parsed wherever the tag happens to sit.
+
+    The reports are rendered here rather than inside the island on purpose.
+    They are static links and they need no JavaScript, so they survive the
+    island failing -- which is precisely the moment a reader most needs the
+    report that says what is missing from the picture.
+{% endcomment %}
+
+{% panel id="node-overview" heading=_("Node overview") classname="w-panel--dashboard" %}
+    <div id="all-nodes" data-statistics-url="{{ statistics_url }}"></div>
+
+    <p class="all-nodes-reports">
+        <a href="{{ gap_reports_url }}">{% trans "Gap reports" %}</a>:
+        {% for report in gap_reports %}
+            <a href="{% url 'gap_report' report.slug %}">{{ report.title }}</a>{% if not forloop.last %} &middot; {% endif %}
+        {% endfor %}
+    </p>
+
+    <style>
+        .all-nodes-reports {
+            font-size: 0.8rem;
+            margin: 0.75rem 0 0;
+        }
+
+        .all-nodes-reports a {
+            margin-right: 0.15rem;
+        }
+    </style>
+{% endpanel %}
+
+<script type="module" crossorigin src="{% vue_bundle_url 'all-nodes' %}"></script>

@@ -20,7 +20,12 @@
 
 <script setup>
 /**
- * One station's last 24 hours, as a shape.
+ * One row's last 24 hours, as a shape.
+ *
+ * A station's on the statistics tab, a centre's on the admin homepage. It
+ * knows about neither: it is handed a dense vector, a name and an
+ * already-worded standing, which is what lets one drawing serve two
+ * vocabularies that have no value in common.
  *
  * **Shape, not volume.** The trace is normalised to this row's own peak, so
  * it says rhythm and recency and says nothing at all about how this station
@@ -50,21 +55,26 @@
  */
 import {computed} from 'vue'
 
-import {STANDING_LABEL} from './standings.js'
-
 const props = defineProps({
   /** The last 24 whole UTC hours of message volume, dense and oldest first. */
   values: {
     type: Array,
     required: true
   },
-  /** What to call the station in the label a screen reader is given. */
+  /** What to call this row in the label a screen reader is given. */
   name: {
     type: String,
     default: ''
   },
-  /** The station's standing, so the label says the same thing the row does. */
-  standing: {
+  /**
+   * The row's standing, already worded, so the label says what the row says.
+   *
+   * The wording rather than the key, because the two callers spell their
+   * standings from different vocabularies with no value in common -- and a
+   * component that looked one of them up would silently drop the standing
+   * out of the other's label rather than fail.
+   */
+  standingLabel: {
     type: String,
     default: ''
   },
@@ -83,10 +93,10 @@ const props = defineProps({
 
 const peak = computed(() => Math.max(0, ...props.values))
 
-// The world heard nothing from this station in 24 hours, whatever its
-// standing says. The two can disagree honestly: a station heard at its own
-// broker alone is transmitting and has still reached nobody, and this column
-// is the one that shows it.
+// The world heard nothing from this row's subject in 24 hours, whatever its
+// standing says. The two can disagree honestly: a station -- or a centre --
+// heard at its own broker alone is publishing and has still reached nobody,
+// and this column is the one that shows it.
 const silent = computed(() => peak.value === 0)
 
 const points = computed(() => {
@@ -107,13 +117,13 @@ const points = computed(() => {
 })
 
 const label = computed(() => {
-  const station = props.name || 'This station'
-  const standing = STANDING_LABEL[props.standing]
+  const subject = props.name || 'This row'
+  const standing = props.standingLabel
   const said = silent.value
       ? 'nothing was heard from it in the last 24 hours'
       : `at most ${peak.value.toLocaleString()} messages in an hour over the last 24 hours`
 
-  return standing ? `${station}, ${standing.toLowerCase()}: ${said}` : `${station}: ${said}`
+  return standing ? `${subject}, ${standing.toLowerCase()}: ${said}` : `${subject}: ${said}`
 })
 </script>
 
@@ -135,8 +145,8 @@ const label = computed(() => {
   stroke-width: 1.2;
 }
 
-/* Nothing reached the world from this station today. The same red the rest of
-   the tab calls silence, because a reader scanning the column is reading one
+/* Nothing reached the world from this row today. The same red the rest of the
+   tab calls silence, because a reader scanning the column is reading one
    colour vocabulary and not learning a second one here. */
 .spark__trace--silent {
   stroke: var(--stat-silent);

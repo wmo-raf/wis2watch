@@ -25,6 +25,12 @@ nothing has ever arrived from is the most concerning row in the table, not an
 absent one, so the query starts from the registry and hangs everything else
 off it.
 
+``NodeStanding`` folds those four judgements into one word, for the surfaces
+that want a column to sort by rather than four badges to read across. It lives
+here rather than beside the table that draws it because it reads nothing but
+the fields already on a row of this one -- which is also what lets it keep the
+promise below.
+
 Nothing here reads the time series. Last-seen is maintained on ingest and
 recent volume comes from the rollups, so the table costs a handful of indexed
 lookups rather than a scan that grows with the region's traffic.
@@ -91,6 +97,119 @@ class CachePickup:
     ]
 
     LABELS = dict(CHOICES)
+
+
+class NodeStanding:
+    """A centre's health as one word, so that a table has something to sort by.
+
+    The four judgements this is folded from -- staleness, silence, cache
+    pickup, and which of the centre's own transports is carrying it -- answer
+    different questions, and keeping them apart is what this whole tool is
+    built around. **This does not replace them.** It is a worst-of over them,
+    and every value names the judgement it came from, so the standing is never
+    a new fact about a centre: it is a pointer at the badge that already
+    carries one.
+
+    Folding them at all is for the reader who came to find out *which* centre
+    has a problem. Four independent badges sort four ways and answer that
+    question four times; a table needs one column to put the worst row at the
+    top.
+
+    ``OriginWatch``'s two ways of not answering get a rank each rather than
+    one between them. In principle they are one fault -- nothing outside can
+    dial this centre's broker -- and they were folded together until the
+    region was measured. Twenty-eight of thirty-two centres are watched at
+    their archive, so one shared standing put twenty centres publishing
+    perfectly well and being cached into the same undifferentiated block as
+    the two nothing watches at all, and a standing two thirds of a region
+    shares sorts nothing. So ``NO_BROKER`` is a centre nothing is watching,
+    ``ARCHIVE_ONLY`` is one answering over HTTP and not over the broker it is
+    obliged to run, and the second sorts below the first because being watched
+    somewhere is better than being watched nowhere.
+
+    Neither of them is ``HEALTHY``, which is the laundering ``OriginWatch``
+    refuses. The consequence is that a region whose centres have all fallen
+    back to their archives shows no healthy row at all -- which is not the
+    scale failing but the finding itself.
+
+    ``NOT_CACHED`` outranks ``NO_BROKER`` because an uncached centre has
+    announced data the world cannot retrieve from anywhere but the centre
+    itself, which is a failure reaching *users*. A centre with no dialable
+    broker is failing an obligation and costing this tool a vantage point,
+    and costs a data user nothing for as long as the Global Broker is
+    carrying it.
+
+    ``HEALTHY`` therefore means all four judgements are clear, which is a
+    higher bar than any one column reads: a centre publishing perfectly well
+    over a broker nobody can dial does not reach it.
+    """
+
+    NEVER_SEEN = "never_seen"
+    STALE = "stale"
+    SILENT = "silent"
+    NOT_CACHED = "not_cached"
+    NO_BROKER = "no_broker"
+    ARCHIVE_ONLY = "archive_only"
+    HEALTHY = "healthy"
+
+    #: In reading order: what has stopped, then what has slipped, then what is
+    #: not reaching the world, then what nothing is watching, then what is
+    #: answering only where it is not obliged to, then what is fine. A filter
+    #: control offers them in this order for the same reason the rows arrive
+    #: in it.
+    CHOICES = [
+        (NEVER_SEEN, _("Never heard from")),
+        (STALE, _("Gone quiet")),
+        (SILENT, _("Datasets overdue")),
+        (NOT_CACHED, _("Not reaching the caches")),
+        (NO_BROKER, _("Not watched")),
+        (ARCHIVE_ONLY, _("Archive only")),
+        (HEALTHY, _("Healthy")),
+    ]
+
+    LABELS = dict(CHOICES)
+
+    #: Where a standing sorts. Derived from ``CHOICES`` rather than written
+    #: out again, because two spellings of one order is one of them being
+    #: wrong later.
+    RANK = {standing: rank for rank, (standing, _label) in enumerate(CHOICES)}
+
+    @classmethod
+    def of(cls, row):
+        """What one centre's four judgements amount to.
+
+        Read in rank order and the first fault wins, which is what makes this
+        a worst-of rather than a summary. A centre nothing has ever been heard
+        from reads ``NEVER_SEEN`` and not ``NOT_CACHED``, even though it has
+        certainly cached nothing -- the later judgements are all downstream of
+        the earlier ones, and reporting a consequence in place of its cause is
+        how a reader ends up chasing the wrong thing.
+
+        Args:
+            row (NodeOverviewRow): the centre's row, already judged four ways.
+
+        Returns:
+            str: one of this class's standings.
+        """
+        if row.staleness == Staleness.NEVER_SEEN:
+            return cls.NEVER_SEEN
+
+        if row.staleness == Staleness.STALE:
+            return cls.STALE
+
+        if row.silence == Silence.SILENT:
+            return cls.SILENT
+
+        if row.cache_pickup == CachePickup.NOT_PICKED_UP:
+            return cls.NOT_CACHED
+
+        if row.origin_watch == OriginWatch.UNWATCHED:
+            return cls.NO_BROKER
+
+        if row.origin_watch == OriginWatch.AT_ARCHIVE:
+            return cls.ARCHIVE_ONLY
+
+        return cls.HEALTHY
 
 
 @dataclass(frozen=True)
