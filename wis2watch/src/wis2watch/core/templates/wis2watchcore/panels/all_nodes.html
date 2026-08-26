@@ -1,0 +1,67 @@
+{% load i18n vue_utils wagtailadmin_tags %}
+
+{% comment %}
+    The mount point for the all-centres island, the panel's header controls,
+    and nothing else.
+
+    Under `panels/` because `wis2watchcore/node_overview.html` is the overview
+    *page*'s template. Two files of that name in one app is how somebody edits
+    the wrong one.
+
+    The bundle is loaded here rather than through the panel's `media`, which is
+    where Wagtail would otherwise put it: Django's `Media` renders a plain
+    `<script src>` and has no way to say `type="module" crossorigin`, which an
+    island entry has to be. A module script is deferred, so it runs after this
+    mount point has been parsed wherever the tag happens to sit.
+
+    ## The header
+
+    Wagtail's own `header_controls` slot, rather than a strip of our own under
+    the table. Two things go in it, and they get there by different routes
+    because they are different kinds of thing.
+
+    The **gap reports** are static links and are rendered here, so they survive
+    the island failing entirely -- which is precisely the moment a reader most
+    needs the report that says what is missing from the picture. They are a
+    dropdown rather than the six links spelled out: the titles run to a
+    hundred and sixty characters, which beside a heading and a button wraps
+    the header onto a second line and makes the links the largest thing in it.
+    The names are one click away rather than on screen, which is a real loss
+    against "a report nobody arrives at reports nothing" -- but a labelled
+    control beside the heading is a stronger invitation than a strip below the
+    fold ever was.
+
+    The **refresh button** is the island's, because its state is: it spins
+    while a request is in flight and it is disabled for the duration. It
+    arrives by `<Teleport>` into the empty span below, which is why that span
+    exists at all. Wagtail only renders `w-panel__controls` when this fragment
+    is non-empty, so the dropdown above is also what guarantees the teleport
+    has somewhere to land.
+{% endcomment %}
+
+{% fragment as header_controls %}
+    {% dropdown toggle_icon="arrow-down" toggle_label=_("Gap reports") classname="w-inline-block" %}
+        {% for report in gap_reports %}
+            <a href="{% url 'gap_report' report.slug %}">{{ report.title }}</a>
+        {% endfor %}
+        {# The index carries a count per report, which the list above cannot. #}
+        <a href="{{ gap_reports_url }}">{% trans "All gap reports" %}</a>
+    {% enddropdown %}
+
+    {% comment %}
+        Where the island teleports its refresh button. Empty on purpose: if the
+        bundle never loads there is nothing to refresh, and an inert button
+        saying otherwise would be worse than no button.
+
+        A block comment rather than the brace-hash kind, which Django's lexer
+        only recognises on a single line -- spread one over three and it is not
+        a comment at all, and every word of it renders into the panel header.
+    {% endcomment %}
+    <span id="all-nodes-refresh"></span>
+{% endfragment %}
+
+{% panel id="node-overview" heading=_("Node overview") icon="list-ul" classname="w-panel--dashboard" header_controls=header_controls %}
+    <div id="all-nodes" data-statistics-url="{{ statistics_url }}"></div>
+{% endpanel %}
+
+<script type="module" crossorigin src="{% vue_bundle_url 'all-nodes' %}"></script>

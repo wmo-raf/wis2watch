@@ -4,6 +4,7 @@ from wagtail.admin.menu import MenuItem
 from wagtail.snippets.models import register_snippet
 
 from wis2watch.core.viewsets import DatasetViewSet, admin_viewsets
+from .panels import NodeOverviewPanel
 from .views import (
     gap_report_index,
     gap_report_table,
@@ -34,6 +35,37 @@ def hide_some_menus(request, menu_items):
     hidden_menus = ["explorer", "documents", "images", "help", "snippets", "reports"]
     
     menu_items[:] = [item for item in menu_items if item.name not in hidden_menus]
+
+
+#: Wagtail's own dashboard panels, all four of them about a page tree this
+#: tool's operators cannot reach from the menu. Removed for the same reason
+#: `construct_main_menu` already hides six menus and the summary items below
+#: strip three tiles: the CMS furniture is noise on a monitoring admin, and a
+#: health table with "Your locked pages" under it reads as one panel among
+#: equals rather than as the page.
+WAGTAIL_DASHBOARD_PANELS = (
+    "WorkflowObjectsToModeratePanel",
+    "UserObjectsInWorkflowModerationPanel",
+    "RecentEditsPanel",
+    "LockedPagesPanel",
+)
+
+
+@hooks.register('construct_homepage_panels')
+def construct_homepage_panels(request, panels):
+    """The region's health, and nothing that is not about the region.
+
+    One hook does both halves because they are one decision: what the admin
+    home is for. Adding the panel while leaving Wagtail's would have made the
+    thing somebody logs in to read the first of five, which is not what it is.
+    """
+    panels[:] = [
+        panel
+        for panel in panels
+        if panel.__class__.__name__ not in WAGTAIL_DASHBOARD_PANELS
+    ]
+
+    panels.append(NodeOverviewPanel())
 
 
 @hooks.register('construct_homepage_summary_items')

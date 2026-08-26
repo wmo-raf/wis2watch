@@ -253,7 +253,7 @@
             <Sparkline
                 :values="row.sparkline"
                 :name="displayName(row)"
-                :standing="row.standing"
+                :standing-label="label(row.standing)"
                 :height="SPARK_HEIGHT"
             />
           </td>

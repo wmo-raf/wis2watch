@@ -4,15 +4,21 @@ from time import perf_counter
 
 from django.http import Http404
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.status import HTTP_400_BAD_REQUEST
 
 from wis2watch.core.analysis import (
+    CachePickup,
+    NodeStanding,
+    OriginWatch,
+    Silence,
     UnknownStation,
     UnknownWindow,
     Window,
+    all_nodes_statistics,
     node_station_detail,
     node_station_statistics,
     node_statistics_summary,
@@ -54,6 +60,92 @@ def nodes_api(request):
         })
 
     return Response(nodes_list)
+
+
+#: The vocabularies a row's judgement fields are spelled in, keyed by the field
+#: each one belongs to. Handed over with the rows so that the words are
+#: Python's on every surface: the overview page renders these same labels
+#: through ``{% trans %}``, and a client spelling its own would be one tool
+#: describing one centre two ways.
+#:
+#: They travel once in the envelope rather than on every row -- the trick the
+#: station payload already uses for its bucket axis -- and keyed by the field
+#: name so a client can look a column's vocabulary up by the column it is
+#: drawing. Rows carry keys only.
+#:
+#: A vocabulary is in its own reading order, worst first, which is the order a
+#: filter control offers it in. All four classes already declare ``CHOICES``
+#: that way, so there is no second ordering here to fall out of step with the
+#: first.
+VOCABULARIES = {
+    "standing": NodeStanding,
+    "origin_watch": OriginWatch,
+    "cache_pickup": CachePickup,
+    "silence": Silence,
+}
+
+
+@api_view()
+@permission_classes(ADMIN_READER)
+def nodes_statistics_api(request):
+    """Every registered centre, and what each of them has been heard doing.
+
+    The region rather than one centre of it, for the panel that is read on
+    login to answer "is anything wrong". Every centre comes back and there is
+    no way to ask for fewer: the population is tens of rows, sorting and
+    filtering are the client's over rows it already holds, and a homepage
+    table that quietly showed a page of the region would be one whose "all
+    clear" meant nothing.
+
+    No window parameter, unlike every other endpoint on this tab. What comes
+    back is the fixed last 24 whole hours, because the question this answers
+    is about now -- and a control that has to be set before the answer means
+    anything belongs on the page a reader opened on purpose.
+
+    Args:
+        request: HTTP request object.
+
+    Returns:
+        Response: the rows, the axis they are read against, and the
+        vocabularies they are spelled in.
+    """
+    started = perf_counter()
+    answered = all_nodes_statistics()
+    elapsed = perf_counter() - started
+
+    # Logged from the first day for the reason the per-node endpoints are:
+    # nothing here has been measured against a production-sized region, and
+    # this one runs on every login rather than when somebody opens a page.
+    logger.debug(
+        "statistics all-nodes rows=%s took=%.3fs", len(answered.rows), elapsed
+    )
+
+    payload = asdict(answered)
+
+    return Response(
+        {
+            **payload,
+            # Reversed here rather than composed in the bundle. The island is
+            # built ahead of time and committed, so a path assembled inside it
+            # is a path nobody can rename from the Django side -- the rule
+            # ADR-0001 settled for the props an island is handed, and a row's
+            # own link is no different for travelling in JSON.
+            "rows": [
+                {
+                    **row,
+                    "detail_url": reverse("node_details", args=[row["node_id"]]),
+                }
+                for row in payload["rows"]
+            ],
+            "vocabularies": {
+                field: [
+                    {"key": key, "label": str(label)}
+                    for key, label in vocabulary.CHOICES
+                ]
+                for field, vocabulary in VOCABULARIES.items()
+            },
+        }
+    )
 
 
 @api_view()

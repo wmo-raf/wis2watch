@@ -5,10 +5,15 @@ from .views import (
     node_statistics_stations_api,
     node_statistics_summary_api,
     nodes_api,
+    nodes_statistics_api,
 )
 
 urlpatterns = [
     path("nodes/", nodes_api, name="nodes_api"),
+    # The region, above the per-centre questions rather than beside them: it
+    # is the same tab's vocabulary asked of every centre at once, and a path
+    # of its own alongside `nodes/<id>/...` would read as a second subject.
+    path("nodes/statistics/", nodes_statistics_api, name="nodes_statistics"),
     # Nested under the node, and split by the shape of what comes back rather
     # than by the widget that draws it: everything series-shaped is one
     # request, the station rows are another, and one station in full is a
