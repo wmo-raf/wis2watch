@@ -1,57 +1,17 @@
 {% extends "wagtailadmin/generic/base.html" %}
 
-{% load i18n vue_utils wagtailadmin_tags %}
+{% load i18n %}
 
 {% comment %}
-    The mount point for the all-centres island in its detailed view, and
-    nothing else.
+    The overview page's mount of the all-centres table: the detailed view,
+    which asks what is wrong rather than whether anything is.
 
-    The same bundle the homepage panel mounts, and the same endpoint. The only
-    thing this page declares is which question it is asking: `data-view` picks
-    the column set and which of the two verdicts every row carries goes in the
-    status slot. The payload is identical either way, so the two tables can
-    never disagree about a centre -- they were computed in one pass, from one
-    set of rows.
-
-    The reports are rendered here rather than inside the island, so they
-    survive it failing entirely -- which is precisely the moment a reader most
-    needs the report that says what is missing from the picture.
+    The same panel the admin home renders, from the same include, so the two
+    surfaces are one thing seen twice rather than two things kept in step by
+    hand. The only difference this template states is the view.
 {% endcomment %}
 
-{% block extra_css %}
-    {{ block.super }}
-    <style>
-        /* Held open so the page does not jump between the server's render and
-           the island's first paint. */
-        #all-nodes {
-            min-height: 20rem;
-        }
-
-        .all-nodes-reports {
-            font-size: 0.85rem;
-            margin: 0 0 1.25rem;
-        }
-
-        .all-nodes-reports a {
-            margin-right: 0.15rem;
-        }
-    </style>
-{% endblock %}
-
 {% block main_content %}
-    <p class="all-nodes-reports">
-        <a href="{{ gap_reports_url }}">{% trans "Gap reports" %}</a>:
-        {% for report in gap_reports %}
-            <a href="{% url 'gap_report' report.slug %}">{{ report.title }}</a>{% if not forloop.last %} &middot; {% endif %}
-        {% endfor %}
-    </p>
-
-    <div id="all-nodes"
-         data-statistics-url="{{ statistics_url }}"
-         data-view="detail"></div>
-{% endblock %}
-
-{% block extra_js %}
-    {{ block.super }}
-    <script type="module" crossorigin src="{% vue_bundle_url 'all-nodes' %}"></script>
+    {% trans "Node overview" as heading %}
+    {% include "wis2watchcore/includes/all_nodes_panel.html" with panel_id="node-overview" heading=heading view="detail" %}
 {% endblock %}
