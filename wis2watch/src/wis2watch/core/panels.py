@@ -12,13 +12,23 @@ from wagtail.admin.ui.components import Component
 from .analysis import GAP_REPORTS
 
 
-class NodeOverviewPanel(Component):
-    """Every centre of the region, worst first, above everything else.
+class TransmissionStatusPanel(Component):
+    """Whether each centre's data is flowing, worst first, above everything else.
 
     The reason somebody logs in. It sits at the top because a health table
     below four panels about a page tree is a health table nobody scrolls to,
-    and because the question it answers -- is anything wrong right now -- is
-    the one the reader already has in their head when the page paints.
+    and because the question it answers is the one the reader already has in
+    their head when the page paints.
+
+    **One question, and only one.** Whether a centre's own broker answers, and
+    whether the Global Caches carried what it published, are both true and
+    neither is what this panel is for: the first is how the tool is watching
+    the centre, the second is what happened downstream after it published.
+    Folding them in put twenty-one of thirty-two centres under "Archive only"
+    and left exactly one row reading healthy -- on a panel whose job is to say
+    whether data is flowing. It draws ``TransmissionStanding`` instead, and the
+    plumbing is on the overview page, which is the page somebody opens to ask
+    what is wrong rather than whether anything is.
 
     **A mount point and nothing else.** The rows arrive from
     ``/api/nodes/statistics/`` after the page has rendered, so a login never

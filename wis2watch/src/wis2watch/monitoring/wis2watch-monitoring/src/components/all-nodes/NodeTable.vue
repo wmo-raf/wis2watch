@@ -1,5 +1,5 @@
 <template>
-  <div class="nodes">
+  <div class="nodes" :class="`nodes--${view}`">
     <!-- A fresh install before the first catalogue sync. Its own sentence
          rather than the population line's, and the controls are not drawn at
          all: there is nothing to filter, and two empty fields over an empty
@@ -22,7 +22,13 @@
           >
         </label>
 
-        <label class="nodes__field">
+        <!-- Offered on the detailed page and not on the glance, because on
+             the glance the default sort already does its job: worst first puts
+             every centre that is not transmitting in the first rows, and a
+             control that repeats the ordering is chrome earning nothing.
+             Search stays on both, because it answers the one thing sorting
+             cannot -- how is *this* centre, right now. -->
+        <label v-if="filterable" class="nodes__field">
           <span class="nodes__field-label">Standing</span>
           <select v-model="standing" class="nodes__input nodes__input--standing">
             <option value="">All standings</option>
@@ -63,13 +69,13 @@
       <div v-if="shown.length" class="nodes__scroll">
         <table class="nodes__table">
           <colgroup>
-            <col v-for="column in COLUMNS" :key="column.key" :style="{width: column.width}">
+            <col v-for="column in columns" :key="column.key" :style="{width: column.width}">
           </colgroup>
 
           <thead>
           <tr>
             <th
-                v-for="column in COLUMNS"
+                v-for="column in columns"
                 :key="column.key"
                 scope="col"
                 :class="[`nodes__cell--${column.align || 'text'}`]"
@@ -92,38 +98,73 @@
 
           <tbody>
           <tr v-for="row in shown" :key="row.node_id">
-            <td class="nodes__cell--text">
+            <td
+                v-for="column in columns"
+                :key="column.key"
+                :class="[`nodes__cell--${column.align || 'text'}`]"
+            >
               <!-- The code is the handle, and it leads to the centre's own
-                   diagnostic page -- the same landing the overview table has
-                   always used, so the two send a reader to one place. The whole
-                   row is deliberately not a link: this table has sortable heads
-                   and two controls directly above it, and a full-row hit target
-                   on a surface people are fiddling with is how a reader leaves
-                   the homepage by accident. -->
-              <a :href="row.detail_url" class="nodes__centre">
+                   statistics tab, which is where going back in time lives --
+                   24 hours to ninety days. That is the question both tables
+                   leave a reader with: this centre looks wrong today, what has
+                   it been doing? The whole row is deliberately not a link: this
+                   table has sortable heads and controls directly above it, and
+                   a full-row hit target on a surface people are fiddling with
+                   is how a reader leaves the page by accident. -->
+              <a v-if="column.key === 'centre_id'" :href="row.node_url" class="nodes__centre">
                 <code>{{ row.centre_id }}</code>
               </a>
-            </td>
-            <td class="nodes__cell--text">{{ row.country_name || '—' }}</td>
-            <td class="nodes__cell--text">
-              <span class="nodes__standing" :class="`nodes__standing--${row.standing}`">
-                {{ word('standing', row.standing) }}
+
+              <span v-else-if="column.key === 'country_name'">
+                {{ row.country_name || '—' }}
               </span>
-            </td>
-            <td class="nodes__cell--text">{{ formatInstant(row.last_seen_at) }}</td>
-            <td class="nodes__cell--number">{{ formatQuiet(row.hours_quiet) }}</td>
-            <td class="nodes__cell--number">{{ formatCount(row.messages_in_window) }}</td>
-            <td>
+
+              <!-- Whichever verdict this view draws, marked the same way. -->
+              <span
+                  v-else-if="column.key === verdict"
+                  class="nodes__standing"
+                  :class="`nodes__standing--${row[verdict]}`"
+              >
+                {{ word(verdict, row[verdict]) }}
+              </span>
+
+              <span v-else-if="column.key === 'last_seen_at'">
+                {{ formatInstant(row.last_seen_at) }}
+              </span>
+
+              <span v-else-if="column.key === 'hours_quiet'">
+                {{ formatQuiet(row.hours_quiet) }}
+              </span>
+
+              <span v-else-if="column.key === 'messages_in_window'">
+                {{ formatCount(row.messages_in_window) }}
+              </span>
+
               <Sparkline
+                  v-else-if="column.key === 'sparkline'"
                   :values="row.sparkline"
                   :name="row.centre_id"
-                  :standing-label="word('standing', row.standing)"
+                  :standing-label="word(verdict, row[verdict])"
                   :height="SPARK_HEIGHT"
               />
-            </td>
-            <td v-for="field in BADGES" :key="field" class="nodes__cell--text">
-              <span class="nodes__badge" :class="{'nodes__badge--worst': isWorst(field, row[field])}">
-                {{ word(field, row[field]) }}
+
+              <span v-else-if="COUNTS.includes(column.key)">
+                {{ formatCount(row[column.key]) }}
+              </span>
+
+              <!-- The badges, with what the overview page used to say under
+                   them carried as a tooltip instead of as a second and third
+                   line. Rows that deep destroy the reading down a column that
+                   a worst-first table exists for -- and the broker's error
+                   arrives here whole, where that page cut it at sixty
+                   characters. -->
+              <span
+                  v-else
+                  class="nodes__badge"
+                  :class="{'nodes__badge--worst': isWorst(column.key, row[column.key])}"
+                  :title="badgeTitle(row, column.key, labels) || null"
+              >
+                {{ word(column.key, row[column.key]) }}
               </span>
             </td>
           </tr>
@@ -167,7 +208,7 @@
  * the payload carried; nothing here spells a standing. That is what keeps this
  * table and the overview page describing one centre in one vocabulary.
  */
-import {computed, ref} from 'vue'
+import {computed, ref, watch} from 'vue'
 
 import Sparkline from '@/components/node-statistics/Sparkline.vue'
 // The three formatters the station rows are drawn with, borrowed rather than
@@ -177,9 +218,14 @@ import Sparkline from '@/components/node-statistics/Sparkline.vue'
 // format module is ever extracted, both callers move together.
 import {formatCount, formatInstant, formatQuiet} from
     '@/components/node-statistics/charts/plot.js'
+// The address bar, borrowed from the statistics tab rather than rewritten --
+// its own docstring says it exists so that two components syncing state do not
+// each invent a way to do it, and one of them start pushing history entries.
+import {readParam, writeParams} from '@/components/node-statistics/querystring.js'
 
 import {
-    COLUMNS,
+    badgeTitle,
+    columnsFor,
     labelsFrom,
     matches,
     narrowing,
@@ -187,6 +233,7 @@ import {
     population,
     ranksFrom,
     sortRows,
+    verdictFor,
 } from './rows.js'
 
 const props = defineProps({
@@ -200,28 +247,72 @@ const props = defineProps({
     type: Object,
     required: true
   },
+  /**
+   * Which table this is: `glance` or `detail`.
+   *
+   * It decides three things together, which is why it is one name and not
+   * three flags: which columns are drawn, which of the two verdicts goes in
+   * the status slot, and whether the standing filter is offered at all.
+   */
+  view: {
+    type: String,
+    default: 'glance'
+  },
 })
 
 //: How tall a sparkline is drawn, in real pixels. Handed to the component
 //: rather than chosen by it, because the row height is this table's decision.
 const SPARK_HEIGHT = 20
 
-//: The three judgements that ride beside the standing as its evidence, in the
-//: order they are drawn. Named once because the header, the cells and the
-//: colouring rule all walk the same list.
-const BADGES = ['origin_watch', 'cache_pickup', 'silence']
+//: The columns that are plain numbers about how big a centre is rather than
+//: how well it is. Drawn on the detailed page only.
+const COUNTS = ['dataset_count', 'station_count']
 
-const search = ref('')
-const standing = ref('')
-const sort = ref('')
-const direction = ref('asc')
+//: Whether this table's state belongs in the address bar.
+//:
+//: The detailed page's is: "look at these centres" is a link worth sending,
+//: and the page it replaces had shareable `?staleness=` links. The glance
+//: panel's is not -- it lives on the admin home, and a homepage that
+//: accumulated `?q=` on every keystroke is a homepage nobody can bookmark.
+const linkable = props.view === 'detail'
+
+const search = ref(linkable ? readParam('q') : '')
+const standing = ref(linkable ? readParam('standing') : '')
+const sort = ref(linkable ? readParam('sort') : '')
+const direction = ref(linkable ? readParam('dir') || 'asc' : 'asc')
+
+// Deliberately no reading of the page's old `?staleness=` and `?order=`. Two
+// of the three staleness values map onto a standing and the third does not --
+// "active" spans five of the seven -- and a mapping that silently drops a
+// third of its inputs is worse than none. Nothing in the codebase ever linked
+// here with parameters; only a reader's own copied link could carry them.
+if (linkable) {
+  watch([search, standing, sort, direction], () => {
+    writeParams({
+      q: search.value,
+      standing: standing.value,
+      sort: sort.value,
+      // Only where there is a column to be a direction of. `?dir=asc` on its
+      // own is a key a reader is asked to interpret and that means nothing.
+      dir: sort.value ? direction.value : '',
+    })
+  })
+}
 
 const ranks = computed(() => ranksFrom(props.vocabularies))
 const labels = computed(() => labelsFrom(props.vocabularies))
 
+//: The columns this view draws, and which verdict sits in its status slot.
+const columns = computed(() => columnsFor(props.view))
+const verdict = computed(() => verdictFor(props.view))
+
+//: Whether the standing filter is offered. The glance table does without it:
+//: worst first already puts everything that is not transmitting at the top.
+const filterable = computed(() => props.view === 'detail')
+
 //: The standings a filter can be set to, in the server's own order, so the
 //: control offers them worst first exactly as the rows arrive.
-const standings = computed(() => props.vocabularies.standing || [])
+const standings = computed(() => props.vocabularies[verdict.value] || [])
 
 const filtering = computed(() =>
     narrowing({search: search.value, standing: standing.value})
@@ -229,7 +320,7 @@ const filtering = computed(() =>
 
 const matching = computed(() =>
     props.rows.filter((row) =>
-        matches(row, {search: search.value, standing: standing.value})
+        matches(row, {search: search.value, standing: standing.value}, verdict.value)
     )
 )
 
@@ -397,6 +488,16 @@ function arrow(key) {
   overflow: auto;
   margin-inline: calc(var(--nodes-gutter) * -1);
   border-block: 1px solid var(--w-color-border-furniture);
+}
+
+/* A page has no reason to clip. The panel bounds itself because it is a panel
+   on a homepage and a region of forty centres drawn at full height would be
+   the whole page; here the region *is* the page, and a reader who came looking
+   for the twenty-ninth centre should not have to find it through a scrollbar
+   inside a scrollbar. The columns still scroll sideways -- twelve of them do
+   not fit a laptop -- so the rule above stays for that axis. */
+.nodes--detail .nodes__scroll {
+  max-height: none;
 }
 
 .nodes__table {

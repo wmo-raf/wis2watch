@@ -47,7 +47,7 @@ from django.db.models import Sum
 from django.utils import timezone as dj_timezone
 
 from ...models import HourlyRollup, MessageSource
-from ..overview import NodeStanding, node_overview
+from ..overview import NodeStanding, TransmissionStanding, node_overview
 from ..silence import BEFORE_ANYTHING
 from ..staleness import default_stale_after_hours
 from ..windows import Grain, Window
@@ -69,23 +69,36 @@ class NodeStatisticsRow:
     these say which way it is broken, which is the distinction this whole tool
     is built around and the one a folded word would have destroyed.
 
-    ``name``, the dataset and station counts, the silence sub-counts and the
-    origin broker's last error are deliberately absent, though the overview row
-    this is built from carries all of them. The first three are size rather
-    than health, and on a surface read to find a fault every column that is not
-    one competes with a column that is; the last two are two and three lines
-    tall, which destroys the reading down a column that the shape and the
-    standing exist for. They are all still on the centre's own page, one click
-    from the code in the first cell.
+    **Two verdicts, because two surfaces ask different questions.**
+    ``transmission`` says whether data is flowing and is folded from staleness
+    and silence alone; ``standing`` says whether anything at all is wrong and
+    folds the plumbing in too. Both travel on every row rather than either
+    being asked for, so one request serves both tables and neither can be
+    computed from rows the other never saw. Each table draws the one it is for
+    and ignores the other.
 
-    There is no staleness field because the standing already is one: its top
-    two ranks are ``Staleness``'s two faults, and a second spelling of one
+    ``name`` stays absent -- the overview page has always shown the centre code
+    and the country instead, and a third way of naming a centre is a third
+    thing to sort by.
+
+    The rest of what the detailed page needs rides here even though the glance
+    table never draws it: the dataset and station counts, the silence
+    sub-counts, and what the centre's own broker last reported along with its
+    error. They cost nothing to carry -- every one is already on the overview
+    row this is built from -- and the alternative is a second endpoint whose
+    only difference is which fields it dropped.
+
+    There is no staleness field because both verdicts already carry it: their
+    top two ranks are ``Staleness``'s two faults, and a second spelling of one
     judgement is a second thing to disagree.
     """
 
     node_id: int
     centre_id: str
     country_name: str
+    #: Whether data is flowing, for the glance table.
+    transmission: str
+    #: Whether anything at all is wrong, for the detailed table.
     standing: str
     last_seen_at: datetime | None
     hours_quiet: float | None
@@ -100,6 +113,19 @@ class NodeStatisticsRow:
     origin_watch: str
     cache_pickup: str
     silence: str
+    #: How big the centre is, rather than how well it is. Drawn on the detailed
+    #: page only: on a surface read to find a fault, a column that is not one
+    #: competes with a column that is.
+    dataset_count: int
+    station_count: int
+    #: What the badges say under themselves on the detailed page, carried as
+    #: figures rather than as sentences so the client words them once. The
+    #: error is whole here; the page it replaces truncated it to sixty
+    #: characters and put the rest in a tooltip.
+    origin_broker_reachability: str
+    origin_last_error: str
+    silent_dataset_count: int
+    judged_dataset_count: int
 
 
 @dataclass(frozen=True)
@@ -164,6 +190,7 @@ def _row(row, *, sparkline):
         node_id=row.node_id,
         centre_id=row.centre_id,
         country_name=row.country_name,
+        transmission=TransmissionStanding.of(row),
         standing=NodeStanding.of(row),
         last_seen_at=row.last_seen_at,
         # Renamed from the overview's ``hours_since_last_seen`` on the way
@@ -175,6 +202,12 @@ def _row(row, *, sparkline):
         origin_watch=row.origin_watch,
         cache_pickup=row.cache_pickup,
         silence=row.silence,
+        dataset_count=row.dataset_count,
+        station_count=row.station_count,
+        origin_broker_reachability=row.origin_broker_reachability,
+        origin_last_error=row.origin_last_error,
+        silent_dataset_count=row.silent_dataset_count,
+        judged_dataset_count=row.judged_dataset_count,
     )
 
 
@@ -226,6 +259,23 @@ def _ordered(rows):
     return sorted(
         rows,
         key=lambda row: (
+            # The *full* standing decides the order both tables arrive in, and
+            # one order serves both because the transmission verdict is a
+            # coarsening of this one rather than a rival to it: ranks nought,
+            # one and two are the same three faults under the same three names,
+            # and `transmitting` is exactly the four ranks below them. Sorting
+            # by this therefore sorts by that as well, and the glance table's
+            # top rows are the same rows whichever verdict a reader is looking
+            # at.
+            #
+            # The accepted consequence is at the *bottom* of the glance table,
+            # where every row says "Transmitting" and their order is decided by
+            # plumbing that table does not draw -- uncached before unwatched
+            # before archive-only before well. Invisible, but not arbitrary,
+            # and every row in that block is one nobody has to act on. Ordering
+            # them by how long they had been quiet would be explicable from the
+            # Quiet column, at the price of the detailed page losing "worst
+            # first" among the rows it exists to rank.
             NodeStanding.RANK.get(row.standing, len(NodeStanding.RANK)),
             row.last_seen_at is not None,
             row.last_seen_at or BEFORE_ANYTHING,

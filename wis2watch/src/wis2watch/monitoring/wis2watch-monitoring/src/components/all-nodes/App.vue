@@ -12,23 +12,18 @@
          "Try again" of its own: the two are one action at two moments -- this
          is the standing control a reader reaches for on seeing the stamp is
          old, that one appears where their eye already is when it broke. -->
-    <Teleport to="#all-nodes-refresh">
-      <button
-          type="button"
-          class="button button--icon text-replace all-nodes__refresh"
-          :aria-label="inFlight ? 'Refreshing' : 'Refresh'"
-          :disabled="inFlight"
-          @click="load"
-      >
-        <svg
-            class="icon"
-            :class="inFlight ? 'icon-spinner' : 'icon-rotate'"
-            aria-hidden="true"
-        >
-          <use :href="inFlight ? '#icon-spinner' : '#icon-rotate'"/>
-        </svg>
-      </button>
+    <Teleport v-if="headerSlot" to="#all-nodes-refresh">
+      <RefreshButton :in-flight="inFlight" @refresh="load"/>
     </Teleport>
+
+    <!-- Where there is no panel header to teleport into -- the overview page,
+         which is a page rather than a panel -- the same button renders where it
+         stands. Guarded by `v-if` rather than Teleport's own `disabled`,
+         because a Teleport whose target is missing does not merely warn: it
+         throws while patching, and the island renders nothing at all. -->
+    <p v-else class="all-nodes__actions">
+      <RefreshButton :in-flight="inFlight" @refresh="load"/>
+    </p>
 
     <p v-if="loading" class="all-nodes__note" role="status">
       Reading the region…
@@ -48,7 +43,11 @@
     </Message>
 
     <template v-else>
-      <NodeTable :rows="payload.rows" :vocabularies="payload.vocabularies"/>
+      <NodeTable
+          :rows="payload.rows"
+          :vocabularies="payload.vocabularies"
+          :view="view"
+      />
 
       <!-- How old this is. The button that acts on it is in the header; this
            stays here because it is not an action -- it is a fact about the
@@ -88,6 +87,7 @@ import {computed, onMounted, ref} from 'vue'
 import Message from 'primevue/message'
 
 import NodeTable from './NodeTable.vue'
+import RefreshButton from './RefreshButton.vue'
 import {formatInstant} from '@/components/node-statistics/charts/plot.js'
 
 // The colour roles the sparkline is drawn from. Shared with the statistics
@@ -101,12 +101,31 @@ const props = defineProps({
     type: String,
     required: true
   },
+  /**
+   * Which table this mount is: `glance` or `detail`.
+   *
+   * One bundle serves both surfaces. The payload is identical -- every row
+   * carries both verdicts and every field either table draws -- so the only
+   * thing a mount point declares is which question it is asking.
+   */
+  view: {
+    type: String,
+    default: 'glance'
+  },
 })
 
 //: The endpoint answers JSON and nothing else, and asking for it by name is
 //: what keeps DRF's browsable HTML out of a fetch that would then fail to
 //: parse.
 const JSON_ONLY = {headers: {'Accept': 'application/json'}}
+
+//: Whether this mount has a panel header to put its refresh button in.
+//:
+//: Read once, synchronously, before the first render: the entry is a deferred
+//: module script, so the document is already parsed by the time this runs. A
+//: `<Teleport>` whose target is missing throws during patching rather than
+//: degrading, so this is asked before one is rendered at all rather than after.
+const headerSlot = Boolean(document.querySelector('#all-nodes-refresh'))
 
 const payload = ref(null)
 const loading = ref(true)
@@ -179,6 +198,12 @@ onMounted(load)
 
 .all-nodes__error {
   margin: 0 0 0.35rem;
+}
+
+.all-nodes__actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 0.5rem;
 }
 
 .all-nodes__stamp {

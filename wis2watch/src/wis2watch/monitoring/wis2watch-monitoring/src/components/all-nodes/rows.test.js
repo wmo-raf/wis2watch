@@ -2,6 +2,9 @@ import {describe, expect, it} from 'vitest'
 
 import {
     COLUMN_BY_KEY,
+    VIEWS,
+    badgeTitle,
+    columnsFor,
     labelsFrom,
     matches,
     narrowing,
@@ -9,6 +12,7 @@ import {
     population,
     ranksFrom,
     sortRows,
+    verdictFor,
 } from './rows.js'
 
 //: The payload's vocabularies, shortened to what these tests read. Worst
@@ -22,6 +26,18 @@ const VOCABULARIES = {
         {key: 'no_broker', label: 'Not watched'},
         {key: 'archive_only', label: 'Archive only'},
         {key: 'healthy', label: 'Healthy'},
+    ],
+    transmission: [
+        {key: 'never_seen', label: 'Never heard from'},
+        {key: 'stale', label: 'Gone quiet'},
+        {key: 'silent', label: 'Datasets overdue'},
+        {key: 'transmitting', label: 'Transmitting'},
+    ],
+    origin_broker_reachability: [
+        {key: 'unreachable', label: 'Not reachable'},
+        {key: 'not_attempted', label: 'Not attempted yet'},
+        {key: 'not_advertised', label: 'No broker advertised'},
+        {key: 'reachable', label: 'Reachable'},
     ],
     silence: [
         {key: 'silent', label: 'Silent'},
@@ -250,5 +266,103 @@ describe('the vocabularies the payload carries', () => {
     it('copes with a payload that carried none', () => {
         expect(ranksFrom(undefined)).toEqual({})
         expect(labelsFrom(undefined)).toEqual({})
+    })
+})
+
+
+/*
+ * Two tables from one component. The glance asks whether data is flowing, the
+ * detailed page asks what is wrong, and the same slot holds a different
+ * verdict on each. A view that drew the wrong verdict, or filtered by the
+ * column it was not drawing, would hide rows for a reason nobody could see --
+ * and would do it without throwing.
+ */
+describe('which table this is', () => {
+    it('draws the transmission verdict on the glance and the standing on the detail', () => {
+        expect(columnsFor('glance').map((c) => c.key)).toContain('transmission')
+        expect(columnsFor('glance').map((c) => c.key)).not.toContain('standing')
+
+        expect(columnsFor('detail').map((c) => c.key)).toContain('standing')
+        expect(columnsFor('detail').map((c) => c.key)).not.toContain('transmission')
+    })
+
+    it('keeps the plumbing off the glance entirely', () => {
+        const glance = columnsFor('glance').map((c) => c.key)
+
+        for (const plumbing of ['origin_watch', 'cache_pickup', 'silence']) {
+            expect(glance).not.toContain(plumbing)
+        }
+    })
+
+    it('filters by whichever verdict its table draws', () => {
+        expect(verdictFor('glance')).toBe('transmission')
+        expect(verdictFor('detail')).toBe('standing')
+
+        const centre = {
+            centre_id: 'ma-marocmeteo',
+            country_name: 'Morocco',
+            transmission: 'transmitting',
+            standing: 'archive_only',
+        }
+
+        // One row, two verdicts: each filter narrows by its own and never by
+        // the column its table is not showing.
+        expect(matches(centre, {standing: 'transmitting'}, 'transmission')).toBe(true)
+        expect(matches(centre, {standing: 'archive_only'}, 'standing')).toBe(true)
+        expect(matches(centre, {standing: 'archive_only'}, 'transmission')).toBe(false)
+    })
+
+    it('names every column it asks for', () => {
+        // A key in a view that no column defines renders as an undefined
+        // column and nothing throws -- the table just loses a column quietly.
+        for (const [view, keys] of Object.entries(VIEWS)) {
+            expect(columnsFor(view).filter(Boolean)).toHaveLength(keys.length)
+        }
+    })
+
+    it('falls back to the smaller table for a view nobody recognises', () => {
+        expect(columnsFor('mistyped').map((c) => c.key))
+            .toEqual(columnsFor('glance').map((c) => c.key))
+    })
+})
+
+describe('what a badge says under itself', () => {
+    const LABELS = labelsFrom(VOCABULARIES)
+
+    it('gives the origin badge what the broker last reported, and the error whole', () => {
+        const row = centre({
+            origin_broker_reachability: 'unreachable',
+            origin_last_error: 'Connection timed out after 30 seconds of waiting',
+        })
+
+        expect(badgeTitle(row, 'origin_watch', LABELS)).toBe(
+            'Broker: Not reachable \u2014 Connection timed out after 30 seconds of waiting'
+        )
+    })
+
+    it('says only the reachability where there is no error to add', () => {
+        const row = centre({
+            origin_broker_reachability: 'not_advertised',
+            origin_last_error: '',
+        })
+
+        expect(badgeTitle(row, 'origin_watch', LABELS)).toBe(
+            'Broker: No broker advertised'
+        )
+    })
+
+    it('counts the overdue datasets on the silence badge', () => {
+        const row = centre({silent_dataset_count: 3, judged_dataset_count: 12})
+
+        expect(badgeTitle(row, 'silence', LABELS)).toBe('3 of 12 datasets overdue')
+    })
+
+    it('says nothing where a centre has no dataset that could be judged', () => {
+        // Which the caller renders as no tooltip at all rather than an empty
+        // one -- an empty tooltip is a cursor change promising information.
+        const row = centre({silent_dataset_count: 0, judged_dataset_count: 0})
+
+        expect(badgeTitle(row, 'silence', LABELS)).toBe('')
+        expect(badgeTitle(row, 'cache_pickup', LABELS)).toBe('')
     })
 })

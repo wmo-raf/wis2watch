@@ -4,7 +4,7 @@ from wagtail.admin.menu import MenuItem
 from wagtail.snippets.models import register_snippet
 
 from wis2watch.core.viewsets import DatasetViewSet, admin_viewsets
-from .panels import NodeOverviewPanel
+from .panels import TransmissionStatusPanel
 from .views import (
     gap_report_index,
     gap_report_table,
@@ -65,7 +65,7 @@ def construct_homepage_panels(request, panels):
         if panel.__class__.__name__ not in WAGTAIL_DASHBOARD_PANELS
     ]
 
-    panels.append(NodeOverviewPanel())
+    panels.append(TransmissionStatusPanel())
 
 
 @hooks.register('construct_homepage_summary_items')

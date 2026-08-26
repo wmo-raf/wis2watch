@@ -122,8 +122,10 @@
     <span id="all-nodes-refresh"></span>
 {% endfragment %}
 
-{% panel id="node-overview" heading=_("Node overview") icon="list-ul" classname="w-panel--dashboard" header_controls=header_controls %}
-    <div id="all-nodes" data-statistics-url="{{ statistics_url }}"></div>
+{% panel id="node-overview" heading=_("Transmission status") icon="list-ul" classname="w-panel--dashboard" header_controls=header_controls %}
+    <div id="all-nodes"
+         data-statistics-url="{{ statistics_url }}"
+         data-view="glance"></div>
 {% endpanel %}
 
 <script type="module" crossorigin src="{% vue_bundle_url 'all-nodes' %}"></script>
