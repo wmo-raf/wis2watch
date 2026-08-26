@@ -12,6 +12,7 @@ import {
     population,
     ranksFrom,
     sortRows,
+    subline,
     verdictFor,
 } from './rows.js'
 
@@ -21,7 +22,7 @@ const VOCABULARIES = {
     standing: [
         {key: 'never_seen', label: 'Never heard from'},
         {key: 'stale', label: 'Gone quiet'},
-        {key: 'silent', label: 'Datasets overdue'},
+        {key: 'silent', label: 'Behind schedule'},
         {key: 'not_cached', label: 'Not reaching the caches'},
         {key: 'no_broker', label: 'Not watched'},
         {key: 'archive_only', label: 'Archive only'},
@@ -30,7 +31,7 @@ const VOCABULARIES = {
     transmission: [
         {key: 'never_seen', label: 'Never heard from'},
         {key: 'stale', label: 'Gone quiet'},
-        {key: 'silent', label: 'Datasets overdue'},
+        {key: 'silent', label: 'Behind schedule'},
         {key: 'transmitting', label: 'Transmitting'},
     ],
     origin_broker_reachability: [
@@ -364,5 +365,52 @@ describe('what a badge says under itself', () => {
 
         expect(badgeTitle(row, 'silence', LABELS)).toBe('')
         expect(badgeTitle(row, 'cache_pickup', LABELS)).toBe('')
+    })
+})
+
+describe('the second line under a status', () => {
+    const OVERDUE = {
+        transmission: 'silent',
+        standing: 'silent',
+        silent_dataset_count: 3,
+        judged_dataset_count: 12,
+    }
+
+    it('says how much of the centre is late, on the glance table', () => {
+        expect(subline(centre(OVERDUE), 'glance', 'transmission'))
+            .toBe('3 of 12 datasets overdue')
+    })
+
+    it('is the same sentence the detailed table hangs off its silence badge', () => {
+        // One spelling, two surfaces. Written twice they would be two
+        // sentences within a release or two, and a reader moving between the
+        // tables would be told one fact in two shapes.
+        const row = centre(OVERDUE)
+
+        expect(subline(row, 'glance', 'transmission'))
+            .toBe(badgeTitle(row, 'silence', labelsFrom(VOCABULARIES)))
+    })
+
+    it('draws no line on the detailed table, which already shows all of this', () => {
+        // Silence badge, dataset count, and this very sentence as that
+        // badge's tooltip are all on that row already. A second copy teaches
+        // a reader the two cells might mean different things.
+        expect(subline(centre(OVERDUE), 'detail', 'standing')).toBe('')
+    })
+
+    it('draws no line on a centre that is transmitting', () => {
+        // The cost lands on the rows that are the reason the page was opened
+        // and nowhere else -- which is what keeps a worst-first scan a scan.
+        expect(subline(centre({transmission: 'transmitting'}), 'glance', 'transmission'))
+            .toBe('')
+    })
+
+    it('draws no line for the faults that are about a whole centre', () => {
+        // `Last seen` and `Quiet` already carry these. Only `silent` is a
+        // verdict about *part* of a centre, which is what a count answers.
+        for (const verdict of ['never_seen', 'stale']) {
+            expect(subline(centre({transmission: verdict}), 'glance', 'transmission'))
+                .toBe('')
+        }
     })
 })

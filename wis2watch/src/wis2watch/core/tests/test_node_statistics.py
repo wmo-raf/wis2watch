@@ -213,12 +213,17 @@ class TransmissionTests(AllNodesTestCase):
         self.assertEqual(self.transmission("bi-igebu"), TransmissionStanding.STALE)
 
     def test_a_centre_with_a_dataset_overdue_says_so_however_much_it_publishes(self):
-        """The label says "Datasets overdue" and never that the centre is quiet.
+        """The label says "Behind schedule" and never that the centre is quiet.
 
         On the live region this lands on centres sending three hundred
         notifications an hour and last heard from six minutes ago: one dataset
         past its own cadence is enough. A verdict that read as silence there
         would be a verdict nobody believed twice.
+
+        Nor does it say "dataset". That was the label until a reader who has
+        never registered a WCMP2 record met it on the front page with nothing
+        beside it; the count that makes the word teachable rides under the
+        badge on the glance table instead.
         """
         node = self.well("dz-meteoalgerie")
         synop = Dataset.objects.create(
@@ -244,7 +249,7 @@ class TransmissionTests(AllNodesTestCase):
         self.assertEqual(row.transmission, TransmissionStanding.SILENT)
         self.assertEqual(row.messages_in_window, 310)
         self.assertEqual(
-            TransmissionStanding.LABELS[row.transmission], "Datasets overdue"
+            TransmissionStanding.LABELS[row.transmission], "Behind schedule"
         )
 
     def test_a_centre_answering_only_at_its_archive_is_still_transmitting(self):

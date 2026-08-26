@@ -160,7 +160,7 @@ class NodeStanding:
     CHOICES = [
         (NEVER_SEEN, _("Never heard from")),
         (STALE, _("Gone quiet")),
-        (SILENT, _("Datasets overdue")),
+        (SILENT, _("Behind schedule")),
         (NOT_CACHED, _("Not reaching the caches")),
         (NO_BROKER, _("Not watched")),
         (ARCHIVE_ONLY, _("Archive only")),
@@ -228,7 +228,7 @@ class TransmissionStanding:
     only" and left exactly one row reading healthy -- on a panel whose whole
     job is to say whether data is flowing. Folded from staleness and silence
     alone, the same region reads two never heard from, one gone quiet, seven
-    with datasets overdue, and twenty-two transmitting.
+    behind schedule, and twenty-two transmitting.
 
     The plumbing is not hidden by this, it is *elsewhere*: the overview page
     carries ``NodeStanding`` and all four badges, and that is the page somebody
@@ -249,7 +249,7 @@ class TransmissionStanding:
     CHOICES = [
         (NEVER_SEEN, _("Never heard from")),
         (STALE, _("Gone quiet")),
-        (SILENT, _("Datasets overdue")),
+        (SILENT, _("Behind schedule")),
         (TRANSMITTING, _("Transmitting")),
     ]
 
@@ -267,8 +267,15 @@ class TransmissionStanding:
         The same worst-of reading as ``NodeStanding``, over the first two of
         its four judgements. ``SILENT`` lands on centres publishing hundreds of
         notifications an hour -- one dataset overdue against its own cadence is
-        enough -- which is why its label says "Datasets overdue" and not
+        enough -- which is why its label says "Behind schedule" and not
         anything about the centre being quiet.
+
+        The label was "Datasets overdue" until a reader who had never
+        registered a WCMP2 record met it on the front page with nothing beside
+        it. "Dataset" is the catalogue's word, correct and unhelpful as a
+        verdict; the count that makes it teachable now rides under the badge
+        on the glance table, where a reader learns it from "3 of 12 datasets
+        overdue" rather than being assumed to know it.
 
         Args:
             row (NodeOverviewRow): the centre's row, already judged.

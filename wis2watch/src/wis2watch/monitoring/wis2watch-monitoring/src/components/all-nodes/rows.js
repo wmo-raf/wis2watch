@@ -403,6 +403,37 @@ export function nextSort({sort, direction} = {}, key) {
 
 
 /**
+ * How much of a centre's output is past its own cadence, in words.
+ *
+ * One sentence, two callers, one spelling. The detailed table hangs it off
+ * its Silence badge as a tooltip and the glance table draws it under the
+ * status; written twice it would be two sentences within a release or two,
+ * and a reader moving between the tables would be told the same fact in two
+ * shapes.
+ *
+ * It is also where the word "dataset" is allowed to appear. The verdict above
+ * it no longer says it -- see `TransmissionStanding` -- because a reader who
+ * has never registered a WCMP2 record cannot act on the catalogue's noun as a
+ * verdict. Here the count teaches it: "3 of 12" makes a dataset a countable
+ * thing this centre has twelve of, which is as much as anybody needs to read
+ * the row.
+ *
+ * Empty where the centre has nothing that can be judged, which no `silent`
+ * row is -- being silent requires a dataset with an expectation -- so this is
+ * a guard rather than a case.
+ *
+ * @param {object} row - the centre.
+ * @returns {string} the sentence, or an empty string.
+ */
+export function overdueSentence(row) {
+    if (!row?.judged_dataset_count) {
+        return ''
+    }
+
+    return `${row.silent_dataset_count} of ${row.judged_dataset_count} datasets overdue`
+}
+
+/**
  * What a badge says under itself, where it has more to say.
  *
  * The overview page carried these as extra lines under two of its badges --
@@ -411,6 +442,11 @@ export function nextSort({sort, direction} = {}, key) {
  * of their own: rows two and three deep destroy the reading down a column
  * that a worst-first table exists for, and the broker's error arrives here
  * *whole*, where the page it replaces cut it at sixty characters.
+ *
+ * That argument is about *this* table, which is twelve columns wide and shows
+ * the Silence badge and the dataset count as columns of their own. It does
+ * not reach the glance table, which is seven columns and had nothing on the
+ * row at all -- see {@link subline}.
  *
  * Empty where there is nothing to add, which the caller renders as no tooltip
  * at all rather than as an empty one.
@@ -435,9 +471,51 @@ export function badgeTitle(row, field, labels) {
         return parts.join(' \u2014 ')
     }
 
-    if (field === 'silence' && row.judged_dataset_count) {
-        return `${row.silent_dataset_count} of ${row.judged_dataset_count} datasets overdue`
+    if (field === 'silence') {
+        return overdueSentence(row)
     }
 
     return ''
+}
+
+/**
+ * The second line under a centre's status, where it has earned one.
+ *
+ * The glance table shows one verdict and, until this, none of what it was
+ * folded from: a reader met "Behind schedule" in a seven-column table with no
+ * count, no dataset column, and a `Quiet` cell reading six minutes right
+ * beside it. A verdict with its evidence nowhere on the row and its
+ * contradiction next to it is worse than a quiet row.
+ *
+ * Only on the rows with a fault, and only on the glance table.
+ *
+ * Only `silent`, because it is the one verdict here that is about *part* of a
+ * centre -- the others are whole-centre facts the `Last seen` and `Quiet`
+ * columns already carry. That also keeps the cost where it belongs: the seven
+ * rows in thirty-two that are the reason the page was opened grow a line and
+ * the other twenty-five do not, which makes a worst-first scan easier rather
+ * than flatter. It is the shape ADR-0009 rejected at twelve columns and every
+ * badge, and the reason it rejected it does not survive at one line under one
+ * badge on a minority of rows.
+ *
+ * Only the glance table, because the detailed one already draws the Silence
+ * badge, the dataset count, and this very sentence as that badge's tooltip.
+ * A second copy in the Standing cell would put one sentence twice on one row,
+ * which teaches a reader the two cells might mean different things.
+ *
+ * Here rather than as a `v-if` in the template for the reason the view's
+ * column lists are here: the component draws, this decides, and a decision
+ * spelled in a template is a decision with no test.
+ *
+ * @param {object} row - the centre.
+ * @param {string} view - `glance` or `detail`.
+ * @param {string} verdict - which verdict this view draws.
+ * @returns {string} the line, or an empty string for no line at all.
+ */
+export function subline(row, view, verdict) {
+    if (view !== 'glance' || row?.[verdict] !== 'silent') {
+        return ''
+    }
+
+    return overdueSentence(row)
 }
