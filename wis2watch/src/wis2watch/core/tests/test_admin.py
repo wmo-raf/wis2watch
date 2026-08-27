@@ -491,7 +491,7 @@ class NodeOverviewViewTests(TestCase):
 
 
 class GapReportViewTests(TestCase):
-    """The six reports, and the ways somebody arrives at one.
+    """The seven reports, and the ways somebody arrives at one.
 
     What the reports find is the analysis seam's business; what is guarded here
     is that each of them can actually be reached and rendered, since a finding
@@ -577,6 +577,20 @@ class GapReportViewTests(TestCase):
                 started_at=dj_timezone.now() - timedelta(days=days_ago),
                 error_message="connection refused" if status == SyncLog.FAILED else "",
             )
+        # A run that reached its source and lost a record out of what it read.
+        # Against another of the centre's syncs on purpose: a newer station
+        # run would be an answer, and the registry above would stop failing.
+        SyncLog.objects.create(
+            node=self.node,
+            sync_type=SyncLog.MESSAGE_ARCHIVE,
+            status=SyncLog.PARTIAL,
+            started_at=dj_timezone.now() - timedelta(hours=1),
+            items_found=63,
+            items_errored=1,
+            stepped_over=[
+                {"item": "urn:wmo:md:ke-kmd:synop", "reason": "duplicate key value"}
+            ],
+        )
 
     def test_the_index_lists_every_report(self):
         response = self.client.get(reverse("gap_reports"))
@@ -613,6 +627,17 @@ class GapReportViewTests(TestCase):
                 response = self.client.get(reverse("gap_report", args=[report.slug]))
 
                 self.assertEqual(response.status_code, 200)
+
+    def test_a_run_that_lost_records_names_them_and_what_refused_them(self):
+        """The count was always on the page; which records were lost was not."""
+        self.a_finding_for_every_report()
+
+        response = self.client.get(
+            reverse("gap_report", args=["syncs-stepping-over-records"])
+        )
+
+        self.assertContains(response, "urn:wmo:md:ke-kmd:synop")
+        self.assertContains(response, "duplicate key value")
 
     def test_a_report_names_the_entities_it_found(self):
         """A count would not be a finding anybody could act on."""
@@ -1000,6 +1025,25 @@ class NodeDetailViewTests(TestCase):
         response = self.client.get(reverse("node_details", args=[unanswered.id]))
 
         self.assertContains(response, "No station is declared by this centre")
+
+    def test_a_run_that_stepped_over_a_record_names_it_on_the_page(self):
+        """The table is where somebody sent after a missing dataset lands."""
+        SyncLog.objects.create(
+            node=self.node,
+            sync_type=SyncLog.NODE_STATIONS,
+            status=SyncLog.PARTIAL,
+            started_at=dj_timezone.now() - timedelta(hours=1),
+            items_found=63,
+            items_errored=1,
+            stepped_over=[
+                {"item": "0-404-0-KE009", "reason": "value too long for column"}
+            ],
+        )
+
+        response = self.page()
+
+        self.assertContains(response, "0-404-0-KE009")
+        self.assertContains(response, "value too long for column")
 
     def test_the_statistics_view_is_one_click_away(self):
         self.assertContains(

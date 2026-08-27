@@ -8,7 +8,7 @@ stations are declared to the world and have never once transmitted, a centre
 publishing that no catalogue has indexed, data announced to a broker the rest
 of the world never hears.
 
-Six reports, because there are six ways the picture can be wrong that no
+Seven reports, because there are seven ways the picture can be wrong that no
 single view of one centre can show:
 
 * what a country declares in OSCAR and has never been heard from;
@@ -17,19 +17,30 @@ single view of one centre can show:
 * what a centre published that the Global Broker never carried;
 * which centres publish with no catalogue record at all;
 * whose own station registry has stopped answering, or never did;
+* which syncs are reading a source and losing records out of what they read;
 * how much of each centre's traffic says nothing about which station it came
   from.
 
-The last of those is the only one that is a finding about this tool's reach
-rather than about the region alone, and it earns its place beside the others
-for the reason all of them are here: nobody was looking. A registry that fails
-every hourly run leaves a failed sync log every hour, and until something read
-them the failure was visible only to whoever opened that centre's page already
-suspecting it -- which for fifty-four countries is nobody. It is a pattern
-over time rather than one bad run, so it is reported where the patterns are
-rather than announced as a hard failure: one centre's dead registry costs one
-of the three station pictures for one centre, and the tool's answers about
-everywhere else stay good.
+The last two are findings about this tool rather than about the region alone
+-- what it could not attribute to a station, and what it read and could not
+store -- and they earn their place beside the others for the reason all of
+them are here: nobody was looking.
+
+That reason is worth spelling out once, on the report that shows it plainest.
+A registry that fails every hourly run leaves a failed sync log every hour,
+and until something read them the failure was visible only to whoever opened
+that centre's page already suspecting it -- which for fifty-four countries is
+nobody. It is a pattern over time rather than one bad run, so it is reported
+where the patterns are rather than announced as a hard failure: one centre's
+dead registry costs one of the three station pictures for one centre, and the
+tool's answers about everywhere else stay good.
+
+The stepped-over report is the same failure of attention on the other side of
+a run. A sync that reaches its source and cannot store nine of the sixty-three
+records it read is recorded as a partial success, and everything downstream
+answers about those nine as though the region had never declared them. Which
+nine, and what refused them, lives on the run; until this listed them it lived
+where nobody reads.
 
 Every one of them is a list of named entities rather than a count. "Seventeen
 stations are silent" is not a finding anybody can act on; a WIGOS identifier, a
@@ -86,6 +97,7 @@ from ..models import (
     UnregisteredCentre,
     WIS2Node,
     evidence_horizon,
+    one_line,
 )
 from ..rollups import window_start
 from .reachability import OriginTransport
@@ -97,7 +109,7 @@ from .silence import hours_between
 #: over a day.
 DEFAULT_ATTRIBUTION_WINDOW_HOURS = 168
 
-#: Which report answers "is this share bad?" for a centre. Alone among the six
+#: Which report answers "is this share bad?" for a centre. Alone among the seven
 #: slugs in being named here, because it is the only one reversed from outside
 #: this module -- the statistics tab links to it. Renaming it should not be a
 #: search for the same string somewhere else in the tree.
@@ -110,6 +122,15 @@ UNATTRIBUTED_MESSAGES_SLUG = "unattributed-messages"
 #: registry went. Deliberately not one of the alerting thresholds: this is not
 #: a failure of the tool, and nobody is being interrupted for it.
 DEFAULT_REGISTRY_UNANSWERED_HOURS = 48
+
+#: How long after it ran a run still speaks for its sync, in days. Long enough
+#: that the weekly OSCAR run is never dropped by the window alone, and short
+#: enough that a sync which has stopped running altogether -- a centre that no
+#: longer advertises a registry, a catalogue taken out of the schedule -- falls
+#: out of the report instead of standing in it for good. Nothing prunes sync
+#: logs, so without a window the newest run of a sync nobody runs any more is
+#: the newest run there will ever be.
+DEFAULT_STEPPED_OVER_DAYS = 14
 
 #: How much of a run's error the digest will quote. Enough for a read timeout,
 #: a refused connection or an HTTP status to be recognised, and not enough for
@@ -155,6 +176,11 @@ def default_registry_unanswered_hours():
         "WIS2WATCH_REGISTRY_UNANSWERED_HOURS",
         DEFAULT_REGISTRY_UNANSWERED_HOURS,
     )
+
+
+def default_stepped_over_days():
+    """How long after it ran a run still speaks for its sync."""
+    return getattr(settings, "WIS2WATCH_STEPPED_OVER_DAYS", DEFAULT_STEPPED_OVER_DAYS)
 
 
 @dataclass(frozen=True)
@@ -405,6 +431,50 @@ class UnansweredRegistryRow:
     def standing_label(self):
         """Whether it ever answered, for a table cell."""
         return RegistryStanding.label(self.standing)
+
+
+@dataclass(frozen=True)
+class SteppedOverRunRow:
+    """A sync whose newest run stored some of what it read and lost the rest.
+
+    The records are on the row because they are the finding. "Nine errored" is
+    a number to worry about and nothing to do about; nine identifiers and the
+    constraint that refused them is a fault somebody can go and fix, and the
+    difference between the two is four days of a centre's largest observation
+    feed missing from the region with the run that dropped it reported green.
+
+    What was read is on the row twice over -- the source, and which of the
+    syncs read it -- because a station registry losing a station and a
+    catalogue losing a dataset cost different things and want different people.
+    """
+
+    run_id: int
+    node_id: int | None
+    read_from: str
+    kind: str
+    kind_label: str
+    started_at: datetime
+    hours_ago: float
+    items_found: int
+    items_errored: int
+    stepped_over: list[dict]
+    reasons_withheld: int
+
+    @property
+    def read_from_label(self):
+        """Whose records these were, for a table cell.
+
+        A run against no centre and no catalogue read the region rather than
+        anybody in it -- OSCAR answers territory by territory, a sweep hears
+        whoever publishes -- so there is no identifier to print and a dash
+        would read as one missing.
+        """
+        return self.read_from or _("the monitored region")
+
+    @property
+    def items_stored(self):
+        """How much of the run did land, which is why it is not a failed one."""
+        return self.items_found - self.items_errored
 
 
 def stations_declared_but_silent(*, now=None):
@@ -796,6 +866,107 @@ def registries_not_answering(*, now=None, unanswered_hours=None):
     ]
 
 
+def syncs_stepping_over_records(*, now=None, within_days=None):
+    """The syncs whose newest run stored some of what it read and lost the rest.
+
+    Args:
+        now: the instant each run's age is measured back from.
+        within_days: how long after it ran a run still speaks for its sync.
+
+    Returns:
+        list[SteppedOverRunRow]: most records lost first, and among equals the
+        run that happened most recently.
+
+    A run that fails is chased. It leaves an error on the log, the digest
+    carries it, the not-answering report names the registry it belongs to. A
+    run that succeeds and steps over records is chased by nobody: it is a
+    partial success on a page nobody opens, the records it lost are absent from
+    the region as far as every other surface can tell, and which records they
+    were was a line in a worker's output.
+
+    Both distinctions the reader needs are kept. A failed run is not here --
+    that is a network or a source to chase, and it brought nothing back at
+    all. Neither is a run called partial for a reason other than losing
+    records: OSCAR calls a run partial for a territory it could not read, and
+    a report of that would be a row with nothing under it to fix.
+    """
+    now = now or dj_timezone.now()
+    days = default_stepped_over_days() if within_days is None else within_days
+
+    return [
+        _stepped_over_run_row(run, now=now)
+        for run in _runs_stepping_over_records(now=now, days=days)
+    ]
+
+
+def _runs_stepping_over_records(*, now, days):
+    """The newest run of each sync, where that one lost records out of what it read.
+
+    The newest run and no other, the way the not-answering report reads its
+    registries: what a reader acts on is whether records are being lost now,
+    and listing every partial run there has ever been would be a log rather
+    than a finding. A sync whose next run got the records down has nothing
+    here, which is exactly the state it is in.
+
+    "Each sync" is the pair of what was read and which sync read it, so a
+    centre's registry and its message archive answer separately, and the runs
+    against no centre at all -- OSCAR, the wildcard sweep -- group under their
+    own kind rather than with each other.
+
+    The window is applied before the newest run is picked rather than after,
+    which is the same statement: a run newer than the one it would exclude is
+    newer than the window's edge too.
+    """
+    newest = (
+        SyncLog.objects.filter(started_at__gte=now - timedelta(days=days))
+        .order_by("node_id", "catalogue_id", "sync_type", "-started_at")
+        .distinct("node_id", "catalogue_id", "sync_type")
+        .values_list("pk", flat=True)
+    )
+
+    return (
+        SyncLog.objects.filter(
+            pk__in=list(newest), status=SyncLog.PARTIAL, items_errored__gt=0
+        )
+        .select_related("node", "catalogue")
+        .order_by("-items_errored", "-started_at")
+    )
+
+
+def _stepped_over_run_row(run, *, now):
+    """One sync that is losing records as a finding."""
+    return SteppedOverRunRow(
+        run_id=run.pk,
+        node_id=run.node_id,
+        read_from=_what_the_run_read(run),
+        kind=run.sync_type,
+        kind_label=run.get_sync_type_display(),
+        started_at=run.started_at,
+        hours_ago=hours_between(run.started_at, now),
+        items_found=run.items_found,
+        items_errored=run.items_errored,
+        stepped_over=run.stepped_over,
+        reasons_withheld=run.reasons_withheld,
+    )
+
+
+def _what_the_run_read(run):
+    """What the run was against, as whoever chases it names it.
+
+    A centre and a catalogue both by their centre ID, which is what a reader
+    takes back to the source. A run against neither read the region rather
+    than anybody in it, and answers with nothing rather than with a name it
+    would have had to invent.
+    """
+    if run.node:
+        return run.node.centre_id
+
+    if run.catalogue:
+        return run.catalogue.centre_id
+
+    return ""
+
+
 def registries_not_answering_centre_ids(*, now=None):
     """Which centres the not-answering report currently names.
 
@@ -983,16 +1154,11 @@ def _unanswered_registry_row(node, *, error, now):
 def _error_excerpt(message):
     """An error as much of one line of it as a reader needs.
 
-    Registries fail in prose. A refused connection is a phrase; a proxy
-    answering with an HTML error page is a screenful, and a report or an email
-    that quoted it whole would bury the twenty findings around it.
+    A report or an email that quoted a proxy's HTML error page whole would
+    bury the twenty findings around it. Shorter than what a sync log keeps,
+    which is the copy this is cut from.
     """
-    excerpt = " ".join(message.split())
-
-    if len(excerpt) <= ERROR_EXCERPT_CHARS:
-        return excerpt
-
-    return excerpt[: ERROR_EXCERPT_CHARS - 1].rstrip() + "\u2026"
+    return one_line(message, ERROR_EXCERPT_CHARS)
 
 
 def _silent_declarations():
@@ -1407,6 +1573,36 @@ def _unanswered_registry_notice(row):
     )
 
 
+def _stepped_over_run_notice(row):
+    """A sync that is losing records, in a sentence.
+
+    Keyed on the sync rather than on the run. A registry stepping over the same
+    station every hour is one problem, and a digest keyed on the run would
+    announce it twenty-four times a day; a sync that recovers drops out of the
+    report and is let go, so one that breaks again is announced again.
+
+    One reason quoted, and the rest counted. What the reader needs from an
+    email is which sync to open, and a mail that inlined fifty constraint
+    violations would bury the findings around it.
+    """
+    records = row.stepped_over
+    because = f": {records[0]['item']} ({records[0]['reason']})" if records else ""
+    and_others = f", and {len(records) - 1} more" if len(records) > 1 else ""
+
+    # The label's own fallback rather than the row's, which is translated for
+    # a table cell; a notice is not translated, being mostly identifiers.
+    read_from = row.read_from or "the monitored region"
+
+    return Notice(
+        key=f"{row.read_from}:{row.kind}",
+        summary=(
+            f"{row.kind_label} for {read_from} stepped over "
+            f"{row.items_errored} of {row.items_found} records"
+            f"{because}{and_others}"
+        ),
+    )
+
+
 def _bounds_nothing(*, now=None):
     """What a report bounded by its filters rather than by truncation says.
 
@@ -1439,7 +1635,7 @@ def _leaves_nothing_unsettled(*, now=None):
 class GapReport:
     """One report: what it finds, and how to ask for it.
 
-    The six are held as a list rather than as six hard-wired pages so that
+    The seven are held as a list rather than as seven hard-wired pages so that
     the index, the routing, the report itself and the digest all read from one
     place. A report that exists but is not on the index is a finding nobody
     sees, which is the failure this whole module exists to prevent -- and one
@@ -1460,7 +1656,7 @@ class GapReport:
     and most of them have nothing to say: they are bounded by filters rather
     than by truncation, so everything they found is on the page. Only the
     propagation report bounds anything, and it is held here rather than in its
-    template so that a sixth report that has to truncate says so in the same
+    template so that the next report that has to truncate says so in the same
     place and the same way.
 
     ``describe_caveat`` is the other thing a report can have to say for
@@ -1504,9 +1700,9 @@ class GapReportSummary:
     bound: str | None = None
 
 
-#: The six reports, in the order the index shows them: what is declared and
-#: missing, what is arriving and unaccounted for, then the four about the
-#: centres themselves.
+#: The seven reports, in the order the index shows them: what is declared and
+#: missing, what is arriving and unaccounted for, then the three about the
+#: centres themselves, and last the two about this tool rather than them.
 GAP_REPORTS = (
     GapReport(
         slug="declared-but-silent",
@@ -1579,6 +1775,21 @@ GAP_REPORTS = (
         describe_caveat=registries_not_answering_caveat,
     ),
     GapReport(
+        slug="syncs-stepping-over-records",
+        title=_("Syncs that stepped over records"),
+        description=_(
+            "Syncs whose newest run read its source, stored most of what it "
+            "read and could not store the rest, saying which records were "
+            "lost and what refused them. A run that failed outright is not "
+            "here: it brought nothing back at all."
+        ),
+        find_rows=syncs_stepping_over_records,
+        count_rows=lambda *, now=None: _runs_stepping_over_records(
+            now=now or dj_timezone.now(), days=default_stepped_over_days()
+        ).count(),
+        describe_row=_stepped_over_run_notice,
+    ),
+    GapReport(
         slug=UNATTRIBUTED_MESSAGES_SLUG,
         title=_("Unattributed messages"),
         description=_(
@@ -1604,7 +1815,7 @@ def gap_report_summaries(*, now=None):
     """Every report with how much it has found, for the index.
 
     Counted rather than listed: the index exists to say which report is worth
-    opening, and building six reports in full to show six numbers would make
+    opening, and building seven reports in full to show seven numbers would make
     the cheapest page in the tool the most expensive.
     """
     now = now or dj_timezone.now()

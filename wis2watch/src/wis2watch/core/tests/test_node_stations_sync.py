@@ -21,7 +21,11 @@ from django.utils import timezone as dj_timezone
 from wis2watch.core.models import Station, StationSource, SyncLog, WIS2Node
 from wis2watch.core.node_stations import fetch_station_pages, sync_node_stations
 from wis2watch.core.stations import node_stations_as_csv
-from wis2watch.core.sync import MAX_PAGES
+from wis2watch.core.sync import (
+    MAX_PAGES,
+    MAX_REASON_CHARS,
+    MAX_STEPPED_OVER_RECORDED,
+)
 
 from .support import failing_fetch, load_json_fixture, pages
 
@@ -278,6 +282,60 @@ class SyncLogTests(NodeStationsTestCase):
         self.assertEqual(sync_log.items_errored, 1)
         self.assertEqual(sync_log.items_created, len(DECLARED))
         self.assertEqual(Station.objects.count(), len(DECLARED))
+
+    def test_a_station_that_cannot_be_stored_says_which_one_and_why(self):
+        """A count of one leaves a reader a station short and nothing to chase."""
+        long_id = "0-288-0-" + "x" * 200
+
+        sync_log = self.sync(
+            {
+                "features": [
+                    {"properties": {"wigos_station_identifier": long_id}},
+                    *self.payload["features"],
+                ]
+            }
+        )
+
+        (stepped_over,) = sync_log.stepped_over
+
+        self.assertEqual(stepped_over["item"], long_id)
+        self.assertTrue(stepped_over["reason"])
+
+    def test_a_run_that_stored_everything_it_read_stepped_over_nothing(self):
+        sync_log = self.sync(self.payload)
+
+        self.assertEqual(sync_log.stepped_over, [])
+
+    def test_a_run_that_steps_over_more_than_it_will_hold_still_counts_them_all(self):
+        """A run losing everything is one fault, not a list to work through.
+
+        The count is what the run is judged by and it keeps counting; the
+        reasons stop at the ceiling, and the two disagreeing is how the run
+        says it kept fewer than it lost.
+        """
+        unstorable = [
+            {"properties": {"wigos_station_identifier": f"0-288-0-{'x' * 200}{n}"}}
+            for n in range(MAX_STEPPED_OVER_RECORDED + 5)
+        ]
+
+        sync_log = self.sync({"features": unstorable})
+
+        self.assertEqual(sync_log.items_errored, MAX_STEPPED_OVER_RECORDED + 5)
+        self.assertEqual(len(sync_log.stepped_over), MAX_STEPPED_OVER_RECORDED)
+        self.assertEqual(sync_log.reasons_withheld, 5)
+
+    def test_a_reason_too_long_to_hold_is_kept_to_a_readable_line(self):
+        """Databases refuse rows in prose, and quote the row they refused."""
+        with mock.patch(
+            "wis2watch.core.node_stations.Station.objects.resolve",
+            side_effect=RuntimeError("refused " + "x" * 2000),
+        ):
+            sync_log = self.sync(one_station())
+
+        (stepped_over,) = sync_log.stepped_over
+
+        self.assertLessEqual(len(stepped_over["reason"]), MAX_REASON_CHARS)
+        self.assertTrue(stepped_over["reason"].startswith("refused "))
 
     def test_every_page_of_a_paged_registry_is_read(self):
         first = {"features": self.payload["features"][:4]}

@@ -370,6 +370,17 @@ class SweepLogTests(SweepTestCase):
         self.assertEqual(self.log().items_created, 1)
         self.assertEqual(self.log().status, SyncLog.PARTIAL)
 
+    def test_a_centre_that_cannot_be_written_says_which_one_and_why(self):
+        self.open_sweep()
+
+        self.sweep.observe({"x" * 300: BR_TOPIC}, now=after(3610))
+        self.sweep.service(now=after(3660))
+
+        (stepped_over,) = self.log().stepped_over
+
+        self.assertEqual(stepped_over["item"], "x" * 300)
+        self.assertTrue(stepped_over["reason"])
+
     def test_a_centre_written_on_a_later_flush_stops_counting_as_an_error(self):
         self.open_sweep()
 

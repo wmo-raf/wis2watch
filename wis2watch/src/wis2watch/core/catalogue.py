@@ -38,7 +38,7 @@ from .models import (
     SyncLog,
     WIS2Node,
 )
-from .sync import CREATED, ERRORED, UPDATED, SyncCounts, fetch_pages
+from .sync import CREATED, UPDATED, SteppedOver, SyncCounts, fetch_pages
 
 logger = logging.getLogger(__name__)
 
@@ -369,7 +369,7 @@ def apply_discovery_record(record, *, registries_not_answering=frozenset()):
             "Could not apply discovery record %s: %s", record.dataset.identifier, exc
         )
 
-        return ERRORED
+        return SteppedOver(item=record.dataset.identifier, reason=str(exc))
 
 
 def sync_catalogue(catalogue, fetch=None):

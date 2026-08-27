@@ -43,7 +43,7 @@ from ..core.interpretation import (
     sweep_topic,
 )
 from ..core.models import SyncLog, UnregisteredCentre, WIS2Node
-from ..core.sync import CREATED, ERRORED, UPDATED, SyncCounts
+from ..core.sync import CREATED, UPDATED, SteppedOver, SyncCounts
 
 logger = logging.getLogger(__name__)
 
@@ -268,7 +268,9 @@ class WildcardSweep:
                 )
             except Exception as exc:
                 logger.warning("Could not record centre %s: %s", centre_id, exc)
-                self._record_outcome(centre_id, ERRORED)
+                self._record_outcome(
+                    centre_id, SteppedOver(item=centre_id, reason=str(exc))
+                )
 
     def _record_outcome(self, centre_id, outcome):
         """Note what became of one centre, once for the window.

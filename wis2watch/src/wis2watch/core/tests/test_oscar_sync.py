@@ -453,6 +453,18 @@ class SyncLogTests(OscarStationsTestCase):
         self.assertEqual(sync_log.items_created, len(DECLARED))
         self.assertEqual(Station.objects.count(), len(DECLARED))
 
+    def test_a_station_that_cannot_be_stored_says_which_one_and_why(self):
+        unstorable = {"wigosId": "0-404-0-" + "x" * 200, "name": "Too long"}
+
+        sync_log = self.sync(
+            KEN=search_response(unstorable, *self.payload["stationSearchResults"])
+        )
+
+        (stepped_over,) = sync_log.stepped_over
+
+        self.assertEqual(stepped_over["item"], unstorable["wigosId"])
+        self.assertTrue(stepped_over["reason"])
+
 
 @override_settings(WIS2WATCH_MONITORED_COUNTRIES=["ke"])
 class FetchTests(TestCase):

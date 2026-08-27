@@ -222,6 +222,12 @@ def poll_message_archive(
             counts.found += published
             counts.created += stored.accepted
             counts.errored += stored.discarded
+
+            # The count comes from the store, which counted the page; the
+            # reasons are taken one at a time, so that the ceiling on how many
+            # a run keeps is the same one every other sync is held to.
+            for discarded in stored.stepped_over:
+                counts.step_over(discarded)
     except PagingDidNotTerminate as exc:
         # It answered -- too many times. A read this could not finish is a
         # failed run, but recording the centre as unreachable would send

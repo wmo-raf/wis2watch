@@ -824,6 +824,25 @@ class SyncLogTests(CatalogueSyncTestCase):
         self.assertEqual(log.items_created, len(MONITORED_CENTRE_IDS) - 1)
         self.assertTrue(Dataset.objects.filter(identifier=CG_DATASET).exists())
 
+    def test_a_record_that_cannot_be_stored_says_which_one_and_why(self):
+        """Which record and what refused it, on the run and not in a worker log.
+
+        The run reports one record errored out of however many; the dataset
+        that is missing from the registry, and the reason it is, are what
+        somebody sent to find it needs.
+        """
+        oversized = load_json_fixture(CATALOGUE)
+        for feature in oversized["features"]:
+            if feature["id"] == KE_DATASET:
+                feature["properties"]["title"] = "x" * 600
+
+        log = self.sync(oversized)
+
+        (stepped_over,) = log.stepped_over
+
+        self.assertEqual(stepped_over["item"], KE_DATASET)
+        self.assertTrue(stepped_over["reason"])
+
 
 class MultiPageSyncTests(CatalogueSyncTestCase):
     def test_records_from_every_page_are_applied(self):

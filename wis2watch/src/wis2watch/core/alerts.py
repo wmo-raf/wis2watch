@@ -743,6 +743,15 @@ def _registry_last_rebuilt(writer):
 
     Timed from when the run finished rather than when it started, because
     what the stamp claims is that the registry was current at that moment.
+
+    A run that brought most of its records back and stepped over the rest does
+    move this clock, and should. The registry it left behind is current for
+    the records it applied, which is not what "frozen" means and is not what
+    the failure this feeds asks anybody to stop believing -- announcing it here
+    would tell a reader the whole registry is stale on the evidence of nine
+    datasets. That a writer keeps losing the same nine is a real finding and a
+    different one, about the region's records rather than about this tool's
+    reach, and it is reported as a gap: see ``syncs_stepping_over_records``.
     """
     last = (
         _runs_against(writer)

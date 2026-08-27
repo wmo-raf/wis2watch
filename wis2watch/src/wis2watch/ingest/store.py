@@ -67,6 +67,7 @@ from ..core.models import (
     StationSource,
     WIS2Node,
 )
+from ..core.sync import MAX_STEPPED_OVER_RECORDED, SteppedOver
 from .subscriptions import cache_source_for
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,14 @@ class StoreCounts:
     It is reported rather than written here because it is a finding about the
     region rather than about a message, and it is the sweep that runs long
     enough to have found it.
+
+    ``stepped_over`` is which of the discarded messages they were and what
+    stopped each one, reported for the same reason and to a different caller:
+    a broker flush is continuous and answers to no run, but a poll of a
+    centre's archive closes a sync log, and a log saying it discarded nine
+    messages without saying which is the failure ADR-0010 is about. Bounded,
+    because a flush is offered whatever the world publishes and a page of
+    malformed traffic must not be held in memory a message at a time.
     """
 
     accepted: int = 0
@@ -122,6 +131,16 @@ class StoreCounts:
     out_of_region: int = 0
     discarded: int = 0
     unregistered_centres: dict[str, str] = field(default_factory=dict)
+    stepped_over: list[SteppedOver] = field(default_factory=list)
+
+    def discard(self, payload, reason):
+        """Count one message that could not be stored, and keep why."""
+        self.discarded += 1
+
+        if len(self.stepped_over) < MAX_STEPPED_OVER_RECORDED:
+            self.stepped_over.append(
+                SteppedOver(item=_names_itself(payload), reason=reason)
+            )
 
     @property
     def summary(self):
@@ -132,6 +151,20 @@ class StoreCounts:
             f"catalogue_records={self.catalogue_records} "
             f"out_of_region={self.out_of_region} discarded={self.discarded}"
         )
+
+
+def _names_itself(payload):
+    """What a message that could not be stored calls itself.
+
+    Its own UUID where it has one. Where it has not -- which is one of the two
+    reasons a message is discarded at all -- the data identifier it names
+    instead, which is what a centre would recognise it by. A message with
+    neither is unnameable, and that is the whole of what is wrong with it.
+    """
+    payload = payload or {}
+    properties = payload.get("properties") or {}
+
+    return payload.get("id") or properties.get("data_id") or ""
 
 
 class RegistryLookup:
@@ -470,7 +503,7 @@ def store_notifications(source, received, node=None):
             )
         except Exception as exc:
             logger.warning("Could not prepare a message on %s: %s", topic, exc)
-            counts.discarded += 1
+            counts.discard(payload, str(exc))
             continue
 
         if record is None:
@@ -478,7 +511,7 @@ def store_notifications(source, received, node=None):
                 "Discarding a message on %s: it names no UUID or no publication time",
                 topic,
             )
-            counts.discarded += 1
+            counts.discard(payload, "it names no UUID or no publication time")
             continue
 
         centre_id = _observed_centre_id(record)

@@ -35,7 +35,7 @@ from django.utils import timezone as dj_timezone
 from .countries import monitored_territory_codes
 from .interpretation import extract_oscar_stations
 from .models import Station, StationSource, SyncLog
-from .sync import CREATED, ERRORED, UPDATED, SyncCounts, declared_position
+from .sync import CREATED, UPDATED, SteppedOver, SyncCounts, declared_position
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +160,7 @@ def apply_declared_station(declared):
             "Could not apply station %s declared in OSCAR: %s", declared.wigos_id, exc
         )
 
-        return ERRORED
+        return SteppedOver(item=declared.wigos_id, reason=str(exc))
 
 
 def _run_status(counts, unread, territories):

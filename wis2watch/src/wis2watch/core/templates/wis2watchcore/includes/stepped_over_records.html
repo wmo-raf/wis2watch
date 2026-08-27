@@ -1,0 +1,26 @@
+{% load i18n %}
+
+{% comment %}
+    What a run stepped over, wherever a run is shown. Written once because it
+    is shown in two places -- the node page's sync run table and the gap
+    report -- and two copies of it is how one of them stops saying what the
+    run withheld.
+
+    Takes `records` (the run's stepped-over list) and `withheld` (how many it
+    kept no reason for). A run recorded before runs kept reasons at all has
+    nothing to list and everything withheld, which is what it knows: the
+    sentence says the reasons were not kept rather than leaving a reader to
+    wonder whether the records were.
+{% endcomment %}
+
+{% for record in records %}
+    <div class="row-detail">
+        <code>{{ record.item }}</code> — {{ record.reason }}
+    </div>
+{% endfor %}
+
+{% if withheld %}
+    <div class="row-detail">
+        {% blocktrans count counter=withheld %}and one more, whose reason was not kept{% plural %}and {{ counter }} more, whose reasons were not kept{% endblocktrans %}
+    </div>
+{% endif %}

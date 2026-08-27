@@ -153,6 +153,17 @@
             font-size: 0.8em;
         }
 
+        /* What a run stepped over, under the outcome that counted it. Narrow
+           enough that a database quoting the row it refused wraps inside its
+           cell instead of pushing the counts off the table. */
+        .row-stepped-over {
+            margin-top: 6px;
+            color: #555;
+            font-size: 0.8em;
+            max-width: 60ch;
+        }
+
+
         .empty-state {
             text-align: center;
             padding: 30px;
@@ -560,6 +571,17 @@
                             {% if run.error_message %}
                                 <div class="row-error" title="{{ run.error_message }}">
                                     {{ run.error_message|truncatechars:80 }}
+                                </div>
+                            {% endif %}
+                            {% comment %}
+                                Beside the count and not instead of it: the
+                                count is what makes the run partial, and these
+                                are the records somebody is here to find.
+                            {% endcomment %}
+                            {% if run.items_errored %}
+                                <div class="row-stepped-over">
+                                    {% trans "Stepped over:" %}
+                                    {% include "wis2watchcore/includes/stepped_over_records.html" with records=run.stepped_over withheld=run.reasons_withheld %}
                                 </div>
                             {% endif %}
                         </td>

@@ -30,12 +30,14 @@ from wis2watch.core.analysis import (
     stations_declared_but_silent,
     stations_declared_but_silent_unasked_centres,
     stations_transmitting_undeclared,
+    syncs_stepping_over_records,
     unattributed_rates,
     unregistered_centres,
 )
 from wis2watch.core.interpretation import OPERATIONAL
 from wis2watch.core.models import (
     Dataset,
+    GlobalDiscoveryCatalogue,
     HardFailure,
     HourlyRollup,
     MessageSource,
@@ -1323,8 +1325,273 @@ class EveryRegistryFailingTests(GapReportTestCase):
         )
 
 
+class SteppedOverRunTestCase(GapReportTestCase):
+    """Syncs with runs behind them, seeded as the runs recorded them.
+
+    Seeded as sync logs rather than by running a sync: what is under test is
+    which of a run history a report reads, and the runs a real sync would have
+    to lose records on are the ones the syncs' own tests already cover.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.writer = GlobalDiscoveryCatalogue.objects.create(
+            centre_id="int-wmo-global-discovery",
+            name="WMO Global Discovery Catalogue",
+            base_url="https://gdc.example.int",
+            is_writer=True,
+        )
+
+    def sync_run(
+        self,
+        *,
+        node=None,
+        catalogue=None,
+        sync_type=SyncLog.NODE_STATIONS,
+        status=SyncLog.PARTIAL,
+        hours_ago=1,
+        found=63,
+        stepped_over=(),
+        errored=None,
+    ):
+        """One run of a sync, as it was recorded."""
+        records = [{"item": item, "reason": reason} for item, reason in stepped_over]
+
+        return SyncLog.objects.create(
+            node=node,
+            catalogue=catalogue,
+            sync_type=sync_type,
+            status=status,
+            started_at=NOW - timedelta(hours=hours_ago),
+            items_found=found,
+            items_errored=len(records) if errored is None else errored,
+            stepped_over=records,
+        )
+
+    def partial_registry_run(self, **kwargs):
+        """The centre's own registry, having stepped over one station."""
+        return self.sync_run(
+            node=self.kenya,
+            stepped_over=[("0-20000-0-63741", "value too long for column name")],
+            **kwargs,
+        )
+
+    def report(self, **kwargs):
+        return syncs_stepping_over_records(now=NOW, **kwargs)
+
+    def counted(self):
+        return {
+            summary.slug: summary.count for summary in gap_report_summaries(now=NOW)
+        }["syncs-stepping-over-records"]
+
+
+class SyncsSteppingOverRecordsTests(SteppedOverRunTestCase):
+    """A sync that reached its source, stored most of what it read and lost the rest.
+
+    The distinction this report exists to keep is the one the not-answering
+    report makes from the other side. A run that failed is a network or a
+    source to chase and has brought nothing back. A run that succeeded and
+    stepped over records reached the source perfectly well and is quietly
+    short: the registry has fifty-four of sixty-three datasets, every surface
+    of the tool reports the missing nine as absent from the region, and the
+    run that dropped them is a green-enough row on one centre's page.
+
+    It is the newest run that is asked, not the run history, because what a
+    reader acts on is whether records are being lost now -- a run whose
+    successor got them down is not a finding, it is a fixed one.
+    """
+
+    def test_a_run_that_stepped_over_records_is_reported(self):
+        self.partial_registry_run()
+
+        (row,) = self.report()
+
+        self.assertEqual(row.read_from, "ke-meteo")
+        self.assertEqual(row.kind, SyncLog.NODE_STATIONS)
+        self.assertEqual(row.items_errored, 1)
+        self.assertEqual(row.items_found, 63)
+
+    def test_the_row_names_the_records_and_what_refused_them(self):
+        """The whole of the report: a count is not something anybody can chase."""
+        self.partial_registry_run()
+
+        (row,) = self.report()
+
+        self.assertEqual(
+            row.stepped_over,
+            [{"item": "0-20000-0-63741", "reason": "value too long for column name"}],
+        )
+
+    def test_a_run_that_stored_everything_it_read_is_not_reported(self):
+        self.sync_run(node=self.kenya, status=SyncLog.SUCCESS)
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_run_that_failed_outright_is_not_reported(self):
+        """That is a source to chase, and the not-answering report chases it."""
+        self.sync_run(
+            node=self.kenya,
+            status=SyncLog.FAILED,
+            stepped_over=[("0-20000-0-63741", "value too long")],
+        )
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_partial_run_that_stepped_over_nothing_is_not_reported(self):
+        """OSCAR calls a run partial for a territory it could not read at all."""
+        self.sync_run(
+            sync_type=SyncLog.OSCAR_STATIONS, status=SyncLog.PARTIAL, errored=0
+        )
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_sync_whose_next_run_got_the_records_down_is_not_reported(self):
+        self.partial_registry_run(hours_ago=5)
+        self.sync_run(node=self.kenya, status=SyncLog.SUCCESS, hours_ago=1)
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_sync_still_stepping_over_records_is_reported_once(self):
+        """However many runs it has lost them on."""
+        self.partial_registry_run(hours_ago=5)
+        self.partial_registry_run(hours_ago=3)
+        self.partial_registry_run(hours_ago=1)
+
+        self.assertEqual(len(self.report()), 1)
+
+    def test_each_sync_against_a_centre_answers_for_itself(self):
+        """Its registry stepping over a station says nothing about its archive."""
+        self.partial_registry_run()
+        self.sync_run(
+            node=self.kenya,
+            sync_type=SyncLog.MESSAGE_ARCHIVE,
+            hours_ago=2,
+            stepped_over=[("a-notification", "no such dataset")],
+        )
+
+        self.assertEqual(
+            sorted(row.kind for row in self.report()),
+            [SyncLog.MESSAGE_ARCHIVE, SyncLog.NODE_STATIONS],
+        )
+
+    def test_each_centre_answers_for_itself(self):
+        self.partial_registry_run()
+        self.sync_run(
+            node=self.node("dj-anm"),
+            stepped_over=[("0-20000-0-63125", "value too long")],
+        )
+
+        self.assertEqual(
+            sorted(row.read_from for row in self.report()), ["dj-anm", "ke-meteo"]
+        )
+
+    def test_the_run_that_builds_the_registry_is_reported_by_its_catalogue(self):
+        """The one that dropped nine of the region's sixty-three datasets."""
+        self.sync_run(
+            catalogue=self.writer,
+            sync_type=SyncLog.CATALOGUE,
+            stepped_over=[("urn:wmo:md:ke-meteo:synop", "duplicate key value")],
+        )
+
+        (row,) = self.report()
+
+        self.assertEqual(row.read_from, "int-wmo-global-discovery")
+        self.assertEqual(row.kind, SyncLog.CATALOGUE)
+
+    def test_a_run_against_no_centre_at_all_says_it_read_the_region(self):
+        """OSCAR answers territory by territory; a sweep hears whoever publishes."""
+        self.sync_run(
+            sync_type=SyncLog.OSCAR_STATIONS,
+            stepped_over=[("0-404-0-toolong", "value too long")],
+        )
+
+        (row,) = self.report()
+
+        self.assertEqual(row.read_from, "")
+        self.assertTrue(row.read_from_label)
+
+    def test_a_run_older_than_the_window_is_not_reported(self):
+        """A sync nobody runs any more would otherwise stand here for good."""
+        self.partial_registry_run(hours_ago=24 * 30)
+
+        self.assertEqual(self.report(), [])
+
+    def test_how_far_back_a_run_still_speaks_for_a_sync_is_a_setting(self):
+        self.partial_registry_run(hours_ago=24 * 30)
+
+        self.assertEqual(len(self.report(within_days=60)), 1)
+
+    def test_the_report_reads_worst_first(self):
+        self.partial_registry_run()
+        self.sync_run(
+            node=self.node("dj-anm"),
+            stepped_over=[("a", "refused"), ("b", "refused")],
+            hours_ago=2,
+        )
+
+        self.assertEqual(
+            [row.read_from for row in self.report()], ["dj-anm", "ke-meteo"]
+        )
+
+    def test_a_run_that_kept_fewer_reasons_than_it_stepped_over_says_so(self):
+        """The ceiling on reasons is a fault named once, not a report shortened."""
+        self.sync_run(
+            node=self.kenya,
+            stepped_over=[("0-20000-0-63741", "value too long")],
+            errored=9,
+        )
+
+        (row,) = self.report()
+
+        self.assertEqual(row.reasons_withheld, 8)
+
+    def test_the_index_counts_what_the_report_lists(self):
+        self.partial_registry_run()
+        self.sync_run(node=self.node("dj-anm"), status=SyncLog.SUCCESS)
+
+        self.assertEqual(self.counted(), len(self.report()))
+        self.assertEqual(self.counted(), 1)
+
+
+class SteppedOverRunNoticeTests(SteppedOverRunTestCase):
+    """What a digest says about a sync that is losing records."""
+
+    def notice(self, row):
+        return gap_report("syncs-stepping-over-records").describe_row(row)
+
+    def test_the_notice_names_the_sync_the_count_and_the_first_reason(self):
+        self.partial_registry_run()
+
+        (row,) = self.report()
+        notice = self.notice(row)
+
+        self.assertIn("ke-meteo", notice.summary)
+        self.assertIn("1 of 63", notice.summary)
+        self.assertIn("value too long for column name", notice.summary)
+
+    def test_the_notice_keys_on_the_sync_rather_than_on_the_run(self):
+        """A sync losing records every hour is one finding, not one an hour."""
+        self.partial_registry_run(hours_ago=3)
+
+        (first,) = self.report()
+
+        self.partial_registry_run(hours_ago=1)
+
+        (second,) = self.report()
+
+        self.assertNotEqual(first.run_id, second.run_id)
+        self.assertEqual(self.notice(first).key, self.notice(second).key)
+
+    def test_a_run_that_kept_no_reasons_still_says_what_it_lost(self):
+        self.sync_run(node=self.kenya, errored=9, stepped_over=[])
+
+        (row,) = self.report()
+
+        self.assertIn("9 of 63", self.notice(row).summary)
+
+
 class GapReportSummaryTests(GapReportTestCase):
-    """The index that says which of the six is worth opening."""
+    """The index that says which of the seven is worth opening."""
 
     def test_every_report_is_summarised(self):
         self.assertEqual(
