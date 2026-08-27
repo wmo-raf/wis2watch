@@ -90,9 +90,9 @@ class AttributionTests(ArchiveTestCase):
     def test_every_notification_is_stored_against_the_centre_that_was_asked(self):
         self.poll_capture()
 
-        self.assertEqual(NotificationMessage.objects.count(), 14)
+        self.assertEqual(NotificationMessage.objects.count(), 13)
         self.assertEqual(
-            NotificationMessage.objects.filter(node=self.node).count(), 14
+            NotificationMessage.objects.filter(node=self.node).count(), 13
         )
 
     def test_no_stored_row_claims_a_topic(self):
@@ -138,23 +138,25 @@ class AttributionTests(ArchiveTestCase):
 
         undeclared = NotificationMessage.objects.filter(dataset__isnull=True)
 
-        self.assertEqual(undeclared.count(), 14)
+        self.assertEqual(undeclared.count(), 13)
         self.assertEqual(undeclared.exclude(node=self.node).count(), 0)
 
-    def test_a_metadata_notification_is_stored_as_the_broker_path_stores_one(self):
-        """It names no dataset and no station, and is kept for all that."""
+    def test_the_centre_s_announcement_of_its_own_record_is_set_aside(self):
+        """The archive names no topic, so the data identifier answers it.
+
+        It is not a publication, and stored it would count as one everywhere a
+        centre's volume is read -- including for a centre whose archive holds
+        nothing else.
+        """
         self.dataset()
 
         self.poll_capture()
 
-        announcement = NotificationMessage.objects.get(
-            data_id=SC_METADATA_NOTIFICATION
+        self.assertFalse(
+            NotificationMessage.objects.filter(
+                data_id=SC_METADATA_NOTIFICATION
+            ).exists()
         )
-
-        self.assertEqual(announcement.node, self.node)
-        self.assertIsNone(announcement.dataset)
-        self.assertIsNone(announcement.station)
-        self.assertEqual(announcement.metadata_id, "")
 
     def test_a_station_seen_transmitting_is_written_down(self):
         self.poll_capture()
@@ -189,7 +191,7 @@ class RepeatedPollTests(ArchiveTestCase):
         self.poll_capture()
         self.poll_capture()
 
-        self.assertEqual(NotificationMessage.objects.count(), 14)
+        self.assertEqual(NotificationMessage.objects.count(), 13)
 
     def test_two_centres_archives_do_not_collide(self):
         other = WIS2Node.objects.create(centre_id="gh-gmet", name="Ghana Met")
@@ -203,8 +205,8 @@ class RepeatedPollTests(ArchiveTestCase):
             fetch=pages(load_json_fixture(DEEP)),
         )
 
-        self.assertEqual(NotificationMessage.objects.filter(node=self.node).count(), 14)
-        self.assertEqual(NotificationMessage.objects.filter(node=other).count(), 10)
+        self.assertEqual(NotificationMessage.objects.filter(node=self.node).count(), 13)
+        self.assertEqual(NotificationMessage.objects.filter(node=other).count(), 9)
 
 
 class SyncLogTests(ArchiveTestCase):
@@ -219,17 +221,18 @@ class SyncLogTests(ArchiveTestCase):
         self.assertIsNotNone(sync_log.completed_at)
 
     def test_it_reports_what_the_archive_offered_and_what_was_stored(self):
+        """The page carries fourteen; one of them announces a record."""
         sync_log = self.poll_capture()
 
-        self.assertEqual(sync_log.items_found, 14)
-        self.assertEqual(sync_log.items_created, 14)
+        self.assertEqual(sync_log.items_found, 13)
+        self.assertEqual(sync_log.items_created, 13)
         self.assertEqual(sync_log.items_errored, 0)
 
     def test_it_counts_every_page_it_read(self):
         sync_log = self.poll(load_json_fixture(SHALLOW), load_json_fixture(DEEP))
 
-        self.assertEqual(sync_log.items_found, 24)
-        self.assertEqual(sync_log.items_created, 24)
+        self.assertEqual(sync_log.items_found, 22)
+        self.assertEqual(sync_log.items_created, 22)
 
     def test_one_unusable_notification_does_not_cost_the_page_it_came_on(self):
         payload = load_json_fixture(SHALLOW)
@@ -238,10 +241,10 @@ class SyncLogTests(ArchiveTestCase):
         sync_log = self.poll(payload)
 
         self.assertEqual(sync_log.status, SyncLog.PARTIAL)
-        self.assertEqual(sync_log.items_found, 15)
-        self.assertEqual(sync_log.items_created, 14)
+        self.assertEqual(sync_log.items_found, 14)
+        self.assertEqual(sync_log.items_created, 13)
         self.assertEqual(sync_log.items_errored, 1)
-        self.assertEqual(NotificationMessage.objects.count(), 14)
+        self.assertEqual(NotificationMessage.objects.count(), 13)
 
 
 class ReachabilityTests(ArchiveTestCase):
@@ -297,8 +300,8 @@ class ReachabilityTests(ArchiveTestCase):
         )
 
         self.assertEqual(sync_log.status, SyncLog.FAILED)
-        self.assertEqual(sync_log.items_found, 14)
-        self.assertEqual(NotificationMessage.objects.count(), 14)
+        self.assertEqual(sync_log.items_found, 13)
+        self.assertEqual(NotificationMessage.objects.count(), 13)
 
 
 class FetchTests(ArchiveTestCase):

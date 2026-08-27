@@ -45,8 +45,10 @@ from .oscar import (
 from .timestamps import parse_timestamp
 from .topics import (
     CACHE,
+    METADATA,
     ORIGIN,
     ParsedTopic,
+    announces_catalogue_record,
     parse_topic,
     subscription_topic,
     sweep_topic,
@@ -56,6 +58,7 @@ __all__ = [
     "BrokerConnection",
     "CACHE",
     "DEFAULT_PORTS",
+    "METADATA",
     "OPERATIONAL",
     "DiscoveredDataset",
     "DiscoveredNode",
@@ -65,6 +68,7 @@ __all__ = [
     "OscarStation",
     "ParsedNotification",
     "ParsedTopic",
+    "announces_catalogue_record",
     "archived_notifications",
     "canonical_link",
     "centre_id_from_identifier",

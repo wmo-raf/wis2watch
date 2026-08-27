@@ -23,7 +23,11 @@ from wis2watch.core.models import (
     StationSource,
     WIS2Node,
 )
-from wis2watch.core.tests.support import in_region, load_jsonl_fixture
+from wis2watch.core.tests.support import (
+    in_region,
+    load_json_fixture,
+    load_jsonl_fixture,
+)
 from wis2watch.ingest.store import store_notifications
 
 CAPTURE = "global_broker_notifications.jsonl"
@@ -35,6 +39,35 @@ KE_STATION = "0-20000-0-63708"
 
 DJ_TOPIC = "origin/a/wis2/dj-anm/data/recommended/weather/aviation/taf"
 BR_TOPIC = "origin/a/wis2/br-inmet/data/core/weather/surface-based-observations/synop"
+
+#: A centre's own archive, which is where a real catalogue-record announcement
+#: was captured: the broker capture happens to carry none, and this is the same
+#: notification as it goes out -- the archive returns the message itself.
+ARCHIVE_CAPTURE = "node_messages_sc_seychelles_met.json"
+
+SC_METADATA_TOPIC = "origin/a/wis2/sc-seychelles-met/metadata"
+SC_TOPIC = (
+    "origin/a/wis2/sc-seychelles-met/data/core/weather/"
+    "surface-based-observations/synop"
+)
+
+
+def catalogue_record_announcement():
+    """The captured announcement of a centre's own WCMP2 record."""
+    for feature in load_json_fixture(ARCHIVE_CAPTURE)["features"]:
+        if feature["properties"]["data_id"].split("/")[1:2] == ["metadata"]:
+            return feature
+
+    raise AssertionError(f"no catalogue-record announcement in {ARCHIVE_CAPTURE}")
+
+
+def archived_data_notification():
+    """A captured data notification from the same centre's archive."""
+    for feature in load_json_fixture(ARCHIVE_CAPTURE)["features"]:
+        if feature["properties"]["data_id"].split("/")[1:2] != ["metadata"]:
+            return feature
+
+    raise AssertionError(f"no data notification in {ARCHIVE_CAPTURE}")
 
 
 def captured():
@@ -358,6 +391,115 @@ class RegionTests(StoreTestCase):
 
         self.assertIsNotNone(record)
         self.assertEqual(record.topic, "some/other/thing")
+
+
+class CatalogueRecordTests(StoreTestCase):
+    """A centre announcing its own record is not a centre publishing data.
+
+    Every centre re-announces its WCMP2 record periodically, and nothing in the
+    payload distinguishes that from a publication -- so stored, it would count
+    as traffic on every volume surface and keep a centre that has published
+    nothing looking as though it had.
+    """
+
+    def setUp(self):
+        super().setUp()
+
+        self.centre = WIS2Node.objects.create(
+            centre_id="sc-seychelles-met", name="Seychelles Met"
+        )
+
+    def announcement_on(self, topic):
+        return (topic, catalogue_record_announcement())
+
+    def test_an_announcement_on_the_metadata_topic_is_not_stored(self):
+        record = store_one(self.source, *self.announcement_on(SC_METADATA_TOPIC))
+
+        self.assertIsNone(record)
+        self.assertEqual(NotificationMessage.objects.count(), 0)
+
+    def test_a_cache_republishing_one_is_not_stored_either(self):
+        record = store_one(
+            self.source,
+            *self.announcement_on(
+                SC_METADATA_TOPIC.replace("origin/", "cache/")
+            ),
+        )
+
+        self.assertIsNone(record)
+        self.assertEqual(NotificationMessage.objects.count(), 0)
+
+    def test_the_same_centre_s_data_is_still_stored(self):
+        counts = store_notifications(
+            self.source,
+            [
+                self.announcement_on(SC_METADATA_TOPIC),
+                (SC_TOPIC, archived_data_notification()),
+            ],
+        )
+
+        record = NotificationMessage.objects.get()
+
+        self.assertEqual(counts.accepted, 1)
+        self.assertEqual(record.node, self.centre)
+        self.assertEqual(record.topic, SC_TOPIC)
+
+    def test_an_announcement_is_counted_as_the_thing_it_is(self):
+        counts = store_notifications(
+            self.source, [self.announcement_on(SC_METADATA_TOPIC)]
+        )
+
+        self.assertEqual(counts.catalogue_records, 1)
+        self.assertEqual(counts.accepted, 0)
+        self.assertEqual(counts.discarded, 0)
+        self.assertIn("catalogue_records=1", counts.summary)
+
+    def test_an_announcement_does_not_move_the_centre_s_last_seen(self):
+        store_notifications(self.source, [self.announcement_on(SC_METADATA_TOPIC)])
+
+        self.assertEqual(NodeLastSeen.objects.count(), 0)
+
+    def test_an_announcement_from_a_centre_s_own_archive_is_not_stored_either(self):
+        """The archive returns no topic, so the data identifier answers it."""
+        counts = store_notifications(
+            self.source,
+            [("", catalogue_record_announcement())],
+            node=self.centre,
+        )
+
+        self.assertEqual(counts.catalogue_records, 1)
+        self.assertEqual(NotificationMessage.objects.count(), 0)
+
+    def test_the_archive_s_data_notifications_are_still_stored(self):
+        counts = store_notifications(
+            self.source,
+            [("", archived_data_notification())],
+            node=self.centre,
+        )
+
+        self.assertEqual(counts.accepted, 1)
+        self.assertEqual(NotificationMessage.objects.get().node, self.centre)
+
+    def test_an_unregistered_centre_announcing_its_record_is_still_reported(self):
+        """It is a centre of the region that the registry has no record of."""
+        WIS2Node.objects.filter(pk=self.centre.pk).delete()
+
+        counts = store_notifications(
+            self.source, [self.announcement_on(SC_METADATA_TOPIC)]
+        )
+
+        self.assertEqual(
+            counts.unregistered_centres, {"sc-seychelles-met": SC_METADATA_TOPIC}
+        )
+
+    def test_another_region_s_announcement_is_refused_as_out_of_region(self):
+        counts = store_notifications(
+            self.source,
+            [self.announcement_on("origin/a/wis2/br-inmet/metadata")],
+        )
+
+        self.assertEqual(counts.out_of_region, 1)
+        self.assertEqual(counts.catalogue_records, 0)
 
 
 class DatasetAttributionTests(StoreTestCase):

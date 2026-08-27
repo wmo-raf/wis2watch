@@ -24,8 +24,10 @@ surveyed it costs the same -- each declares a single dataset -- and a message
 whose metadata identifier names no registered dataset is the strongest evidence
 this tool can get that a centre is transmitting undeclared data, since it comes
 from the centre's own archive. Asking per dataset could only ever return the
-datasets already known. Metadata notifications come back mixed in with data
-ones and are stored, as the broker path stores them.
+datasets already known. The centre's announcement of its own catalogue record
+comes back mixed in with the data notifications and is set aside, as the broker
+path sets one aside -- with no topic to recognise it by, the data identifier
+spells the same path the topic would have.
 
 **The window is a fixed trailing one, asked for again each time.** Publication
 time is the publisher's own claim, so a message stamped behind a watermark
@@ -152,7 +154,7 @@ def _record_answer(source, error=""):
 
 
 def _store_page(source, payload):
-    """Store one page of notifications, reporting what became of them.
+    """Store one page of notifications, reporting how many it published.
 
     The node is handed to the store rather than left to be read off a topic:
     the poll knows whose archive it asked for, and the messages carry nothing
@@ -160,11 +162,16 @@ def _store_page(source, payload):
     what to do with one that cannot be identified in time -- is the store's,
     which is the point of writing through it.
 
-    Two of the store's outcomes are the only ones a poll can come back with:
-    accepted, and unstorable. Nothing here can be refused for belonging to
-    another region, since that is decided from the centre a message's topic
-    names and these name none -- which is why what the run reports adds up
-    without counting it.
+    What is returned is what the page offered that the poll had any business
+    with, which is what a sync log means by "found". A centre's announcement of
+    its own catalogue record is not a publication and is left out of it, so
+    that a run's found, created and errored go on adding up rather than the
+    announcement reading as a notification that went missing.
+
+    Two of the store's outcomes are the only ones a poll can come back with
+    besides that: accepted, and unstorable. Nothing here can be refused for
+    belonging to another region, since that is decided from the centre a
+    message's topic names and these name none.
     """
     notifications = archived_notifications(payload)
 
@@ -174,7 +181,7 @@ def _store_page(source, payload):
         node=source.node,
     )
 
-    return len(notifications), counts
+    return len(notifications) - counts.catalogue_records, counts
 
 
 def poll_message_archive(
@@ -210,9 +217,9 @@ def poll_message_archive(
 
     try:
         for payload in fetch(source, since=since, until=until, max_pages=max_pages):
-            offered, stored = _store_page(source, payload)
+            published, stored = _store_page(source, payload)
 
-            counts.found += offered
+            counts.found += published
             counts.created += stored.accepted
             counts.errored += stored.discarded
     except PagingDidNotTerminate as exc:
