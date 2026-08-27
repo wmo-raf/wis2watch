@@ -29,8 +29,8 @@ from .interpretation import extract_node_stations
 from .models import Station, StationSource, SyncLog
 from .sync import (
     CREATED,
-    ERRORED,
     UPDATED,
+    SteppedOver,
     SyncCounts,
     declared_position,
     fetch_pages,
@@ -130,7 +130,7 @@ def apply_declared_station(node, declared):
             exc,
         )
 
-        return ERRORED
+        return SteppedOver(item=declared.wigos_id, reason=str(exc))
 
 
 def sync_node_stations(node, fetch=None):

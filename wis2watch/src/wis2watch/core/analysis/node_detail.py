@@ -110,7 +110,14 @@ class NodeDatasetRow:
 
 @dataclass(frozen=True)
 class SyncRunRow:
-    """One run of a sync job, as the page reports it."""
+    """One run of a sync job, as the page reports it.
+
+    Two failures rather than one count, because they send a reader two
+    different ways. ``error_message`` is what stopped the run; ``stepped_over``
+    is the records it read and could not store, which is what a page opened to
+    ask "where did this dataset go" is actually being asked about -- and a row
+    that gave only the count would answer it with a number.
+    """
 
     run_id: int
     scope: str
@@ -125,11 +132,17 @@ class SyncRunRow:
     items_updated: int
     items_errored: int
     error_message: str
+    stepped_over: list
 
     @property
     def scope_label(self):
         """Whose run this was, for a table cell."""
         return SyncScope.LABELS.get(self.scope, self.scope)
+
+    @property
+    def reasons_withheld(self):
+        """How many stepped-over records this run kept no reason for."""
+        return max(self.items_errored - len(self.stepped_over), 0)
 
 
 @dataclass(frozen=True)
@@ -366,6 +379,7 @@ def _sync_run_row(run, scope):
         items_updated=run.items_updated,
         items_errored=run.items_errored,
         error_message=run.error_message,
+        stepped_over=run.stepped_over,
     )
 
 

@@ -1,0 +1,61 @@
+{% extends "wis2watchcore/gap_reports/base.html" %}
+
+{% load i18n %}
+
+{% block report_note %}
+    <p class="report-note">
+        {% trans "Every sync leaves a log whether it worked or not, and a run that reached its source and could not store some of what it read is recorded as a partial success. These are the syncs whose newest run is one of those: the records are missing from the region as far as every other page here can tell, and this is where the run says which ones and what refused them." %}
+    </p>
+{% endblock %}
+
+{% block table_head %}
+    <th>{% trans "Read from" %}</th>
+    <th>{% trans "Sync" %}</th>
+    <th>{% trans "Last run" %}</th>
+    <th class="numeric">{% trans "Stored" %}</th>
+    <th class="numeric">{% trans "Stepped over" %}</th>
+    <th>{% trans "What was lost, and why" %}</th>
+{% endblock %}
+
+{% block table_row %}
+    <td>
+        {% if row.read_from %}
+            <code>{{ row.read_from }}</code>
+        {% else %}
+            {{ row.read_from_label }}
+        {% endif %}
+    </td>
+    <td>{{ row.kind_label }}</td>
+    <td>
+        {{ row.started_at|date:"Y-m-d H:i" }}
+        <div class="row-detail">
+            {% blocktrans with hours=row.hours_ago|floatformat:1 %}{{ hours }}h ago{% endblocktrans %}
+        </div>
+    </td>
+    <td class="numeric">{{ row.items_stored }} / {{ row.items_found }}</td>
+    <td class="numeric">
+        <span class="badge badge-warning">{{ row.items_errored }}</span>
+    </td>
+    {% comment %}
+        The column the report exists for. A run recorded before runs kept
+        their reasons has the count and nothing here, which is what it knows:
+        the row says the reasons were not kept rather than leaving a reader to
+        wonder whether the records were.
+    {% endcomment %}
+    <td class="wrapping">
+        {% for record in row.stepped_over %}
+            <div class="row-detail">
+                <code>{{ record.item }}</code> — {{ record.reason }}
+            </div>
+        {% endfor %}
+        {% if row.reasons_withheld %}
+            <div class="row-detail">
+                {% blocktrans with count=row.reasons_withheld %}and {{ count }} more, whose reasons were not kept{% endblocktrans %}
+            </div>
+        {% endif %}
+    </td>
+{% endblock %}
+
+{% block empty_message %}
+    {% trans "Every sync stored everything its newest run read" %}
+{% endblock %}

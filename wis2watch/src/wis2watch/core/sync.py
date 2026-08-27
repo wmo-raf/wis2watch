@@ -8,8 +8,11 @@ once, here, rather than once per sync:
 - **How a collection is read.** Page after page, following the server's own
   ``next`` link, with a ceiling so that links which cycle cannot spin.
 - **What became of the records.** The same four counts, and a run that stepped
-  over a record it could not store succeeded only partly. That is what keeps
-  two sync logs comparable when they are read side by side on a node's page.
+  over a record it could not store succeeded only partly -- and says which
+  records those were and what refused them, because the count on its own is a
+  reader told that nine things are missing and given no way to find out which.
+  That is what keeps two sync logs comparable when they are read side by side
+  on a node's page.
 - **Where a source places a station.** Every source that declares a station
   gives it a latitude, a longitude and sometimes an elevation, and the canonical
   location is one three-dimensional point whichever source supplied it.
@@ -18,7 +21,7 @@ What differs between the syncs -- which URL, which credentials, how long to
 wait -- stays with the sync that knows it.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import requests
 from django.contrib.gis.geos import Point
@@ -40,6 +43,20 @@ ERRORED = "errored"
 MAX_PAGES = 50
 
 FETCH_TIMEOUT = 60
+
+#: How many of a run's stepped-over records are recorded with their reasons.
+#: A run that steps over a handful has a list of records somebody can go and
+#: fix; a run that steps over a thousand has one fault, and the first fifty
+#: reasons name it as well as the thousandth would. ``items_errored`` keeps
+#: counting past this, so a run that stepped over more than it recorded says so
+#: by the two numbers disagreeing rather than by quietly listing fewer.
+MAX_STEPPED_OVER_RECORDED = 50
+
+#: How much of one record's reason is kept. Records are refused in prose, and a
+#: database quoting the row it would not take, or a source answering with a
+#: page of HTML, would otherwise put a screenful per record into a log that is
+#: read a run at a time.
+MAX_REASON_CHARS = 300
 
 
 class PagingDidNotTerminate(Exception):
@@ -117,6 +134,34 @@ def declared_position(declared):
     )
 
 
+@dataclass(frozen=True)
+class SteppedOver:
+    """One record a run read and could not store, and what refused it.
+
+    What a sync reports for such a record, in place of a bare ``ERRORED``. The
+    count on its own is what let a unique constraint drop a centre's largest
+    observation feed for four days: a run reporting that it errored on nine of
+    sixty-three names neither the nine nor the constraint, and the only trace
+    of either was a line in a worker's output nobody reads.
+
+    ``item`` is what the record is called at its source -- a dataset
+    identifier, a WIGOS identifier, a centre ID -- because the source is where
+    whoever reads this has to go next.
+    """
+
+    item: str
+    reason: str
+
+    def as_recorded(self):
+        """This one as a sync log keeps it: one line of it, and not a page."""
+        reason = " ".join(str(self.reason).split())
+
+        if len(reason) > MAX_REASON_CHARS:
+            reason = reason[: MAX_REASON_CHARS - 1].rstrip() + "\u2026"
+
+        return {"item": str(self.item), "reason": reason}
+
+
 @dataclass
 class SyncCounts:
     """What became of the records a run read.
@@ -129,10 +174,23 @@ class SyncCounts:
     created: int = 0
     updated: int = 0
     errored: int = 0
+    stepped_over: list = field(default_factory=list)
 
     def record(self, outcome):
-        """Count one record's outcome: ``CREATED``, ``UPDATED`` or ``ERRORED``,
-        each of which names the field it counts into."""
+        """Count one record's outcome.
+
+        ``CREATED`` and ``UPDATED`` each name the field they count into. A
+        record the run stepped over comes back as a ``SteppedOver``, which
+        counts as an error and keeps its reason with it; a bare ``ERRORED`` is
+        still counted, for a caller with nothing to say about which record it
+        was.
+        """
+        if isinstance(outcome, SteppedOver):
+            if len(self.stepped_over) < MAX_STEPPED_OVER_RECORDED:
+                self.stepped_over.append(outcome)
+
+            outcome = ERRORED
+
         setattr(self, outcome, getattr(self, outcome) + 1)
 
     @property
@@ -148,6 +206,7 @@ class SyncCounts:
         sync_log.items_created = self.created
         sync_log.items_updated = self.updated
         sync_log.items_errored = self.errored
+        sync_log.stepped_over = [record.as_recorded() for record in self.stepped_over]
         sync_log.completed_at = dj_timezone.now()
         sync_log.save()
 

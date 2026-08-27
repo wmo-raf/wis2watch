@@ -377,6 +377,7 @@ class SyncRunTests(NodeDetailTestCase):
         hours_ago=1,
         error="",
         sync_type=SyncLog.NODE_STATIONS,
+        stepped_over=None,
     ):
         return SyncLog.objects.create(
             node=self.kenya if node is None else node,
@@ -384,7 +385,32 @@ class SyncRunTests(NodeDetailTestCase):
             status=status,
             started_at=NOW - timedelta(hours=hours_ago),
             error_message=error,
+            stepped_over=stepped_over or [],
+            items_errored=len(stepped_over or []),
         )
+
+    def test_a_run_that_stepped_over_records_carries_which_and_why(self):
+        """The page the table is on is where somebody goes for the missing one."""
+        self.sync_run(
+            status=SyncLog.PARTIAL,
+            stepped_over=[
+                {"item": "0-20000-0-63741", "reason": "value too long for column"}
+            ],
+        )
+
+        (run,) = self.detail().sync_runs
+
+        self.assertEqual(
+            run.stepped_over,
+            [{"item": "0-20000-0-63741", "reason": "value too long for column"}],
+        )
+
+    def test_a_run_that_stored_everything_carries_nothing_of_the_kind(self):
+        self.sync_run()
+
+        (run,) = self.detail().sync_runs
+
+        self.assertEqual(run.stepped_over, [])
 
     def test_the_most_recent_runs_come_first_with_what_they_said(self):
         self.sync_run(hours_ago=5)

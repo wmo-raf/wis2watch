@@ -1755,8 +1755,16 @@ class UnregisteredCentre(TimeStampedModel):
 
 
 class SyncLog(models.Model):
-    """
-    One run of a synchronisation job, with its counts and any error.
+    """One run of a synchronisation job, with its counts and what went wrong.
+
+    Two kinds of thing go wrong in a run and the log holds both, because they
+    are two errands. ``error_message`` is what stopped the run as a whole -- a
+    refused connection, a catalogue that never stopped offering pages -- and is
+    somebody's to chase at the source or at the network. ``stepped_over`` is
+    the records the run read and could not store, which is a data problem in
+    the region or a fault in how this tool reads it, and is the difference
+    between a run that says it errored on nine records and one that says which
+    nine and what refused them.
     """
 
     CATALOGUE = "catalogue"
@@ -1818,6 +1826,15 @@ class SyncLog(models.Model):
         help_text=_("Why the run failed as a whole, as opposed to a single item"),
     )
 
+    stepped_over = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=_(
+            "Which items the run could not store, and what refused each one: "
+            "one object per item, with an ``item`` and a ``reason``"
+        ),
+    )
+
     started_at = models.DateTimeField(default=dj_timezone.now)
     completed_at = models.DateTimeField(null=True, blank=True)
 
@@ -1841,6 +1858,18 @@ class SyncLog(models.Model):
             f"{self.status} found={self.items_found} created={self.items_created} "
             f"updated={self.items_updated} errored={self.items_errored}"
         )
+
+    @property
+    def reasons_withheld(self):
+        """How many stepped-over items the run kept no reason for.
+
+        A run that steps over more items than a sync log will hold reasons for
+        records the first of them and counts the rest, and the two numbers
+        disagreeing is how it says so. Ordinarily nought: a run stepping over
+        more than a page of records is a fault in this tool rather than a list
+        of records to chase, and the reasons it did keep say which fault.
+        """
+        return max(self.items_errored - len(self.stepped_over), 0)
 
 
 class ReportedFinding(models.Model):
