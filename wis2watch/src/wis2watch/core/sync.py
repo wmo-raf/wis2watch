@@ -28,7 +28,7 @@ from django.contrib.gis.geos import Point
 from django.utils import timezone as dj_timezone
 
 from .interpretation import next_page_url
-from .models import SyncLog
+from .models import SyncLog, one_line
 
 CREATED = "created"
 UPDATED = "updated"
@@ -52,10 +52,10 @@ FETCH_TIMEOUT = 60
 #: by the two numbers disagreeing rather than by quietly listing fewer.
 MAX_STEPPED_OVER_RECORDED = 50
 
-#: How much of one record's reason is kept. Records are refused in prose, and a
-#: database quoting the row it would not take, or a source answering with a
-#: page of HTML, would otherwise put a screenful per record into a log that is
-#: read a run at a time.
+#: How much of one record's reason is kept, ellipsis included. Longer than the
+#: excerpt a digest line quotes, because this is the copy everything else is
+#: read from: what a page shows can be cut again, and what a log never kept
+#: cannot be got back.
 MAX_REASON_CHARS = 300
 
 
@@ -154,12 +154,10 @@ class SteppedOver:
 
     def as_recorded(self):
         """This one as a sync log keeps it: one line of it, and not a page."""
-        reason = " ".join(str(self.reason).split())
-
-        if len(reason) > MAX_REASON_CHARS:
-            reason = reason[: MAX_REASON_CHARS - 1].rstrip() + "\u2026"
-
-        return {"item": str(self.item), "reason": reason}
+        return {
+            "item": str(self.item),
+            "reason": one_line(self.reason, MAX_REASON_CHARS),
+        }
 
 
 @dataclass
@@ -174,7 +172,7 @@ class SyncCounts:
     created: int = 0
     updated: int = 0
     errored: int = 0
-    stepped_over: list = field(default_factory=list)
+    stepped_over: list[SteppedOver] = field(default_factory=list)
 
     def record(self, outcome):
         """Count one record's outcome.
@@ -186,12 +184,24 @@ class SyncCounts:
         was.
         """
         if isinstance(outcome, SteppedOver):
-            if len(self.stepped_over) < MAX_STEPPED_OVER_RECORDED:
-                self.stepped_over.append(outcome)
+            self.step_over(outcome)
 
             outcome = ERRORED
 
         setattr(self, outcome, getattr(self, outcome) + 1)
+
+    def step_over(self, record):
+        """Keep one record's reason, without counting it.
+
+        Apart from ``record`` for the one caller that counts in bulk: a poll
+        that stores a page at a time is told how many of it the store refused
+        and separately which they were, and adding the count per record would
+        be counting the page twice. The ceiling is here rather than at either
+        call site, so that a run cannot keep more reasons by arriving at them
+        one way rather than the other.
+        """
+        if len(self.stepped_over) < MAX_STEPPED_OVER_RECORDED:
+            self.stepped_over.append(record)
 
     @property
     def status(self):

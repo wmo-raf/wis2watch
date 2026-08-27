@@ -132,17 +132,13 @@ class SyncRunRow:
     items_updated: int
     items_errored: int
     error_message: str
-    stepped_over: list
+    stepped_over: list[dict]
+    reasons_withheld: int
 
     @property
     def scope_label(self):
         """Whose run this was, for a table cell."""
         return SyncScope.LABELS.get(self.scope, self.scope)
-
-    @property
-    def reasons_withheld(self):
-        """How many stepped-over records this run kept no reason for."""
-        return max(self.items_errored - len(self.stepped_over), 0)
 
 
 @dataclass(frozen=True)
@@ -380,6 +376,7 @@ def _sync_run_row(run, scope):
         items_errored=run.items_errored,
         error_message=run.error_message,
         stepped_over=run.stepped_over,
+        reasons_withheld=run.reasons_withheld,
     )
 
 

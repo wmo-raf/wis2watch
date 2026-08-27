@@ -163,15 +163,6 @@
             max-width: 60ch;
         }
 
-        .row-stepped-over li {
-            margin-top: 2px;
-            list-style: none;
-        }
-
-        .row-stepped-over ul {
-            margin: 2px 0 0;
-            padding: 0;
-        }
 
         .empty-state {
             text-align: center;
@@ -585,27 +576,12 @@
                             {% comment %}
                                 Beside the count and not instead of it: the
                                 count is what makes the run partial, and these
-                                are the records somebody is here to find. A run
-                                recorded before the reasons were kept has the
-                                count and nothing under it, which is honest --
-                                it never knew.
+                                are the records somebody is here to find.
                             {% endcomment %}
-                            {% if run.stepped_over %}
+                            {% if run.items_errored %}
                                 <div class="row-stepped-over">
                                     {% trans "Stepped over:" %}
-                                    <ul>
-                                        {% for record in run.stepped_over %}
-                                            <li>
-                                                <code>{{ record.item }}</code>
-                                                — {{ record.reason }}
-                                            </li>
-                                        {% endfor %}
-                                    </ul>
-                                    {% if run.reasons_withheld %}
-                                        <div>
-                                            {% blocktrans with count=run.reasons_withheld %}and {{ count }} more, whose reasons were not kept{% endblocktrans %}
-                                        </div>
-                                    {% endif %}
+                                    {% include "wis2watchcore/includes/stepped_over_records.html" with records=run.stepped_over withheld=run.reasons_withheld %}
                                 </div>
                             {% endif %}
                         </td>

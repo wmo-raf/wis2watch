@@ -1423,6 +1423,35 @@ class PropagationGapQuerySet(models.QuerySet):
         return self.filter(published_at__lt=evidence_horizon(now))
 
 
+def one_line(message, limit):
+    """As much of one line of a message as a reader has any use for.
+
+    Sources and databases fail in prose. A refused connection is a phrase, a
+    constraint violation quotes the row it would not take, and a proxy
+    answering with a page of HTML is a screenful -- and every one of them
+    arrives where something is about to hold twenty of them side by side, on a
+    row, in a sync log or in a morning's mail.
+
+    Said here, beside the fields that hold the trimmed text, because the run
+    that records a reason and the report that quotes one are in two layers
+    that do not import each other, and two copies of a rule about how long a
+    line may be is how they come to disagree about it.
+
+    Args:
+        message: whatever went wrong, as it was reported.
+        limit: how many characters of it may be kept, ellipsis included.
+
+    Returns:
+        str: the message on one line, cut to the limit if it ran past it.
+    """
+    excerpt = " ".join(str(message).split())
+
+    if len(excerpt) <= limit:
+        return excerpt
+
+    return excerpt[: limit - 1].rstrip() + "\u2026"
+
+
 def evidence_horizon(now=None):
     """The instant before which a gap's evidence is no longer held.
 
@@ -1829,10 +1858,7 @@ class SyncLog(models.Model):
     stepped_over = models.JSONField(
         default=list,
         blank=True,
-        help_text=_(
-            "Which items the run could not store, and what refused each one: "
-            "one object per item, with an ``item`` and a ``reason``"
-        ),
+        help_text=_("Which items the run could not store, and what refused each one"),
     )
 
     started_at = models.DateTimeField(default=dj_timezone.now)
@@ -1867,7 +1893,13 @@ class SyncLog(models.Model):
         records the first of them and counts the rest, and the two numbers
         disagreeing is how it says so. Ordinarily nought: a run stepping over
         more than a page of records is a fault in this tool rather than a list
-        of records to chase, and the reasons it did keep say which fault.
+        of records to chase, and the reasons it did keep say which fault. A run
+        recorded before runs kept reasons at all withholds every one of them,
+        which is honest -- it never knew.
+
+        Said once here rather than by each surface that shows it. Two pages
+        and a digest read this, and three of them working it out separately is
+        how one of them comes to disagree about what a run lost.
         """
         return max(self.items_errored - len(self.stepped_over), 0)
 

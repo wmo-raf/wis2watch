@@ -21,12 +21,15 @@ single view of one centre can show:
 * how much of each centre's traffic says nothing about which station it came
   from.
 
-The last two are the ones that are findings about this tool's own reading
-rather than about the region alone, and they earn their place beside the
-others for the reason all of them are here: nobody was looking. A registry
-that fails every hourly run leaves a failed sync log every hour, and until
-something read them the failure was visible only to whoever opened that
-centre's page already suspecting it -- which for fifty-four countries is
+The last two are findings about this tool rather than about the region alone
+-- what it could not attribute to a station, and what it read and could not
+store -- and they earn their place beside the others for the reason all of
+them are here: nobody was looking.
+
+That reason is worth spelling out once, on the report that shows it plainest.
+A registry that fails every hourly run leaves a failed sync log every hour,
+and until something read them the failure was visible only to whoever opened
+that centre's page already suspecting it -- which for fifty-four countries is
 nobody. It is a pattern over time rather than one bad run, so it is reported
 where the patterns are rather than announced as a hard failure: one centre's
 dead registry costs one of the three station pictures for one centre, and the
@@ -94,6 +97,7 @@ from ..models import (
     UnregisteredCentre,
     WIS2Node,
     evidence_horizon,
+    one_line,
 )
 from ..rollups import window_start
 from .reachability import OriginTransport
@@ -453,7 +457,8 @@ class SteppedOverRunRow:
     hours_ago: float
     items_found: int
     items_errored: int
-    stepped_over: list
+    stepped_over: list[dict]
+    reasons_withheld: int
 
     @property
     def read_from_label(self):
@@ -470,18 +475,6 @@ class SteppedOverRunRow:
     def items_stored(self):
         """How much of the run did land, which is why it is not a failed one."""
         return self.items_found - self.items_errored
-
-    @property
-    def reasons_withheld(self):
-        """How many of the lost records the run kept no reason for.
-
-        Ordinarily nought. A run stepping over more records than a sync log
-        will hold reasons for is one fault rather than a list, and the two
-        numbers disagreeing is how the row says so rather than quietly
-        listing fewer than it counted. A run recorded before runs kept reasons
-        at all withholds every one of them, which is honest: it never knew.
-        """
-        return max(self.items_errored - len(self.stepped_over), 0)
 
 
 def stations_declared_but_silent(*, now=None):
@@ -953,6 +946,7 @@ def _stepped_over_run_row(run, *, now):
         items_found=run.items_found,
         items_errored=run.items_errored,
         stepped_over=run.stepped_over,
+        reasons_withheld=run.reasons_withheld,
     )
 
 
@@ -1160,16 +1154,11 @@ def _unanswered_registry_row(node, *, error, now):
 def _error_excerpt(message):
     """An error as much of one line of it as a reader needs.
 
-    Registries fail in prose. A refused connection is a phrase; a proxy
-    answering with an HTML error page is a screenful, and a report or an email
-    that quoted it whole would bury the twenty findings around it.
+    A report or an email that quoted a proxy's HTML error page whole would
+    bury the twenty findings around it. Shorter than what a sync log keeps,
+    which is the copy this is cut from.
     """
-    excerpt = " ".join(message.split())
-
-    if len(excerpt) <= ERROR_EXCERPT_CHARS:
-        return excerpt
-
-    return excerpt[: ERROR_EXCERPT_CHARS - 1].rstrip() + "\u2026"
+    return one_line(message, ERROR_EXCERPT_CHARS)
 
 
 def _silent_declarations():
@@ -1713,7 +1702,7 @@ class GapReportSummary:
 
 #: The seven reports, in the order the index shows them: what is declared and
 #: missing, what is arriving and unaccounted for, then the three about the
-#: centres themselves, and last the two about this tool's own reading of them.
+#: centres themselves, and last the two about this tool rather than them.
 GAP_REPORTS = (
     GapReport(
         slug="declared-but-silent",

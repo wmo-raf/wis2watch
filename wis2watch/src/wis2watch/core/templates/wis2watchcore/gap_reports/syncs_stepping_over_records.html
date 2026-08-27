@@ -36,23 +36,9 @@
     <td class="numeric">
         <span class="badge badge-warning">{{ row.items_errored }}</span>
     </td>
-    {% comment %}
-        The column the report exists for. A run recorded before runs kept
-        their reasons has the count and nothing here, which is what it knows:
-        the row says the reasons were not kept rather than leaving a reader to
-        wonder whether the records were.
-    {% endcomment %}
+    {# The column the report exists for. #}
     <td class="wrapping">
-        {% for record in row.stepped_over %}
-            <div class="row-detail">
-                <code>{{ record.item }}</code> — {{ record.reason }}
-            </div>
-        {% endfor %}
-        {% if row.reasons_withheld %}
-            <div class="row-detail">
-                {% blocktrans with count=row.reasons_withheld %}and {{ count }} more, whose reasons were not kept{% endblocktrans %}
-            </div>
-        {% endif %}
+        {% include "wis2watchcore/includes/stepped_over_records.html" with records=row.stepped_over withheld=row.reasons_withheld %}
     </td>
 {% endblock %}
 

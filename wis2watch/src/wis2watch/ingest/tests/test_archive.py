@@ -246,6 +246,32 @@ class SyncLogTests(ArchiveTestCase):
         self.assertEqual(sync_log.items_errored, 1)
         self.assertEqual(NotificationMessage.objects.count(), 13)
 
+    def test_a_notification_that_could_not_be_stored_says_which_and_why(self):
+        """A poll reporting one discarded and not which is the log that hid #128."""
+        payload = load_json_fixture(SHALLOW)
+        payload["features"].append({"id": "no-publication-time", "properties": {}})
+
+        sync_log = self.poll(payload)
+
+        (stepped_over,) = sync_log.stepped_over
+
+        self.assertEqual(stepped_over["item"], "no-publication-time")
+        self.assertIn("publication time", stepped_over["reason"])
+
+    def test_a_notification_with_no_uuid_is_named_by_what_it_published(self):
+        """Having no UUID is one of the two reasons it is here at all."""
+        payload = load_json_fixture(SHALLOW)
+        payload["features"].append({"properties": {"data_id": "sc/synop/2026-08-12"}})
+
+        sync_log = self.poll(payload)
+
+        (stepped_over,) = sync_log.stepped_over
+
+        self.assertEqual(stepped_over["item"], "sc/synop/2026-08-12")
+
+    def test_a_run_that_stored_everything_it_read_stepped_over_nothing(self):
+        self.assertEqual(self.poll_capture().stepped_over, [])
+
 
 class ReachabilityTests(ArchiveTestCase):
     """Only a poll can settle whether a centre serves an archive at all."""
