@@ -14,6 +14,7 @@ error.
 from django.test import TestCase
 from django.utils import timezone as dj_timezone
 
+from wis2watch.core.interpretation import announces_catalogue_record
 from wis2watch.core.models import (
     Dataset,
     MessageSource,
@@ -52,22 +53,32 @@ SC_TOPIC = (
 )
 
 
-def catalogue_record_announcement():
-    """The captured announcement of a centre's own WCMP2 record."""
+def archived(*, announcing):
+    """The first captured archive message that is, or is not, an announcement.
+
+    Picked by the rule the ingest picks by rather than by one written again
+    here: a test that spelled out what a catalogue record looks like would go
+    on passing after the two spellings had drifted apart.
+    """
     for feature in load_json_fixture(ARCHIVE_CAPTURE)["features"]:
-        if feature["properties"]["data_id"].split("/")[1:2] == ["metadata"]:
+        found = announces_catalogue_record(
+            "", data_id=feature["properties"].get("data_id", "")
+        )
+
+        if found == announcing:
             return feature
 
-    raise AssertionError(f"no catalogue-record announcement in {ARCHIVE_CAPTURE}")
+    raise AssertionError(f"nothing matching in {ARCHIVE_CAPTURE}")
+
+
+def catalogue_record_announcement():
+    """The captured announcement of a centre's own WCMP2 record."""
+    return archived(announcing=True)
 
 
 def archived_data_notification():
     """A captured data notification from the same centre's archive."""
-    for feature in load_json_fixture(ARCHIVE_CAPTURE)["features"]:
-        if feature["properties"]["data_id"].split("/")[1:2] != ["metadata"]:
-            return feature
-
-    raise AssertionError(f"no data notification in {ARCHIVE_CAPTURE}")
+    return archived(announcing=False)
 
 
 def captured():

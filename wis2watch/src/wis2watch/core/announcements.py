@@ -30,18 +30,26 @@ expired, their counts are baked into rollups that no message remains to
 recompute, and no arithmetic here could tell them apart from the unattributed
 data they sit beside.
 
-Written to be run again. Finding nothing is the ordinary outcome, and a run
-that stopped half way has left behind a database this arrives at the same
-answer from.
+The removal and the rebuild are one transaction, which is the only way this
+can be safe to run again. Every step of it destroys the evidence for the step
+before -- once the announcements are deleted, a re-run finds nothing to do and
+would leave a bucket that was dropped but never recomputed missing for good,
+since nothing else ever revisits an hour that old. Held together, an
+interrupted run leaves the database exactly as it found it and running again
+starts from the beginning.
+
+Finding nothing is the ordinary outcome, and is what every run after the first
+comes to.
 """
 
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
 
+from django.db import transaction
 from django.db.models import Max, Q
 
-from .daily_rollups import floor_to_day, rollup_days
+from .daily_rollups import DAILY_GROUP_BY, floor_to_day, rollup_days
 from .interpretation import announces_catalogue_record
 from .models import (
     DailyStationRollup,
@@ -49,14 +57,15 @@ from .models import (
     NodeLastSeen,
     NotificationMessage,
 )
-from .rollups import floor_to_hour, rollup_hours
+from .rollups import GROUP_BY, floor_to_hour, rollup_hours
 
 logger = logging.getLogger(__name__)
 
-#: How many rollup buckets are named in one delete. The keys are named one by
-#: one -- a bucket is five columns, two of which are routinely null -- and a
-#: region's fortnight of announcements is a few hundred of them, so they are
-#: sent in batches rather than as one statement the length of the finding.
+#: How many rollup buckets are named in one delete. A bucket is named a column
+#: at a time, since several of those columns are routinely null and null is not
+#: something an ``IN`` matches, and a region's fortnight of announcements comes
+#: to a few hundred of them -- so they go in batches rather than as one
+#: statement the length of the finding.
 KEY_BATCH = 200
 
 #: What a stored row has to carry before it is worth interpreting. The topic
@@ -64,7 +73,16 @@ KEY_BATCH = 200
 #: this narrows a fortnight of the region's traffic to the handful of rows that
 #: could be one. It decides nothing: what a row is is decided by the same rule
 #: the ingest decides it by.
-CANDIDATES = Q(topic__contains="/metadata") | Q(data_id__contains="/metadata/")
+POSSIBLE_ANNOUNCEMENTS = Q(topic__contains="/metadata") | Q(
+    data_id__contains="/metadata/"
+)
+
+#: The hourly grain, as a message carries it: the bucket columns with the
+#: message's own publication time standing in for the bucket it falls in.
+#: Taken from the grain rather than restated here, for the reason
+#: ``grain_columns`` is -- the key a bucket is deleted by and the key it was
+#: written under have to be one key, or this deletes buckets nothing counted.
+MESSAGE_COLUMNS = ("time",) + GROUP_BY[1:]
 
 
 @dataclass
@@ -92,9 +110,8 @@ def stored_announcements():
     refuses one by. A row is a catalogue record because of where it was
     published, and there is one statement of what that means.
     """
-    candidates = NotificationMessage.objects.filter(CANDIDATES).values(
-        "id", "time", "source_id", "node_id", "dataset_id", "station_id",
-        "topic", "data_id",
+    candidates = NotificationMessage.objects.filter(POSSIBLE_ANNOUNCEMENTS).values(
+        "id", "topic", "data_id", *MESSAGE_COLUMNS
     )
 
     return [
@@ -107,60 +124,44 @@ def stored_announcements():
 def _bucket_keys(announcements):
     """The hourly buckets the announcements were counted into."""
     return {
-        (
-            floor_to_hour(row["time"]),
-            row["source_id"],
-            row["node_id"],
-            row["dataset_id"],
-            row["station_id"],
-        )
+        (floor_to_hour(row["time"]),)
+        + tuple(row[column] for column in MESSAGE_COLUMNS[1:])
         for row in announcements
     }
 
 
-def _drop_hourly_buckets(keys):
-    """Remove the hourly buckets, so an emptied one does not survive."""
+def _daily_keys(keys):
+    """The station-days summarised from those hourly buckets.
+
+    The daily grain drops the dataset and collapses the hour, so several of the
+    buckets fall into one day -- which is why a day is dropped whole rather than
+    at the grain its hours were found at. Read across the two grains by name so
+    that a column moving in either is a column that moves here.
+    """
+    return {
+        tuple(
+            floor_to_day(bucket["hour"]) if column == "day" else bucket[column]
+            for column in DAILY_GROUP_BY
+        )
+        for bucket in (dict(zip(GROUP_BY, key)) for key in keys)
+    }
+
+
+def _drop_buckets(model, columns, keys):
+    """Remove named rollup buckets, so an emptied one does not survive.
+
+    Ordered before batching only so that a run sends the same statements twice
+    running, which is what makes a failure reproducible. The sort is by the
+    written-out key because a bucket names a nullable dataset and a nullable
+    station, and None does not compare with a primary key.
+    """
     for batch in _batched(sorted(keys, key=str), KEY_BATCH):
         matches = Q()
 
-        for hour, source_id, node_id, dataset_id, station_id in batch:
-            matches |= Q(
-                hour=hour,
-                source_id=source_id,
-                node_id=node_id,
-                dataset_id=dataset_id,
-                station_id=station_id,
-            )
+        for key in batch:
+            matches |= Q(**dict(zip(columns, key)))
 
-        HourlyRollup.objects.filter(matches).delete()
-
-
-def _drop_daily_buckets(keys):
-    """Remove the station-days summarised from those buckets.
-
-    The daily summary drops the dataset, so one day of one station is rewritten
-    from every hourly bucket under it -- which is why the day is dropped whole
-    rather than by the grain the hours were found at.
-    """
-    days = {
-        (floor_to_day(hour), source_id, node_id, station_id)
-        for hour, source_id, node_id, _dataset_id, station_id in keys
-    }
-
-    for batch in _batched(sorted(days, key=str), KEY_BATCH):
-        matches = Q()
-
-        for day, source_id, node_id, station_id in batch:
-            matches |= Q(
-                day=day,
-                source_id=source_id,
-                node_id=node_id,
-                station_id=station_id,
-            )
-
-        DailyStationRollup.objects.filter(matches).delete()
-
-    return days
+        model.objects.filter(matches).delete()
 
 
 def _restate_last_seen(node_ids):
@@ -175,6 +176,12 @@ def _restate_last_seen(node_ids):
     hour rather than an instant, and understates by up to an hour a question
     asked in days. A centre with neither is one nothing has ever heard publish
     data, and its row is removed rather than left saying otherwise.
+
+    The fallback carries the same limit the rollups do: an hour older than the
+    raw retention window has no messages left to be recomputed from, so a
+    centre whose last rollup was an hour of nothing but announcements lands on
+    that hour. It is still the latest thing the region has evidence of, and it
+    is weeks earlier than the announcement that would otherwise have stood.
 
     Time only moves backwards here. This corrects an overstatement, and a run
     finding a centre that has published since cannot be the thing that decides
@@ -212,6 +219,10 @@ def _batched(items, size):
 def discard_stored_announcements():
     """Drop the announcements already stored, and rebuild what counted them.
 
+    One transaction, for the reason this module opens with: each step removes
+    the evidence the next one would be found by, so a run that stopped between
+    two of them would leave a rebuild nothing was ever going to come back for.
+
     Returns:
         DiscardCounts: what was removed and what was rebuilt.
     """
@@ -222,27 +233,29 @@ def discard_stored_announcements():
 
     keys = _bucket_keys(announcements)
     hours = sorted({key[0] for key in keys})
+    days = _daily_keys(keys)
     node_ids = {row["node_id"] for row in announcements} - {None}
 
-    NotificationMessage.objects.filter(
-        id__in=[row["id"] for row in announcements]
-    ).delete()
+    with transaction.atomic():
+        NotificationMessage.objects.filter(
+            id__in=[row["id"] for row in announcements]
+        ).delete()
 
-    _drop_hourly_buckets(keys)
-    rollup_hours(since=hours[0], until=hours[-1] + timedelta(hours=1))
+        _drop_buckets(HourlyRollup, GROUP_BY, keys)
+        rollup_hours(since=hours[0], until=hours[-1] + timedelta(hours=1))
 
-    days = _drop_daily_buckets(keys)
-    rollup_days(
-        since=floor_to_day(hours[0]),
-        until=floor_to_day(hours[-1]) + timedelta(days=1),
-    )
+        _drop_buckets(DailyStationRollup, DAILY_GROUP_BY, days)
+        rollup_days(
+            since=floor_to_day(hours[0]),
+            until=floor_to_day(hours[-1]) + timedelta(days=1),
+        )
 
-    counts = DiscardCounts(
-        messages=len(announcements),
-        hours=len(keys),
-        days=len(days),
-        nodes=_restate_last_seen(node_ids),
-    )
+        counts = DiscardCounts(
+            messages=len(announcements),
+            hours=len(keys),
+            days=len(days),
+            nodes=_restate_last_seen(node_ids),
+        )
 
     logger.info("Discarded catalogue-record announcements: %s", counts.summary)
 

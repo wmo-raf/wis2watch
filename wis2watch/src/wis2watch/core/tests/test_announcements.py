@@ -8,6 +8,7 @@ announcement has to stop reading as one heard from minutes ago.
 """
 
 from datetime import timedelta
+from unittest import mock
 
 from django.test import TestCase
 
@@ -289,6 +290,29 @@ class RepeatedRunTests(DiscardTestCase):
         counts = discard_stored_announcements()
 
         self.assertEqual(counts.messages, 0)
+        self.assertEqual(self.hours(), before)
+
+    def test_a_run_that_fails_part_way_leaves_the_database_as_it_found_it(self):
+        """Each step destroys the evidence for the last, so it is one or none.
+
+        A rebuild left undone would never be come back for: the next run finds
+        no announcements, and nothing else revisits an hour that old.
+        """
+        self.store("2026-08-12T10:05:00")
+        self.announce("2026-08-12T10:00:00")
+        self.derive()
+
+        before = self.hours()
+
+        with mock.patch(
+            "wis2watch.core.announcements.rollup_hours",
+            side_effect=OSError("the connection dropped"),
+        ):
+            with self.assertRaises(OSError):
+                discard_stored_announcements()
+
+        self.assertEqual(len(stored_announcements()), 1)
+        self.assertEqual(NotificationMessage.objects.count(), 2)
         self.assertEqual(self.hours(), before)
 
     def test_many_announcements_across_many_hours_are_all_removed(self):

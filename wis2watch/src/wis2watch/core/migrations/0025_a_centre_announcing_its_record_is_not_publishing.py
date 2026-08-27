@@ -20,8 +20,11 @@ Re-running it is safe and finding nothing is the ordinary outcome, so an
 interrupted run is put right by running it again --
 ``discard_stored_announcements()`` in a shell, which is what this calls.
 
-Not atomic, so the delete and the rebuild commit as they go rather than being
-held open against a database that is also serving ingestion.
+Declared not atomic because the atomicity that matters here is the removal's
+own, and it holds it itself: the delete and the rebuild it makes necessary are
+one transaction inside ``discard_stored_announcements``, which is what makes
+running it again safe. Leaving the migration to wrap it as well would say the
+guarantee came from being a migration, which it does not.
 """
 
 from django.db import migrations
