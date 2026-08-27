@@ -647,7 +647,6 @@ class Dataset(TimeStampedModel):
     node = models.ForeignKey(WIS2Node, on_delete=models.CASCADE, related_name="datasets")
     identifier = models.CharField(
         max_length=500,
-        unique=True,
         help_text=_("URN identifier of the dataset"),
     )
     expected_interval_override_hours = models.PositiveIntegerField(
@@ -663,7 +662,6 @@ class Dataset(TimeStampedModel):
     title = models.CharField(max_length=500)
     wmo_data_policy = models.CharField(max_length=20, choices=DATA_POLICY_CHOICES)
     wmo_topic_hierarchy = models.CharField(
-        unique=True,
         max_length=500,
         help_text=_("MQTT topic hierarchy for this dataset"),
     )
@@ -689,6 +687,20 @@ class Dataset(TimeStampedModel):
 
     class Meta:
         ordering = ["node", "title"]
+        constraints = [
+            # A centre names each of its datasets once, and that is the whole
+            # key. The topic is deliberately not part of it: a wis2box makes
+            # one dataset per station group and every one of them publishes on
+            # the centre's single surface-based-observations topic, so a
+            # centre sharing a topic between datasets is the ordinary case
+            # rather than a catalogue error. Which dataset a message on such a
+            # topic belongs to is settled by the message, not by the schema --
+            # see ``RegistryLookup.dataset``.
+            models.UniqueConstraint(
+                fields=["node", "identifier"],
+                name="unique_dataset_identifier_per_node",
+            ),
+        ]
         indexes = [
             models.Index(fields=["wmo_topic_hierarchy"]),
             models.Index(fields=["status"]),
