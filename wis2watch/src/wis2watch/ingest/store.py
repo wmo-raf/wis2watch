@@ -4,8 +4,9 @@ One Global Broker connection carries every centre, so nothing about a message
 can be inferred from the connection it arrived on: the centre is read off the
 topic, and the dataset and station off the message. Each of those may resolve
 to nothing, and each absence is recorded rather than treated as a failure --
-a centre publishing without a catalogue record, a topic no dataset claims and
-a message carrying no station are all findings this tool exists to report.
+a centre publishing without a catalogue record, a topic no dataset claims or
+several claim between them, and a message carrying no station are all findings
+this tool exists to report.
 
 A station is the exception to resolving to nothing: one that names itself and
 that no registry declares is created here, along with the record that it was
@@ -99,8 +100,9 @@ class StoreCounts:
 
     The other two are counted over what the centres published, cache copies
     left out. Both are statements about how a centre publishes -- that it omits
-    the station identifier, that it publishes on a topic its catalogue record
-    never named -- and a cached copy repeats whatever the original said.
+    the station identifier, that it publishes on a topic no record of its own
+    named or that several of its records name between them -- and a cached copy
+    repeats whatever the original said.
     Counting the copies would multiply a centre's unattributed rate by the
     number of caches watching it, which would say more about the caches than
     about the centre.
@@ -182,33 +184,55 @@ class RegistryLookup:
 
         return self._nodes[centre_id]
 
-    def dataset(self, origin_topic, metadata_id):
+    def dataset(self, node, origin_topic, metadata_id):
         """The dataset a message belongs to, or None.
 
-        The topic is asked first because it is what the centre actually
-        published on; a cache topic is reduced to the origin topic it mirrors
-        so that both vantage points resolve to one dataset. The metadata
-        identifier is the fallback, for centres publishing on a topic their
-        catalogue record never named.
+        The message's own record is asked first: a notification carrying a
+        ``metadata_id`` names the dataset it belongs to, and nothing the topic
+        can be read as outranks the publisher saying so. It is also the only
+        key that stays right where a centre publishes several datasets on one
+        topic, which is the ordinary arrangement -- one wis2box dataset per
+        station group, all of them on the centre's synop topic.
+
+        The topic answers only when exactly one live dataset claims it. A
+        cache topic is reduced to the origin topic it mirrors, so both vantage
+        points resolve to one dataset. Where several claim it, the message is
+        left unattributed rather than given to whichever row came back first:
+        an arbitrary attribution is indistinguishable from a real one
+        afterwards, and a missing one is the finding it looks like.
+
+        Both keys are the node's own. A dataset another centre declares is not
+        this centre's whatever it is called, and a centre the registry has no
+        record of has no datasets to resolve against.
         """
-        key = (origin_topic, metadata_id)
+        key = (node.pk if node else None, origin_topic, metadata_id)
 
         if key not in self._datasets:
-            self._datasets[key] = self._find_dataset(origin_topic, metadata_id)
+            self._datasets[key] = self._find_dataset(node, origin_topic, metadata_id)
 
         return self._datasets[key]
 
-    def _find_dataset(self, origin_topic, metadata_id):
-        if origin_topic:
-            dataset = Dataset.objects.filter(
-                wmo_topic_hierarchy=origin_topic
-            ).first()
-
-            if dataset:
-                return dataset
+    def _find_dataset(self, node, origin_topic, metadata_id):
+        if node is None:
+            return None
 
         if metadata_id:
-            return Dataset.objects.filter(identifier=metadata_id).first()
+            named = Dataset.objects.filter(node=node, identifier=metadata_id).first()
+
+            if named:
+                return named
+
+        if origin_topic:
+            # Two is as many as the answer turns on: one claimant resolves,
+            # and every count above that is the same "leave it unattributed".
+            claiming = Dataset.objects.filter(
+                node=node,
+                wmo_topic_hierarchy=origin_topic,
+                status=Dataset.ACTIVE,
+            )[:2]
+
+            if len(claiming) == 1:
+                return claiming[0]
 
         return None
 
@@ -270,11 +294,15 @@ def prepare_notification(source, topic, payload, lookup=None, node=None):
         else None
     )
 
+    published_by = lookup.node(parsed.centre_id) if parsed else node
+
     return NotificationMessage(
         source=lookup.vantage(source, parsed),
-        node=lookup.node(parsed.centre_id) if parsed else node,
+        node=published_by,
         dataset=lookup.dataset(
-            parsed.as_origin().raw if parsed else "", notification.metadata_id
+            published_by,
+            parsed.as_origin().raw if parsed else "",
+            notification.metadata_id,
         ),
         station=station,
         notification_id=notification.notification_id,

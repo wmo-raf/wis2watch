@@ -10,6 +10,7 @@ centre -- ``ke-meteo``, ``cg-met``, ``sz-swazimet``, ``gh-gmet`` and
 ``ke-meteo`` and ``tg-anamet`` advertise an address of their own.
 """
 
+import copy
 from datetime import timedelta
 from io import StringIO
 from unittest import mock
@@ -39,6 +40,8 @@ MONITORED_CENTRE_IDS = {"ke-meteo", "cg-met", "sz-swazimet", "gh-gmet", "tg-anam
 
 KE_DATASET = "urn:wmo:md:ke-meteo:synop-dataset-surface-observations"
 CG_DATASET = "urn:wmo:md:cg-met:core.climate.surface-based-observations.climat"
+SZ_DATASET = "urn:wmo:md:sz-swazimet:surface-based-observations.synop"
+SZ_SIBLING_DATASET = "urn:wmo:md:sz-swazimet:surface-based-observations.synop.aws"
 
 
 class CatalogueSyncTestCase(TestCase):
@@ -698,6 +701,58 @@ class ReadOnlyCatalogueTests(CatalogueSyncTestCase):
         self.assertEqual(log.status, SyncLog.SUCCESS)
 
 
+class SharedTopicTests(CatalogueSyncTestCase):
+    """A centre routinely publishes several datasets on one topic.
+
+    A wis2box creates one dataset per station group, and every one of them
+    lands on the centre's single surface-based-observations topic. Refusing
+    the second was refusing whole feeds -- the largest in the region among
+    them -- on every run.
+    """
+
+    def records_sharing_a_topic(self):
+        payload = load_json_fixture(CATALOGUE)
+        original = next(f for f in payload["features"] if f["id"] == SZ_DATASET)
+        sibling = copy.deepcopy(original)
+        sibling["id"] = SZ_SIBLING_DATASET
+        sibling["properties"]["identifier"] = SZ_SIBLING_DATASET
+        sibling["properties"]["title"] = "Automatic stations (sz-swazimet)"
+        payload["features"].append(sibling)
+
+        return payload
+
+    def test_both_records_are_applied(self):
+        log = self.sync(self.records_sharing_a_topic())
+
+        self.assertEqual(log.status, SyncLog.SUCCESS)
+        self.assertEqual(log.items_errored, 0)
+        self.assertEqual(log.items_created, len(MONITORED_CENTRE_IDS) + 1)
+
+    def test_both_datasets_persist_under_the_one_topic(self):
+        self.sync(self.records_sharing_a_topic())
+
+        shared = Dataset.objects.filter(
+            wmo_topic_hierarchy=(
+                "origin/a/wis2/sz-swazimet/data/core/weather/"
+                "surface-based-observations/synop"
+            )
+        )
+
+        self.assertEqual(
+            set(shared.values_list("identifier", flat=True)),
+            {SZ_DATASET, SZ_SIBLING_DATASET},
+        )
+
+    def test_a_re_run_updates_both_rather_than_creating_more(self):
+        payload = self.records_sharing_a_topic()
+
+        self.sync(payload)
+        log = self.sync(payload)
+
+        self.assertEqual(log.items_created, 0)
+        self.assertEqual(log.items_updated, len(MONITORED_CENTRE_IDS) + 1)
+
+
 class IdempotenceTests(CatalogueSyncTestCase):
     def test_re_running_the_sync_creates_no_duplicates(self):
         self.sync()
@@ -756,16 +811,13 @@ class SyncLogTests(CatalogueSyncTestCase):
         self.assertIsNone(self.catalogue.last_sync)
 
     def test_a_record_that_cannot_be_stored_is_counted_and_the_rest_still_land(self):
-        """Two records claiming one topic: the topic is unique, so one fails."""
-        clashing = load_json_fixture(CATALOGUE)
-        for feature in clashing["features"]:
+        """A title longer than the column: the database refuses that record."""
+        oversized = load_json_fixture(CATALOGUE)
+        for feature in oversized["features"]:
             if feature["id"] == KE_DATASET:
-                feature["properties"]["wmo:topicHierarchy"] = (
-                    "origin/a/wis2/sz-swazimet/data/core/weather/"
-                    "surface-based-observations/synop"
-                )
+                feature["properties"]["title"] = "x" * 600
 
-        log = self.sync(clashing)
+        log = self.sync(oversized)
 
         self.assertEqual(log.status, SyncLog.PARTIAL)
         self.assertEqual(log.items_errored, 1)

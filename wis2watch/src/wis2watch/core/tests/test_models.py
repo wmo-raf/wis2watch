@@ -334,6 +334,57 @@ class MessageSourceAddressTests(TestCase):
         source.full_clean()
 
 
+class DatasetIdentityTests(TestCase):
+    """What makes two catalogue records one dataset, and what does not.
+
+    A dataset is keyed on the centre that publishes it and the identifier its
+    record carries. The topic is not part of the key: a centre routinely
+    publishes several datasets on one -- a wis2box makes one per station
+    group, all of them landing on the centre's synop topic -- and one dj-anm
+    topic carries a METAR record and a SPECI record both.
+    """
+
+    TOPIC = "origin/a/wis2/ke-kmd/data/core/weather/surface-based-observations/synop"
+
+    def setUp(self):
+        self.node = make_node()
+
+    def dataset(self, identifier, topic=TOPIC, node=None):
+        return Dataset.objects.create(
+            node=node or self.node,
+            identifier=identifier,
+            title="Surface weather observations",
+            wmo_data_policy="core",
+            wmo_topic_hierarchy=topic,
+            raw_json={},
+        )
+
+    def test_one_node_may_publish_several_datasets_on_one_topic(self):
+        self.dataset("urn:wmo:md:ke-kmd:synop.manual")
+        self.dataset("urn:wmo:md:ke-kmd:synop.automatic")
+
+        self.assertEqual(
+            Dataset.objects.filter(wmo_topic_hierarchy=self.TOPIC).count(), 2
+        )
+
+    def test_two_nodes_may_publish_on_the_same_topic(self):
+        self.dataset("urn:wmo:md:ke-kmd:synop")
+        self.dataset("urn:wmo:md:gh-gmet:synop", node=make_node("gh-gmet"))
+
+        self.assertEqual(
+            Dataset.objects.filter(wmo_topic_hierarchy=self.TOPIC).count(), 2
+        )
+
+    def test_a_node_declares_an_identifier_once(self):
+        self.dataset("urn:wmo:md:ke-kmd:synop")
+
+        with self.assertRaises(IntegrityError):
+            self.dataset(
+                "urn:wmo:md:ke-kmd:synop",
+                topic="origin/a/wis2/ke-kmd/data/core/weather/aviation/metar",
+            )
+
+
 class NotificationMessageTests(TestCase):
     def setUp(self):
         self.source = make_source()

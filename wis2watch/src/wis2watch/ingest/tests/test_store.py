@@ -36,6 +36,9 @@ CAPTURE = "global_broker_notifications.jsonl"
 KE_TOPIC = "origin/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop"
 KE_CACHE_TOPIC = KE_TOPIC.replace("origin/", "cache/")
 KE_METADATA_ID = "urn:wmo:md:ke-meteo:synop-dataset-surface-observations"
+KE_OTHER_METADATA_ID = "urn:wmo:md:ke-meteo:synop-dataset-automatic-stations"
+KE_THIRD_METADATA_ID = "urn:wmo:md:ke-meteo:synop-dataset-manual-stations"
+KE_OTHER_TOPIC = "origin/a/wis2/ke-meteo/data/core/weather/something-else"
 KE_STATION = "0-20000-0-63708"
 
 DJ_TOPIC = "origin/a/wis2/dj-anm/data/recommended/weather/aviation/taf"
@@ -140,14 +143,15 @@ class StoreTestCase(TestCase):
         )
         self.node = WIS2Node.objects.create(centre_id="ke-meteo", name="Kenya Met")
 
-    def dataset(self):
+    def dataset(self, identifier=KE_METADATA_ID, topic=KE_TOPIC, node=None, **kwargs):
         return Dataset.objects.create(
-            node=self.node,
-            identifier=KE_METADATA_ID,
+            node=node or self.node,
+            identifier=identifier,
             title="Kenya surface observations",
             wmo_data_policy="core",
-            wmo_topic_hierarchy=KE_TOPIC,
+            wmo_topic_hierarchy=topic,
             raw_json={},
+            **kwargs,
         )
 
     def store(self, topic):
@@ -528,16 +532,43 @@ class DatasetAttributionTests(StoreTestCase):
 
     def test_a_dataset_known_only_by_identifier_still_resolves(self):
         """Some centres publish on a topic their catalogue record never named."""
-        dataset = Dataset.objects.create(
-            node=self.node,
-            identifier=KE_METADATA_ID,
-            title="Kenya surface observations",
-            wmo_data_policy="core",
-            wmo_topic_hierarchy="origin/a/wis2/ke-meteo/data/core/weather/something-else",
-            raw_json={},
-        )
+        dataset = self.dataset(topic=KE_OTHER_TOPIC)
 
         self.assertEqual(self.store(KE_TOPIC).dataset, dataset)
+
+    def test_a_message_resolves_to_the_record_it_names_over_the_topic_it_shares(self):
+        """A centre publishing on a sibling's topic is attributed to its own.
+
+        This is the collision the region actually has: one dataset declares
+        the topic, another declares none of its own but names itself in every
+        message it publishes. Resolving on the topic would hand a centre's
+        largest feed to whichever record happened to claim the topic.
+        """
+        named = self.dataset(topic=KE_OTHER_TOPIC)
+        self.dataset(identifier=KE_OTHER_METADATA_ID)
+
+        self.assertEqual(self.store(KE_TOPIC).dataset, named)
+
+    def test_a_topic_several_datasets_claim_resolves_to_no_dataset(self):
+        """Guessing between them would attribute traffic to the wrong one."""
+        self.dataset(identifier=KE_OTHER_METADATA_ID)
+        self.dataset(identifier=KE_THIRD_METADATA_ID)
+
+        self.assertIsNone(self.store(KE_TOPIC).dataset)
+
+    def test_a_topic_one_live_dataset_claims_resolves_to_it(self):
+        """A retired record is not one of the several a topic is shared by."""
+        self.dataset(identifier=KE_OTHER_METADATA_ID, status=Dataset.INACTIVE)
+        current = self.dataset(identifier=KE_THIRD_METADATA_ID)
+
+        self.assertEqual(self.store(KE_TOPIC).dataset, current)
+
+    def test_another_centre_s_dataset_is_never_resolved_to(self):
+        """Both keys are the node's: a record declared elsewhere is not it."""
+        other_node = WIS2Node.objects.create(centre_id="gh-gmet", name="Ghana Met")
+        self.dataset(node=other_node)
+
+        self.assertIsNone(self.store(KE_TOPIC).dataset)
 
     def test_a_topic_no_dataset_claims_is_stored_with_no_dataset(self):
         record = self.store(KE_TOPIC)

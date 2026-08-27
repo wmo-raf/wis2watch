@@ -311,11 +311,23 @@ def _apply_origin_api(node):
 
 
 def _apply_dataset(node, discovered):
-    """The dataset a record describes, created or refreshed."""
+    """The dataset a record describes, created or refreshed.
+
+    Keyed on the centre and the identifier its record carries, which is the
+    grain the catalogue publishes at. The topic is not part of the key: a
+    centre publishing several datasets on one is the ordinary case, and keying
+    on it refused every record but the first.
+
+    An identifier is never merged with another. Where a centre renames what
+    may be the same dataset, the two records become two rows, because "the
+    same dataset under a corrected identifier" and "a different dataset, the
+    old one retired" cannot be told apart from outside, and guessing wrong
+    would silently rewrite the history of whichever row it landed on.
+    """
     _, created = Dataset.objects.update_or_create(
+        node=node,
         identifier=discovered.identifier,
         defaults={
-            "node": node,
             "title": discovered.title,
             "wmo_data_policy": discovered.data_policy,
             "wmo_topic_hierarchy": discovered.topic,
@@ -337,8 +349,8 @@ def apply_discovery_record(record, *, registries_not_answering=frozenset()):
     """Write one discovery record to the registry, reporting what happened.
 
     Each record is applied in its own savepoint, so a record the database
-    refuses -- two centres claiming one topic, say -- is counted and stepped
-    over rather than losing the rest of the run.
+    refuses -- one carrying a title longer than the column, say -- is counted
+    and stepped over rather than losing the rest of the run.
     """
     try:
         with transaction.atomic():
