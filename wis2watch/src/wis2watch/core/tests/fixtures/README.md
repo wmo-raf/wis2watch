@@ -125,8 +125,11 @@ what a centre publishing its own discovery metadata looks like from the
 archive. It carries the WCMP2 record inline as base64, names **no**
 `metadata_id` (the record it announces is the one that would be named), carries
 no `wigos_station_identifier`, and advertises only a `rel: update` link — no
-canonical link at all. So it resolves to no dataset and no station, and is
-stored for all that, as the MQTT path stores one.
+canonical link at all. Nothing in the payload says it is not a publication;
+what says so is its `data_id`, which spells the topic it went out on —
+`{centre}/metadata/{record}`. That is what the ingest recognises it by here,
+there being no topic, and it is set aside rather than stored, as the MQTT path
+sets aside one on `origin/a/wis2/{centre}/metadata`.
 
 | Capture | Retention at capture | The window asked for | Match count |
 | --- | --- | --- | --- |

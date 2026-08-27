@@ -6,6 +6,12 @@ centre and the data's place in the topic hierarchy::
     origin/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop
     cache/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop
 
+The level directly below the centre says what kind of thing is being announced.
+``data`` is a publication; ``metadata`` is the centre announcing its own
+catalogue record, which is not one::
+
+    origin/a/wis2/ke-meteo/metadata
+
 Everything downstream -- which centre a message belongs to, whether a Global
 Cache picked it up, whether the centre is one we monitor -- is read off that
 structure, so it is parsed once, here.
@@ -18,6 +24,10 @@ STANDARD_SEGMENT = ("a", "wis2")
 
 ORIGIN = "origin"
 CACHE = "cache"
+
+#: The level below the centre on which it announces its WCMP2 discovery
+#: metadata record. Every other level below a centre carries data.
+METADATA = "metadata"
 
 #: The MQTT wildcard matching a centre's whole hierarchy, however deep.
 MULTI_LEVEL_WILDCARD = "#"
@@ -44,6 +54,11 @@ class ParsedTopic:
     def is_cache(self):
         """Whether this is traffic republished by a Global Cache."""
         return self.prefix == CACHE
+
+    @property
+    def announces_catalogue_record(self):
+        """Whether this topic carries a catalogue record rather than data."""
+        return self.hierarchy[:1] == (METADATA,)
 
     def as_origin(self):
         """The same topic as published at origin.
@@ -128,3 +143,29 @@ def parse_topic(topic):
         centre_id=centre_id.lower(),
         hierarchy=tuple(tokens[4:]),
     )
+
+
+def announces_catalogue_record(topic, data_id=""):
+    """Whether a notification announces a discovery metadata record.
+
+    A centre announces its own WCMP2 record on ``.../{centre}/metadata``, and
+    every Global Cache republishes that announcement under its own prefix. It
+    is a notification like any other and nothing about its payload says it is
+    not a publication -- what says so is where it was published.
+
+    The topic answers it wherever one was observed, and answers it alone: a
+    message that went out on a data topic is a data publication whatever else
+    it says about itself.
+
+    A centre's own message archive returns notifications with no topic at all,
+    and there the data identifier is read instead. It spells the same path the
+    topic would have -- ``{centre}/metadata/{record}`` -- which is what lets the
+    one announcement be recognised from either vantage point rather than only
+    from the broker.
+    """
+    if topic and topic.strip():
+        parsed = parse_topic(topic)
+
+        return parsed is not None and parsed.announces_catalogue_record
+
+    return (data_id or "").split("/")[1:2] == [METADATA]

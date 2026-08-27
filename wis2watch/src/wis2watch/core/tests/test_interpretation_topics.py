@@ -4,6 +4,7 @@ from django.test import override_settings
 
 from wis2watch.core.interpretation import (
     CACHE,
+    announces_catalogue_record,
     centre_id_prefix,
     is_monitored_centre_id,
     monitored_country_code_for_centre_id,
@@ -107,6 +108,107 @@ class SubscriptionTopicTests(NoNetworkTestCase):
         self.assertIsNone(subscription_topic(""))
         self.assertIsNone(subscription_topic(None))
         self.assertIsNone(subscription_topic("   "))
+
+
+class CatalogueRecordAnnouncementTests(NoNetworkTestCase):
+    """Telling a centre announcing its record from a centre publishing data."""
+
+    def test_the_metadata_topic_carries_a_catalogue_record(self):
+        self.assertTrue(
+            announces_catalogue_record("origin/a/wis2/ke-meteo/metadata")
+        )
+
+    def test_a_cache_republishing_one_is_the_same_announcement(self):
+        self.assertTrue(
+            announces_catalogue_record("cache/a/wis2/ke-meteo/metadata")
+        )
+
+    def test_a_record_named_below_the_metadata_level_is_still_one(self):
+        self.assertTrue(
+            announces_catalogue_record(
+                "origin/a/wis2/gh-gmet/metadata/core.surface-based-observations.synop"
+            )
+        )
+
+    def test_a_data_topic_is_not_one(self):
+        self.assertFalse(
+            announces_catalogue_record(
+                "origin/a/wis2/ke-meteo/data/core/weather/"
+                "surface-based-observations/synop"
+            )
+        )
+
+    def test_a_centre_publishing_data_about_metadata_is_not_one(self):
+        """Only the level directly below the centre decides it."""
+        self.assertFalse(
+            announces_catalogue_record("origin/a/wis2/ke-meteo/data/core/metadata")
+        )
+
+    def test_a_topic_that_is_not_a_wis2_topic_is_not_one(self):
+        self.assertFalse(announces_catalogue_record("some/other/metadata"))
+
+    def test_with_no_topic_the_data_identifier_answers_it(self):
+        """A centre's own archive returns the notification without a topic."""
+        self.assertTrue(
+            announces_catalogue_record(
+                "",
+                data_id=(
+                    "gh-gmet/metadata/"
+                    "urn:wmo:md:gh-gmet:core.surface-based-observations.synop"
+                ),
+            )
+        )
+
+    def test_with_no_topic_a_data_identifier_naming_data_is_not_one(self):
+        self.assertFalse(
+            announces_catalogue_record(
+                "",
+                data_id=(
+                    "gh-gmet:core.surface-based-observations.synop/"
+                    "WIGOS_0-288-0-65492_20260809T160000"
+                ),
+            )
+        )
+
+    def test_a_topic_that_was_observed_settles_it_alone(self):
+        """What a message went out on outranks what it says about itself."""
+        self.assertFalse(
+            announces_catalogue_record(
+                "origin/a/wis2/gh-gmet/data/core/weather/"
+                "surface-based-observations/synop",
+                data_id="gh-gmet/metadata/urn:wmo:md:gh-gmet:whatever",
+            )
+        )
+
+    def test_nothing_named_at_all_is_not_one(self):
+        self.assertFalse(announces_catalogue_record("", data_id=""))
+        self.assertFalse(announces_catalogue_record(None, data_id=None))
+
+
+class ArchivedCatalogueRecordTests(NoNetworkTestCase):
+    """The captured archives carry one announcement each, and it is found."""
+
+    def announcements_in(self, capture):
+        return [
+            feature
+            for feature in load_json_fixture(capture)["features"]
+            if announces_catalogue_record(
+                "", data_id=feature["properties"].get("data_id", "")
+            )
+        ]
+
+    def test_each_captured_archive_page_carries_exactly_one(self):
+        for capture in (
+            "node_messages_sc_seychelles_met.json",
+            "node_messages_gh_gmet.json",
+        ):
+            with self.subTest(capture=capture):
+                found = self.announcements_in(capture)
+
+                self.assertEqual(len(found), 1)
+                self.assertEqual(
+                    [link["rel"] for link in found[0]["links"]], ["update"]
+                )
 
 
 class SweepTopicTests(NoNetworkTestCase):

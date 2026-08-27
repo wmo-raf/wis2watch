@@ -68,9 +68,21 @@ class PullTests(PullMessageArchiveTestCase):
 
         stored = NotificationMessage.objects.filter(node=self.node)
 
-        self.assertEqual(stored.count(), 14)
+        # Thirteen of the fourteen the page carries: the fourteenth announces
+        # the centre's own catalogue record, which is not a publication.
+        self.assertEqual(stored.count(), 13)
         self.assertEqual(stored.exclude(source=self.source).count(), 0)
         self.assertEqual(set(stored.values_list("topic", flat=True)), {""})
+
+    def test_the_centre_s_announcement_of_its_own_record_is_not_stored(self):
+        self.run_command("sc-seychelles-met", hours=2)
+
+        self.assertEqual(
+            NotificationMessage.objects.filter(
+                data_id__startswith="sc-seychelles-met/metadata/"
+            ).count(),
+            0,
+        )
 
     def test_it_asks_the_archive_for_the_depth_it_was_given(self):
         with mock.patch("wis2watch.ingest.archive.fetch_archive_pages") as fetch:
@@ -106,9 +118,9 @@ class PullTests(PullMessageArchiveTestCase):
 
         self.assertEqual(sync_log.node, self.node)
         self.assertEqual(sync_log.status, SyncLog.SUCCESS)
-        self.assertEqual(sync_log.items_found, 14)
+        self.assertEqual(sync_log.items_found, 13)
         self.assertIn("sc-seychelles-met", output)
-        self.assertIn("found=14", output)
+        self.assertIn("found=13", output)
 
 
 class RollupTests(PullMessageArchiveTestCase):
@@ -124,20 +136,20 @@ class RollupTests(PullMessageArchiveTestCase):
 
         rollups = HourlyRollup.objects.filter(node=self.node)
 
-        # One row per station the hour carried, and one for the metadata
-        # notification, which names none.
-        self.assertEqual(rollups.count(), 14)
+        # One row per station the hour carried. The catalogue-record
+        # announcement the page also carries reaches none of this.
+        self.assertEqual(rollups.count(), 13)
         self.assertEqual(
             set(rollups.values_list("hour", flat=True)),
             {NOW.replace(hour=15, minute=0)},
         )
-        self.assertEqual(sum(rollups.values_list("message_count", flat=True)), 14)
+        self.assertEqual(sum(rollups.values_list("message_count", flat=True)), 13)
 
     def test_a_pull_reaching_back_past_the_scheduled_window_is_counted_too(self):
         """The whole depth asked for, not the trailing two days of it."""
         self.run_command("sc-seychelles-met", hours=24 * 60)
 
-        self.assertEqual(HourlyRollup.objects.filter(node=self.node).count(), 14)
+        self.assertEqual(HourlyRollup.objects.filter(node=self.node).count(), 13)
 
     def test_a_second_pull_of_the_same_window_does_not_double_the_counts(self):
         self.run_command("sc-seychelles-met", hours=2)
@@ -149,7 +161,7 @@ class RollupTests(PullMessageArchiveTestCase):
                     "message_count", flat=True
                 )
             ),
-            14,
+            13,
         )
 
 

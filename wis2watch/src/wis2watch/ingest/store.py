@@ -24,10 +24,19 @@ to be watching it. So ``cache/`` traffic is stored against a vantage point of
 its own: it is countable there, and every count of what a centre published
 stays about the centre.
 
-One thing is refused: traffic from a centre that is neither in the registry nor
-in the monitored region. This tool watches a region, and the wildcard sweep is
-briefly offered the whole world's; keeping what the sweep turns up outside the
-region would trade unbounded storage for messages nobody will ever ask about.
+One thing is set aside rather than stored: a centre announcing its own WCMP2
+discovery metadata record, which every centre does periodically on the
+``metadata`` topic below its own. Nothing in such a notification says it is not
+a publication -- what says so is where it was published -- and stored, it would
+count as traffic on every volume surface and keep a centre that has published
+no data at all reading as though it had. The centre it names is still reported
+as one the region carries, because that much is true whatever it announced.
+
+One thing is refused outright: traffic from a centre that is neither in the
+registry nor in the monitored region. This tool watches a region, and the
+wildcard sweep is briefly offered the whole world's; keeping what the sweep
+turns up outside the region would trade unbounded storage for messages nobody
+will ever ask about.
 The region is decided from the centre ID prefix alone, since a centre nothing
 knows about has nothing else to decide it by, and the centres in the region
 that the registry has no record of are reported back as the finding they are.
@@ -43,6 +52,7 @@ from dataclasses import dataclass, field
 from django.db.models import Q
 
 from ..core.interpretation import (
+    announces_catalogue_record,
     is_monitored_centre_id,
     parse_notification,
     parse_topic,
@@ -75,6 +85,12 @@ class StoreCounts:
     what could not be stored at all, and ``out_of_region`` what was refused for
     belonging to another part of the world.
 
+    ``catalogue_records`` counts the centres' announcements of their own
+    discovery metadata records, which are set aside rather than stored. Named
+    in the log because they are a fixed cost of listening to a region -- a
+    steady trickle, one per centre per re-announcement -- and because a flush
+    that is nothing else is a flush in which no centre published anything.
+
     ``cached`` is how much of a flush was a Global Cache's republication rather
     than a centre's own publication -- typically more than the rest of it,
     since every cache carrying a centre's data republishes it. Named in the log
@@ -100,6 +116,7 @@ class StoreCounts:
     unattributed: int = 0
     unknown_dataset: int = 0
     cached: int = 0
+    catalogue_records: int = 0
     out_of_region: int = 0
     discarded: int = 0
     unregistered_centres: dict[str, str] = field(default_factory=dict)
@@ -110,6 +127,7 @@ class StoreCounts:
         return (
             f"accepted={self.accepted} unattributed={self.unattributed} "
             f"unknown_dataset={self.unknown_dataset} cached={self.cached} "
+            f"catalogue_records={self.catalogue_records} "
             f"out_of_region={self.out_of_region} discarded={self.discarded}"
         )
 
@@ -392,6 +410,13 @@ def store_notifications(source, received, node=None):
     A message the flush cannot prepare is counted and stepped over: one
     malformed notification must not cost the flush it arrived in.
 
+    A centre announcing its own discovery metadata record is counted and set
+    aside before anything is written, so that it reaches neither the rollups
+    nor the centre's last-seen. It is set aside after the region has been
+    judged and after the centre has been noted, though: an unregistered centre
+    announcing its record is still a centre of the region that this tool has no
+    record of, which is the finding a sweep exists to make.
+
     A message from a centre that is neither registered nor in the monitored
     region is refused for the same reason nothing subscribes to the world: it
     is another region's traffic, and this tool answers questions about one.
@@ -436,6 +461,10 @@ def store_notifications(source, received, node=None):
                 continue
 
             counts.unregistered_centres[centre_id] = record.topic
+
+        if announces_catalogue_record(record.topic, record.data_id):
+            counts.catalogue_records += 1
+            continue
 
         records.append(record)
         counts.accepted += 1
