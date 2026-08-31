@@ -320,6 +320,19 @@ class ResumingWhereTheServerWillNotTests(NoNetworkTestCase):
 
         self.assertEqual(get.call_count, 2)
 
+    def test_a_link_that_jumps_ahead_is_the_servers_own_statement(self):
+        """Followed as given: second-guessing it is how a read skips or repeats."""
+        get = mock.Mock(
+            side_effect=[
+                Answer(page(returned=2, matched=9, next_url=f"{ITEMS}?offset=500")),
+                Answer(page(returned=1, matched=9)),
+            ]
+        )
+
+        self.read(get)
+
+        self.assertEqual(get.call_args_list[1].args[0], f"{ITEMS}?offset=500")
+
     def test_a_collection_that_says_nothing_about_its_size_stops_there(self):
         get = mock.Mock(
             side_effect=[Answer(page(returned=2, next_url=f"{ITEMS}?offset=1"))]
@@ -330,19 +343,19 @@ class ResumingWhereTheServerWillNotTests(NoNetworkTestCase):
         self.assertEqual(len(pages), 1)
         self.assertEqual(get.call_count, 1)
 
-    def test_a_short_answer_with_no_link_at_all_is_resumed(self):
-        get = mock.Mock(
-            side_effect=[
-                Answer(page(returned=2, matched=3)),
-                Answer(page(returned=1, matched=3)),
-            ]
-        )
+    def test_a_short_answer_with_no_link_at_all_is_believed(self):
+        """Only a server that contradicts itself has its paging taken over.
 
-        self.read(get)
+        One offering no next link has said that is all of it, and resuming on
+        the strength of a count it also published would be calling half its
+        answer wrong on the authority of the other half.
+        """
+        get = mock.Mock(side_effect=[Answer(page(returned=2, matched=3))])
 
-        self.assertEqual(
-            get.call_args_list[1].kwargs["params"], {"f": "json", "offset": 2}
-        )
+        pages = self.read(get)
+
+        self.assertEqual(len(pages), 1)
+        self.assertEqual(get.call_count, 1)
 
 
 class TheCeilingTests(NoNetworkTestCase):

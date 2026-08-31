@@ -60,15 +60,26 @@ class RecordsMatchedTests(NoNetworkTestCase):
 
 
 class RecordsReturnedTests(NoNetworkTestCase):
-    def test_a_page_says_how_many_it_carried(self):
-        self.assertEqual(records_returned({"numberReturned": 60, "features": []}), 60)
+    """What the reader is holding, which is the feature list and not the claim.
 
-    def test_a_page_that_does_not_say_is_counted(self):
+    The count becomes the offset a resumed read asks from, so a server whose
+    own metadata is stale -- which is the case this exists for -- must not be
+    able to move it by saying a number.
+    """
+
+    def test_a_page_is_counted_by_what_it_carried(self):
         self.assertEqual(records_returned({"features": [{}, {}, {}]}), 3)
+
+    def test_a_page_claiming_more_than_it_carried_is_counted_by_its_list(self):
+        self.assertEqual(records_returned({"numberReturned": 60, "features": []}), 0)
+
+    def test_a_page_with_no_list_at_all_is_taken_at_its_word(self):
+        self.assertEqual(records_returned({"numberReturned": 60}), 60)
 
     def test_an_empty_page_carried_nothing(self):
         self.assertEqual(records_returned({}), 0)
         self.assertEqual(records_returned(None), 0)
+        self.assertEqual(records_returned({"numberReturned": "sixty"}), 0)
 
 
 class PageOffsetTests(NoNetworkTestCase):

@@ -26,6 +26,7 @@ from wis2watch.core.sync import (
     MAX_PAGES,
     MAX_REASON_CHARS,
     MAX_STEPPED_OVER_RECORDED,
+    ReadKeptFailing,
 )
 
 from .support import failing_fetch, load_json_fixture, pages
@@ -424,7 +425,7 @@ class FetchTests(NodeStationsTestCase):
         with mock.patch("wis2watch.core.sync.requests.get") as get:
             get.side_effect = requests.exceptions.ConnectionError("refused")
 
-            with self.assertRaises(Exception):
+            with self.assertRaises(ReadKeptFailing):
                 list(fetch_station_pages(self.node))
 
         self.assertEqual(get.call_count, 1)

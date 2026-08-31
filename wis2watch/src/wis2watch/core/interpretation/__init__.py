@@ -35,7 +35,13 @@ from .notifications import (
     parse_notification,
     station_attribution,
 )
-from .ogcapi import next_page_url, page_offset, records_matched, records_returned
+from .ogcapi import (
+    OFFSET,
+    next_page_url,
+    page_offset,
+    records_matched,
+    records_returned,
+)
 from .oscar import (
     OPERATIONAL,
     OscarStation,
@@ -59,6 +65,7 @@ __all__ = [
     "CACHE",
     "DEFAULT_PORTS",
     "METADATA",
+    "OFFSET",
     "OPERATIONAL",
     "DiscoveredDataset",
     "DiscoveredNode",

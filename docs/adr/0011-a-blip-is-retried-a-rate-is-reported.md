@@ -45,12 +45,12 @@ seven rows in a sync log nobody opens.
 
 ## Decision
 
-**A page whose transport failed is asked for again — three times, backing
-off.** A page is a GET; asking again is safe in the way retrying a write never
-is, and it costs the source one more read of something it is already serving.
-Three attempts over six seconds clears the great majority of what was failing
-these runs, and a source that has said nothing three times in half a minute is
-not blipping.
+**A page whose transport failed is asked for again — three attempts, waiting
+two seconds and then four between them.** A page is a GET; asking again is
+safe in the way retrying a write never is, and it costs the source one more
+read of something it is already serving. Three attempts clears the great
+majority of what was failing these runs, and a source that has refused or
+dropped three connections in a row is not blipping.
 
 **Only the transport is retried.** A refused connection, a read timeout and a
 body cut off partway have in common that the source said nothing at all. An
@@ -71,8 +71,7 @@ already fetched six times over — a retry there buys redundancy the window has.
 **A read that kept failing says so as itself.** `ReadKeptFailing` names the
 source and how many times it was asked, and quotes the last fault. What a
 reader needs from a sync log is not that a connection was aborted — it is that
-this source was asked three times over half a minute and said nothing each
-time.
+this source was asked three times over and said nothing each time.
 
 **The page size is left where it is.** Half the failures were connect-level,
 where the size of the response is irrelevant, and a smaller page is more

@@ -26,9 +26,11 @@ from urllib.parse import parse_qs, urlsplit
 #: The link relation naming the next page of a collection.
 NEXT = "next"
 
-#: What a collection says it holds in total, and what one page carried.
+#: What a collection says it holds in total, what one page claims to have
+#: carried, and the list that actually answers for it.
 MATCHED = "numberMatched"
 RETURNED = "numberReturned"
+FEATURES = "features"
 
 #: The query parameter a paging link resumes at.
 OFFSET = "offset"
@@ -65,19 +67,24 @@ def records_matched(payload):
 def records_returned(payload):
     """How many records one page carried.
 
-    Counted where the page does not say, because that is the number a reader
-    is actually holding, and a server whose ``numberReturned`` disagrees with
-    its own feature list is telling the reader about the list.
+    The feature list is what answers, not the claim beside it. What this count
+    is used for is the offset a resumed read asks from, and the servers it is
+    used against are exactly the ones whose paging metadata is stale -- so a
+    server able to move that offset by saying a number could make a read skip
+    records nobody would ever know were missing.
+
+    ``numberReturned`` answers only for a payload carrying no list at all,
+    where it is the sole thing said and there is nothing to check it against.
     """
     if not payload:
         return 0
 
+    if FEATURES in payload:
+        return len(payload.get(FEATURES) or [])
+
     returned = payload.get(RETURNED)
 
-    if isinstance(returned, int):
-        return returned
-
-    return len(payload.get("features") or [])
+    return returned if isinstance(returned, int) else 0
 
 
 def page_offset(url):

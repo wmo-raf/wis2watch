@@ -41,10 +41,20 @@ next page.** It is this page again, or one before it. The rule replaces an
 assumption that following the link makes progress — an assumption one of the
 three catalogues this tool ships with does not satisfy.
 
-**A link naming no offset at all is followed as given.** It may be paging by a
-cursor this knows nothing about, and refusing one for not being an offset
-would break every server that pages properly by something else. The ceiling
-stays as the guard for that case, which is what it was always for.
+**A link naming no offset at all is followed as given**, and so is one that
+resumes *ahead* of what has been read. The first may be paging by a cursor
+this knows nothing about, and refusing one for not being an offset would break
+every server that pages properly by something else. The second is the server's
+own statement about where its next page begins, and second-guessing it is how
+a reader comes to skip or repeat. The ceiling stays as the guard for both,
+which is what it was always for.
+
+**A page with no next link at all ends the read**, however short of
+`numberMatched` it was. A server offering none has said that is all of it, and
+taking over its paging on the strength of a count it also published would be
+calling one half of its answer wrong on the authority of the other. This only
+ever takes over from a server that has contradicted itself, which keeps the
+change to the fifty-four station registries and the archive poll at nil.
 
 **Where the link will not advance, the read resumes from an offset of its
 own** — the original URL and the original query, plus how much has been read.
@@ -57,8 +67,20 @@ pages keep coming back with records in them.** `numberMatched` is what tells a
 short read from a whole one, and a collection that reports no count has said
 nothing — so the read stops where the server's links stopped advancing, which
 is what it did before any of this. A server that answers an offset it does not
-understand with the same page every time stops on the second condition rather
-than being asked until the ceiling.
+understand with an empty page stops on the second condition. One that answers
+with the *same* page every time is bounded instead by the count climbing a
+page each round until it reaches what the collection says it holds — a handful
+of repeated records, applied twice and stored once, rather than a walk to the
+ceiling.
+
+**How much has been read is counted from the feature lists, not from
+`numberReturned`.** That count becomes the offset a resume asks from, and the
+servers this exists for are exactly the ones whose paging metadata is stale: a
+server able to move the offset by publishing a number could make a read skip
+records nobody would know were missing. Counted from the lists, the count can
+only lag the server's own position — a link that jumped ahead leaves it
+behind, never in front — so a resume can re-read, which is idempotent, and
+cannot skip, which would not be.
 
 **The ceiling stays.** It is the last resort for links that advance forever,
 and a run that hits it is still a failed run: a partly-read registry that
@@ -77,11 +99,15 @@ writing: `cn-cma` 560 records in two pages, `ca-eccc` 559 in two, `de-dwd` 560
 in two. The catalogue that had never completed a run completes one, so the
 region now has two reading catalogues rather than one.
 
-**A truncated answer is now resumed rather than accepted.** A server that
-returns 200 records of 560 and offers no next link used to end the read; it is
-now resumed from offset 200. That is the same rule seen from the other side,
-and it is the right one: the alternative is a registry silently short by a
-third.
+**Nothing changed for a server that pages correctly**, including one whose
+last page is short. Only a next link that resumes behind what has been read
+diverts the read, so the two catalogues that page properly, all fifty-four
+station registries and the archive poll behave exactly as they did.
+
+**`records_returned` reads the feature list rather than the count beside it.**
+That is a behaviour change for any server whose `numberReturned` disagrees
+with what it sent, and the change is deliberate: what a reader holds is what
+arrived.
 
 **The comment in `interpretation.ogcapi` that said the link is followed as
 given is now qualified rather than true.** It has been rewritten, since a rule

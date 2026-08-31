@@ -502,7 +502,6 @@ class FailingCatalogueRow:
     and no successful run at all is not failing intermittently, it is down.
     """
 
-    catalogue_id: int
     centre_id: str
     name: str
     is_writer: bool
@@ -514,8 +513,13 @@ class FailingCatalogueRow:
     records_last_read_at: datetime | None
 
     @property
-    def standing_label(self):
-        """Which catalogue this is, for a table cell."""
+    def role_label(self):
+        """Which of the two this catalogue is, for a table cell.
+
+        Not called a standing, which everywhere else here is a verdict on
+        something's health -- a centre's, a registry's, a station's. This is
+        the catalogue's job rather than how it is doing at it.
+        """
         return _("Writer") if self.is_writer else _("Read-only")
 
 
@@ -987,10 +991,23 @@ def catalogues_that_keep_failing(*, now=None, within_days=None, share=None):
     now = now or dj_timezone.now()
     days = default_catalogue_failing_days() if within_days is None else within_days
     share = default_catalogue_failing_share() if share is None else share
+    since = now - timedelta(days=days)
+
+    failing = _catalogues_that_keep_failing(now=now, days=days, share=share)
+
+    # Asked of the reported catalogues together rather than per row, the way
+    # the not-answering report asks its registries: a page of findings is two
+    # queries rather than two each.
+    failures = _last_catalogue_failures(failing, since=since)
+    read = _catalogue_records_last_read(failing, since=since)
 
     return [
-        _failing_catalogue_row(catalogue, now=now, days=days)
-        for catalogue in _catalogues_that_keep_failing(now=now, days=days, share=share)
+        _failing_catalogue_row(
+            catalogue,
+            failure=failures.get(catalogue.pk),
+            read_at=read.get(catalogue.pk),
+        )
+        for catalogue in failing
     ]
 
 
@@ -1016,18 +1033,32 @@ def _catalogues_that_keep_failing(*, now, days, share):
                 & Q(sync_logs__status=SyncLog.FAILED),
             ),
         )
-        .filter(runs__gte=RUNS_ENOUGH_TO_JUDGE)
+        # A catalogue that failed nothing is excluded here rather than left to
+        # the share, which would let it through were the threshold ever set to
+        # nought -- a setting of zero means "name anything failing", not "name
+        # every catalogue there is".
+        .filter(runs__gte=RUNS_ENOUGH_TO_JUDGE, failures__gt=0)
+        # By name among equals, which survives the sort below because Python's
+        # is stable: two catalogues failing identically are listed in the same
+        # order every time the page is read.
         .order_by("-is_writer", "name")
     )
 
-    return sorted(
-        (
-            catalogue
-            for catalogue in counted
-            if _share_failed(catalogue) >= share and catalogue.failures
-        ),
-        key=lambda catalogue: (not catalogue.is_writer, -_share_failed(catalogue)),
-    )
+    # The share is worked out once per catalogue and carried, rather than
+    # recomputed by the filter and again by the sort: three readings of one
+    # division are three chances for them to be three different numbers.
+    over_the_line = [
+        (catalogue, _share_failed(catalogue))
+        for catalogue in counted
+        if _share_failed(catalogue) >= share
+    ]
+
+    return [
+        catalogue
+        for catalogue, _share in sorted(
+            over_the_line, key=lambda pair: (not pair[0].is_writer, -pair[1])
+        )
+    ]
 
 
 def _ran_in(*, now, days):
@@ -1048,50 +1079,70 @@ def _share_failed(catalogue):
     return round(100 * catalogue.failures / catalogue.runs)
 
 
-def _failing_catalogue_row(catalogue, *, now, days):
+def _failing_catalogue_row(catalogue, *, failure, read_at):
     """One catalogue's failure rate as a finding."""
-    runs = SyncLog.objects.filter(
-        catalogue=catalogue,
-        sync_type=SyncLog.CATALOGUE,
-        started_at__gte=now - timedelta(days=days),
-    )
-    last_failure = runs.filter(status=SyncLog.FAILED).order_by("-started_at").first()
+    started_at, error = failure or (None, "")
 
     return FailingCatalogueRow(
-        catalogue_id=catalogue.pk,
         centre_id=catalogue.centre_id,
         name=catalogue.name,
         is_writer=catalogue.is_writer,
         runs=catalogue.runs,
         failures=catalogue.failures,
         share=_share_failed(catalogue),
-        last_failed_at=last_failure.started_at if last_failure else None,
-        last_error=_error_excerpt(last_failure.error_message if last_failure else ""),
-        records_last_read_at=_records_last_read_at(runs),
+        last_failed_at=started_at,
+        last_error=_error_excerpt(error),
+        records_last_read_at=read_at,
     )
 
 
-def _records_last_read_at(runs):
-    """When one of these runs last brought registry records back.
+def _catalogue_runs(catalogues, *, since):
+    """The catalogue sync's runs in the window, against these catalogues."""
+    return SyncLog.objects.filter(
+        catalogue_id__in=[catalogue.pk for catalogue in catalogues],
+        sync_type=SyncLog.CATALOGUE,
+        started_at__gte=since,
+    )
 
-    The same reading ``alerts`` takes for staleness, and for the same reason: a
-    run that failed, one that answered with nothing, and one every record of
-    which was stepped over all leave the registry exactly where they found it.
-    Here it is what separates a catalogue that is failing intermittently from
-    one that is simply down -- a rate with no successful run behind it is the
-    second, and the row says so by having nothing to put here.
+
+def _last_catalogue_failures(catalogues, *, since):
+    """When each of them last failed and what it said, per catalogue.
+
+    A refused connection, a read timeout and a 404 are three different
+    conversations, and a report that said only "failing" would send somebody to
+    open the sync logs it exists to have read for them. A run that failed
+    without recording why -- a worker killed mid-fetch -- carries nothing, and
+    the row says nothing rather than inventing a cause.
     """
-    last = (
-        runs.exclude(status=SyncLog.FAILED)
-        .filter(items_found__gt=F("items_errored"))
-        .order_by("-started_at")
-        .first()
-    )
+    return {
+        run["catalogue_id"]: (run["started_at"], run["error_message"])
+        for run in _catalogue_runs(catalogues, since=since)
+        .filter(status=SyncLog.FAILED)
+        .order_by("catalogue_id", "-started_at")
+        .distinct("catalogue_id")
+        .values("catalogue_id", "started_at", "error_message")
+    }
 
-    if last is None:
-        return None
 
-    return last.completed_at or last.started_at
+def _catalogue_records_last_read(catalogues, *, since):
+    """When a run of each last brought registry records back, per catalogue.
+
+    Which runs those are is ``SyncLog``'s to say, and is the same predicate the
+    staleness alert reads: a run that failed, one that answered with nothing,
+    and one every record of which was stepped over all leave the registry
+    exactly where they found it. Here it is what separates a catalogue failing
+    intermittently from one that is simply down -- a rate with no run behind it
+    that brought anything back is the second, and the row says so by having
+    nothing to put here.
+    """
+    return {
+        run["catalogue_id"]: run["completed_at"] or run["started_at"]
+        for run in _catalogue_runs(catalogues, since=since)
+        .brought_records_back()
+        .order_by("catalogue_id", "-started_at")
+        .distinct("catalogue_id")
+        .values("catalogue_id", "completed_at", "started_at")
+    }
 
 
 def syncs_stepping_over_records(*, now=None, within_days=None):

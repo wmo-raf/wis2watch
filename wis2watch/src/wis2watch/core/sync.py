@@ -32,6 +32,7 @@ from django.contrib.gis.geos import Point
 from django.utils import timezone as dj_timezone
 
 from .interpretation import (
+    OFFSET,
     next_page_url,
     page_offset,
     records_matched,
@@ -54,10 +55,6 @@ ERRORED = "errored"
 MAX_PAGES = 50
 
 FETCH_TIMEOUT = 60
-
-#: The query parameter a read of our own resumes at, when the server's own
-#: link will not.
-OFFSET = "offset"
 
 #: How many times one page is asked for before the read is given up.
 #:
@@ -201,7 +198,10 @@ def _fetch_page(url, params, *, verify, timeout, read_from, attempts):
     last five, has a retry already and does not need a second one against
     fifty-four hosts of which many hang until the timeout.
     """
-    for attempt in range(1, attempts + 1):
+    # Clamped, so that a page is asked for at least once whatever a caller
+    # passes: a loop that never ran would return no payload at all, and a
+    # generator yielding None is a failure nothing downstream would recognise.
+    for attempt in range(1, max(1, attempts) + 1):
         try:
             response = requests.get(
                 url,
@@ -214,7 +214,7 @@ def _fetch_page(url, params, *, verify, timeout, read_from, attempts):
 
             return response.json()
         except TRANSPORT_FAULTS as fault:
-            if attempt == attempts:
+            if attempt >= attempts:
                 raise ReadKeptFailing(
                     f"{read_from or url} did not answer in {attempts} "
                     f"attempts; the last of them: {fault}"
@@ -244,20 +244,37 @@ def _next_page(payload, *, resume_from, query, read):
 
     A link naming no offset at all is followed as given. It may be paging by
     something this knows nothing about, and refusing a cursor for not being an
-    offset would break every server that pages properly by one.
+    offset would break every server that pages properly by one. So is a link
+    that jumps *ahead* of what has been read: that is the server's own
+    statement about where its next page begins, and second-guessing it is how
+    a reader comes to re-read or skip.
 
-    Where the link will not advance, the read resumes from an offset of its
-    own -- the original URL and the original query, which is what keeps a
-    filtered read inside its filter, plus how much has been read. That is only
-    worth doing while the collection says there is more to come, and only
-    while pages keep coming back with records in them: a server that answers
-    an offset it does not understand with the same page every time would
-    otherwise be asked until the ceiling.
+    **No link at all ends the read**, however short it was. A server offering
+    none has said that is all of it, and taking over its paging on the
+    strength of a count it also published would be calling one half of its
+    answer wrong on the authority of the other. This only takes over from a
+    server that has contradicted itself.
+
+    Where it has, the read resumes from an offset of its own -- the original
+    URL and the original query, which is what keeps a filtered read inside its
+    filter, plus how much has been read. That count is records held rather than
+    where the server had got to, and the difference can only run one way: a
+    link that jumped ahead leaves the count behind the server's position, never
+    in front of it. So a resume can re-read, which is idempotent, and cannot
+    skip, which would not be.
+
+    It is only worth resuming while the collection says there is more to come
+    and while pages keep coming back with records in them, which is what
+    ``_more_to_read`` decides.
     """
     following = next_page_url(payload)
+
+    if not following:
+        return None, None
+
     offset = page_offset(following)
 
-    if following and (offset is None or offset >= read):
+    if offset is None or offset >= read:
         return following, None
 
     if not _more_to_read(payload, read=read):
@@ -273,6 +290,14 @@ def _more_to_read(payload, *, read):
     told the reader nothing, and a read that resumed on a guess would be
     inventing the evidence it acts on -- so it stops where the server's own
     links stopped advancing, which is what it did before any of this.
+
+    The empty-page arm is what stops a server that answers an offset it does
+    not understand: asked to resume, it returns the first page again, and a
+    page that came back with nothing at all ends the read there rather than
+    being asked once per remaining page. A server that goes on returning the
+    *same* records is bounded instead by the count climbing a page at a time
+    until it reaches what the collection says it holds -- which costs the
+    reader a handful of repeated records, applied twice and stored once.
     """
     matched = records_matched(payload)
 

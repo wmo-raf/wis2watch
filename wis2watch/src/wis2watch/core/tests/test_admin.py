@@ -586,8 +586,12 @@ class GapReportViewTests(TestCase):
             base_url="https://wis2-gdc.example.ca",
             is_writer=True,
         )
-        for hours_ago, status in ((6, SyncLog.FAILED), (12, SyncLog.SUCCESS),
-                                  (18, SyncLog.FAILED), (24, SyncLog.SUCCESS)):
+        for hours_ago, status in (
+            (6, SyncLog.FAILED),
+            (12, SyncLog.SUCCESS),
+            (18, SyncLog.FAILED),
+            (24, SyncLog.SUCCESS),
+        ):
             SyncLog.objects.create(
                 catalogue=catalogue,
                 sync_type=SyncLog.CATALOGUE,

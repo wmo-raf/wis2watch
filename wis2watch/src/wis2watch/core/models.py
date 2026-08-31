@@ -1783,6 +1783,27 @@ class UnregisteredCentre(TimeStampedModel):
         return f"{self.centre_id} (last seen {self.last_seen_at})"
 
 
+class SyncLogQuerySet(models.QuerySet):
+    def brought_records_back(self):
+        """The runs that left the registry better than they found it.
+
+        Three kinds of run reach it no better than a refused connection does,
+        and none of them counts here: one that failed, whatever it read on the
+        way; one that answered with no records for the region; and one every
+        record of which was stepped over. What is left is the whole of what
+        "the registry is current" can honestly mean, and it is said here
+        because two surfaces read it and must not disagree -- the hard failure
+        that announces a frozen registry (ADR-0004) and the report that names a
+        catalogue failing a share of its runs (ADR-0011). One is about whether
+        the registry is being rebuilt at all and the other about how often, and
+        a copy of this predicate that drifted would have them arguing about the
+        same catalogue.
+        """
+        return self.exclude(status=SyncLog.FAILED).filter(
+            items_found__gt=models.F("items_errored")
+        )
+
+
 class SyncLog(models.Model):
     """One run of a synchronisation job, with its counts and what went wrong.
 
@@ -1865,6 +1886,8 @@ class SyncLog(models.Model):
     completed_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
+
+    objects = SyncLogQuerySet.as_manager()
 
     class Meta:
         ordering = ["-started_at"]
