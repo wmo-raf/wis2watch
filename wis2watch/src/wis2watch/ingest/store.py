@@ -417,6 +417,15 @@ def _attribute_to_the_record_it_names(record, lookup):
     and the dataset is created from the message rather than the traffic being
     filed under nobody.
 
+    A dataset the topic resolved to is not the record the message named, and
+    does not settle it. The topic is the weaker key by the whole of the reason
+    it is asked second -- a centre publishes several datasets on one topic --
+    so a message naming a record the registry does not hold would otherwise be
+    handed to whichever of the centre's datasets happened to claim the topic,
+    which is the mis-attribution the resolution order exists to prevent. Where
+    the registry does hold the named record, the message has already resolved
+    to it and there is nothing to do.
+
     Done here rather than in the lookup, and after a message has been judged,
     so that only traffic this tool is keeping can create anything: another
     region's publication and a centre's announcement of its own catalogue
@@ -428,10 +437,10 @@ def _attribute_to_the_record_it_names(record, lookup):
     that cannot be created is one message stored unattributed, not a flush
     lost.
     """
-    if record.dataset_id is not None or record.node_id is None:
+    if record.node_id is None or not record.metadata_id:
         return
 
-    if not record.metadata_id:
+    if record.dataset_id is not None and record.dataset.identifier == record.metadata_id:
         return
 
     try:
@@ -519,9 +528,9 @@ def _record_observed_datasets(records):
     same publication read from two vantage points says one thing.
 
     Time only moves forward, and every vantage point counts, for the reasons
-    ``_record_last_seen`` gives about a node's. Written only on creation
-    otherwise, so a flush costs a query or two per dataset rather than a
-    rewrite of a payload per message.
+    ``_record_last_seen`` gives about a node's. What the source said is
+    written only when the row is created, so a flush costs a query or two per
+    dataset rather than a rewrite of a payload per message.
     """
     latest = {}
     topics = {}
@@ -532,31 +541,67 @@ def _record_observed_datasets(records):
 
         seen_before = latest.get(record.dataset_id)
 
-        if seen_before is None or record.time > seen_before:
-            latest[record.dataset_id] = record.time
+        if seen_before is not None and record.time <= seen_before:
+            continue
 
-        topics.setdefault(record.dataset_id, _origin_topic(record))
+        latest[record.dataset_id] = record.time
+        topics[record.dataset_id] = _origin_topic(record)
 
     for dataset_id, seen_at in latest.items():
-        moved = DatasetSource.objects.filter(
-            Q(last_seen__lt=seen_at) | Q(last_seen__isnull=True),
-            dataset_id=dataset_id,
-            source_type=DatasetSource.OBSERVED,
-            catalogue=None,
-        ).update(last_seen=seen_at)
+        topic = topics[dataset_id]
 
-        if not moved:
-            topic = topics[dataset_id]
+        _record_observation(
+            DatasetSource,
+            {
+                "dataset_id": dataset_id,
+                "source_type": DatasetSource.OBSERVED,
+                "catalogue": None,
+            },
+            seen_at,
+            said={"topic": topic} if topic else None,
+        )
 
-            DatasetSource.objects.get_or_create(
-                dataset_id=dataset_id,
-                source_type=DatasetSource.OBSERVED,
-                catalogue=None,
-                defaults={
-                    "last_seen": seen_at,
-                    "raw_json": {"topic": topic} if topic else None,
-                },
-            )
+
+def _record_observation(model, declaration, seen_at, said=None):
+    """Move an observation up to when the thing was last seen, creating it if new.
+
+    One home for the two provenance rows an ingest writes, because there is
+    one rule behind them. **An observation only moves forward**: brokers
+    redeliver, a sweep runs alongside the per-centre subscriptions, and a
+    message can arrive after a later one -- none of which is news about when
+    something was last transmitting, so an older time is stepped over rather
+    than written.
+
+    Two statements, and the update has to come first. The filter is what makes
+    the move conditional; a ``get_or_create`` alone would either overwrite a
+    newer time or need the row read back and compared, and a flush that races
+    another would still write the older of the two. No rows moved means either
+    the row is not there yet or it already knows better, and creating settles
+    which.
+
+    ``first_seen`` is the same instant, not now. It is when this source was
+    first heard saying so, and what was heard is a publication -- an archive
+    poll routinely brings back a day-old one, and a row claiming to have been
+    first seen after it was last seen says nothing anybody can read.
+
+    Args:
+        model: the declaration model to write, ``StationSource`` or
+            ``DatasetSource``.
+        declaration: the fields identifying whose observation this is.
+        seen_at: the publication time observed.
+        said: what the source said, kept only when the row is created.
+    """
+    moved = model.objects.filter(
+        Q(last_seen__lt=seen_at) | Q(last_seen__isnull=True), **declaration
+    ).update(last_seen=seen_at)
+
+    if moved:
+        return
+
+    model.objects.get_or_create(
+        **declaration,
+        defaults={"first_seen": seen_at, "last_seen": seen_at, "raw_json": said},
+    )
 
 
 def _origin_topic(record):
@@ -584,13 +629,14 @@ def _record_observed_stations(records):
     a centre with no catalogue record still has stations, and losing them
     would hide exactly the traffic worth asking about.
 
-    Time only moves forward, and every vantage point counts, for the reasons
-    ``_record_last_seen`` gives about a node's -- a cached copy carries the
-    station's own transmission time, and taking the latest of what several
-    vantage points saw cannot overstate it. The two are kept apart rather than
-    generalised: they answer different questions, and the row a station's
-    answer lives on is one of the three provenance records, which a node's is
-    not.
+    Every vantage point counts, for the reasons ``_record_last_seen`` gives
+    about a node's -- a cached copy carries the station's own transmission
+    time, and taking the latest of what several vantage points saw cannot
+    overstate it. A node's last-seen is kept apart from this rather than
+    generalised with it: the two answer different questions, and the row a
+    station's answer lives on is one of the three provenance records, which a
+    node's is not. A dataset's observation is the other, and it is written by
+    the same rule -- see ``_record_observation``.
     """
     latest = {}
 
@@ -605,20 +651,15 @@ def _record_observed_stations(records):
             latest[transmitter] = record.time
 
     for (station_id, node_id), seen_at in latest.items():
-        moved = StationSource.objects.filter(
-            Q(last_seen__lt=seen_at) | Q(last_seen__isnull=True),
-            station_id=station_id,
-            source_type=StationSource.OBSERVED,
-            node_id=node_id,
-        ).update(last_seen=seen_at)
-
-        if not moved:
-            StationSource.objects.get_or_create(
-                station_id=station_id,
-                source_type=StationSource.OBSERVED,
-                node_id=node_id,
-                defaults={"last_seen": seen_at},
-            )
+        _record_observation(
+            StationSource,
+            {
+                "station_id": station_id,
+                "source_type": StationSource.OBSERVED,
+                "node_id": node_id,
+            },
+            seen_at,
+        )
 
 
 def store_notifications(source, received, node=None):

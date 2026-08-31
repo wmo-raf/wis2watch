@@ -168,6 +168,20 @@ class BackfillTests(DatasetSourceTestCase):
         self.assertEqual(backfill_gdc_declarations(), 0)
         self.assertEqual(DatasetSource.objects.count(), 1)
 
+    def test_with_no_writer_catalogue_nothing_is_credited(self):
+        """A declaration naming no catalogue is a claim about nobody.
+
+        And one the next real sync could not recognise as its own, since which
+        catalogue said it is part of a declaration's key -- so it would leave
+        two. The sync that follows a re-designated writer records the
+        declaration itself, which is why nothing is lost by waiting.
+        """
+        GlobalDiscoveryCatalogue.objects.update(is_writer=False)
+        self.dataset()
+
+        self.assertEqual(backfill_gdc_declarations(), 0)
+        self.assertEqual(DatasetSource.objects.count(), 0)
+
     def test_a_dataset_the_traffic_declared_is_not_given_to_the_catalogue(self):
         """Only what the catalogue wrote is the catalogue's to be credited with.
 

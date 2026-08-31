@@ -653,6 +653,20 @@ class ObservedDatasetTests(StoreTestCase):
         self.assertEqual(observation.source_type, DatasetSource.OBSERVED)
         self.assertIsNone(observation.catalogue)
 
+    def test_an_observation_was_first_seen_when_the_message_was_published(self):
+        """A poll of an archive brings back a day-old publication.
+
+        Stamped as now, the row would claim to have been first seen after it
+        was last seen -- which says nothing anybody can read.
+        """
+        declared = self.dataset()
+
+        store_notifications(self.source, [published_at("2026-08-11T10:00:00Z")])
+
+        observation = self.observation(declared)
+
+        self.assertEqual(observation.first_seen, observation.last_seen)
+
     def test_the_observation_keeps_the_topic_the_traffic_arrived_on(self):
         """What the source said, which for traffic is where it was published."""
         self.store(KE_TOPIC)
@@ -664,6 +678,34 @@ class ObservedDatasetTests(StoreTestCase):
         self.store(KE_CACHE_TOPIC)
 
         self.assertEqual(self.observation(Dataset.objects.get()).raw_json["topic"], KE_TOPIC)
+
+    def test_the_record_a_message_names_outranks_the_topic_it_arrived_on(self):
+        """The topic is the weaker key, and does not settle what it did not name.
+
+        A centre publishes several datasets on one topic, which is why the
+        topic is asked second. Left to answer for a record nothing holds, it
+        would hand the traffic to whichever of the centre's datasets happened
+        to claim the topic -- the mis-attribution the resolution order exists
+        to prevent.
+        """
+        claiming_the_topic = self.dataset(identifier=KE_OTHER_METADATA_ID)
+
+        record = self.store(KE_TOPIC)
+
+        self.assertNotEqual(record.dataset, claiming_the_topic)
+        self.assertEqual(record.dataset.identifier, KE_METADATA_ID)
+
+    def test_the_named_record_is_created_even_where_a_topic_would_have_answered(self):
+        self.dataset(identifier=KE_OTHER_METADATA_ID)
+
+        self.store(KE_TOPIC)
+
+        self.assertTrue(
+            DatasetSource.objects.filter(
+                dataset__identifier=KE_METADATA_ID,
+                source_type=DatasetSource.OBSERVED,
+            ).exists()
+        )
 
     def test_nothing_is_claimed_of_the_dataset_beyond_its_identifier(self):
         """A notification names its record and says nothing else about it.

@@ -369,8 +369,8 @@
                             {% for source in row.sources %}
                                 <div>
                                     <span class="badge badge-source-{{ source.source_type }}">{{ source.source_label }}</span>
-                                    {% if source.catalogue_id %}
-                                        <div class="row-detail"><code>{{ source.catalogue_id }}</code></div>
+                                    {% if source.catalogue_centre_id %}
+                                        <div class="row-detail"><code>{{ source.catalogue_centre_id }}</code></div>
                                     {% endif %}
                                     <div class="row-detail">
                                         {% if source.last_seen %}

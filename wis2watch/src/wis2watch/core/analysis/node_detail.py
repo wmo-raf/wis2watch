@@ -98,7 +98,7 @@ class DatasetSourceRow:
 
     source_type: str
     source_label: str
-    catalogue_id: str
+    catalogue_centre_id: str
     first_seen: datetime
     last_seen: datetime | None
 
@@ -342,12 +342,7 @@ def _datasets(node, *, now):
 
 
 def _declarations(node):
-    """Every source behind the centre's datasets, keyed by the dataset.
-
-    Read for the centre in one query rather than per dataset: the page lists
-    every dataset a centre has, and a relation followed per row would be a
-    query per row.
-    """
+    """Every source behind the centre's datasets, keyed by the dataset."""
     by_dataset = {}
 
     for declaration in DatasetSource.objects.declared_for_node(node):
@@ -363,7 +358,7 @@ def _dataset_source_row(declaration):
     return DatasetSourceRow(
         source_type=declaration.source_type,
         source_label=declaration.get_source_type_display(),
-        catalogue_id=(
+        catalogue_centre_id=(
             declaration.catalogue.centre_id if declaration.catalogue_id else ""
         ),
         first_seen=declaration.first_seen,

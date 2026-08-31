@@ -79,10 +79,27 @@ def backfill_gdc_declarations():
     accounted for, and crediting the catalogue with one the traffic found
     would invent the very disagreement these rows exist to report.
 
+    With no writer catalogue designated, nothing is written and nothing is
+    lost. There is no catalogue to name, and a declaration naming none would
+    be a claim about nobody -- and worse, a row the first real sync could not
+    recognise as its own, since which catalogue said it is part of a
+    declaration's key. So it would leave two. The state cannot arise where the
+    criterion matters, because a dataset exists only because a writer created
+    it, and the sync that follows a re-designated writer records the
+    declaration itself.
+
     Returns:
         int: how many declarations were written.
     """
     catalogue = GlobalDiscoveryCatalogue.objects.filter(is_writer=True).first()
+
+    if catalogue is None:
+        logger.warning(
+            "No writer catalogue is designated; no dataset declarations were "
+            "backfilled"
+        )
+
+        return 0
 
     undeclared = Dataset.objects.filter(sources__isnull=True)
 

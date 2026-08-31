@@ -252,7 +252,7 @@ class DatasetSourceTests(NodeDetailTestCase):
         source = self.sources_of()[0]
 
         self.assertEqual(source.source_type, DatasetSource.GDC)
-        self.assertEqual(source.catalogue_id, writer.centre_id)
+        self.assertEqual(source.catalogue_centre_id, writer.centre_id)
 
     def test_every_source_that_declared_it_is_shown(self):
         synop = self.dataset("synop")
@@ -267,7 +267,7 @@ class DatasetSourceTests(NodeDetailTestCase):
     def test_a_source_that_names_no_catalogue_says_so(self):
         self.declare(self.dataset("synop"), DatasetSource.OBSERVED, last_seen=NOW)
 
-        self.assertEqual(self.sources_of()[0].catalogue_id, "")
+        self.assertEqual(self.sources_of()[0].catalogue_centre_id, "")
 
     def test_a_source_carries_when_it_last_said_so(self):
         self.declare(self.dataset("synop"), DatasetSource.OBSERVED, last_seen=NOW)
