@@ -154,8 +154,20 @@ class NodeDatasetTaskTests(TestCase):
 
     def test_it_is_not_asked_in_the_same_minute_as_the_regions_other_fetches(self):
         """One centre's two endpoints in one minute is the region's slow hosts
-        in a single pile."""
-        others = ("poll-message-archives", "probe-canonical-links")
+        in a single pile.
+
+        The station registry first, since it is the one this reads the same
+        hosts as. An interval schedule would defeat the whole comparison --
+        its minute is whenever the beat was last restarted -- so what is
+        asserted is that both name a minute and that the minutes differ.
+        """
+        others = (
+            "sync-node-stations",
+            "poll-message-archives",
+            "probe-canonical-links",
+        )
+
+        self.assertTrue(self.entry["schedule"].minute)
 
         for name in others:
             with self.subTest(schedule=name):
