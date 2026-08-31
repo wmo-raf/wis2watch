@@ -1,4 +1,5 @@
 import re
+from contextlib import ExitStack
 from datetime import timedelta
 from unittest import mock
 
@@ -1061,32 +1062,88 @@ class NodeDetailViewTests(TestCase):
         self.assertIn("Nairobi JKIA", rows[1])
         self.assertIn("63740", rows[1])
 
-    def test_syncing_a_node_by_hand_asks_it_for_its_stations(self):
-        """Datasets come from the catalogue; a node is asked only for stations."""
-        with mock.patch("wis2watch.core.views.sync_node_stations") as sync:
-            sync.return_value = SyncLog(
-                node=self.node,
-                sync_type=SyncLog.NODE_STATIONS,
-                status=SyncLog.SUCCESS,
-            )
+    def sync_by_hand(self, **stood_in_for):
+        """Post the page's sync, with the named endpoints stood in for.
+
+        Only what a test is not about is patched. What is left runs for real,
+        which for a centre advertising no address is the whole of what is being
+        asserted -- and for one that does advertise it is why every test here
+        patches whatever it is not asking about, an unpatched sync being a
+        fetch against the centre's real host.
+        """
+        with ExitStack() as stack:
+            patched = {
+                name: stack.enter_context(
+                    mock.patch(f"wis2watch.core.views.{name}", return_value=sync_log)
+                )
+                for name, sync_log in stood_in_for.items()
+            }
 
             response = self.client.post(
                 reverse("node_details", args=[self.node.id]), {"node_id": self.node.id}
             )
 
+        return response, patched
+
+    def synced(self, sync_type, status=SyncLog.SUCCESS, error=""):
+        return SyncLog(
+            node=self.node, sync_type=sync_type, status=status, error_message=error
+        )
+
+    def test_syncing_a_node_by_hand_asks_it_for_its_stations(self):
+        response, patched = self.sync_by_hand(
+            sync_node_stations=self.synced(SyncLog.NODE_STATIONS),
+            sync_node_datasets=self.synced(SyncLog.DISCOVERY_METADATA),
+        )
+
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(sync.call_args.args[0], self.node)
+        self.assertEqual(patched["sync_node_stations"].call_args.args[0], self.node)
+
+    def test_syncing_a_node_by_hand_asks_it_what_it_publishes(self):
+        """The catalogue is not the only thing that says what a centre has."""
+        response, patched = self.sync_by_hand(
+            sync_node_stations=self.synced(SyncLog.NODE_STATIONS),
+            sync_node_datasets=self.synced(SyncLog.DISCOVERY_METADATA),
+        )
+
+        self.assertEqual(patched["sync_node_datasets"].call_args.args[0], self.node)
+        self.assertContains(response, "Discovery metadata synchronization completed")
+
+    def test_each_endpoint_is_reported_apart_from_the_other(self):
+        """They fail independently, so one message could not cover both."""
+        response, _patched = self.sync_by_hand(
+            sync_node_stations=self.synced(SyncLog.NODE_STATIONS),
+            sync_node_datasets=self.synced(
+                SyncLog.DISCOVERY_METADATA,
+                status=SyncLog.FAILED,
+                error="connection refused",
+            ),
+        )
+
+        self.assertContains(response, "Station synchronization completed")
+        self.assertContains(response, "connection refused")
 
     def test_a_node_that_advertises_no_station_registry_says_so(self):
         self.node.stations_url = ""
         self.node.node_type = "other"
         self.node.save()
 
-        response = self.client.post(
-            reverse("node_details", args=[self.node.id]), {"node_id": self.node.id}
+        response, _patched = self.sync_by_hand(
+            sync_node_datasets=self.synced(SyncLog.DISCOVERY_METADATA)
         )
 
         self.assertContains(response, "advertises no station registry")
+
+    def test_a_node_that_advertises_no_discovery_metadata_says_so(self):
+        self.node.discovery_metadata_url = ""
+        self.node.node_type = "other"
+        self.node.save()
+
+        response, _patched = self.sync_by_hand(
+            sync_node_stations=self.synced(SyncLog.NODE_STATIONS)
+        )
+
+        self.assertContains(response, "advertises no discovery metadata")
 
     def test_a_centre_nobody_asked_is_not_reported_as_declaring_nothing(self):
         """The page's claim about the centre has to be one it can make."""
@@ -1142,7 +1199,9 @@ class NodeDetailViewTests(TestCase):
         Each view is its own URL, so a POST lands back where it was made
         rather than on whichever view a fragment happened to name.
         """
-        with mock.patch("wis2watch.core.views.sync_node_stations"):
+        with mock.patch("wis2watch.core.views.sync_node_stations"), mock.patch(
+            "wis2watch.core.views.sync_node_datasets"
+        ):
             response = self.client.post(
                 reverse("node_details", args=[self.node.id]), {"node_id": self.node.id}
             )

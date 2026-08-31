@@ -549,6 +549,14 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'wis2watch.core.tasks.run_sync_all_node_stations',
         'schedule': 3600.0,  # Every hour
     },
+    # Hourly, like the station registries and against the same hosts, but at
+    # its own minute: a centre's two endpoints are two fetches, several of the
+    # region's hosts hang until the timeout, and asking both of a centre in the
+    # same minute would put the whole region's slow hosts in one pile.
+    'sync-node-discovery-metadata': {
+        'task': 'wis2watch.core.tasks.run_sync_all_node_datasets',
+        'schedule': crontab(minute=40),
+    },
     # Hourly, and only for the centres whose own broker will not answer -- see
     # wis2watch.ingest.tasks for why an hour is soon enough and why the centres
     # that can be heard live are left alone. Off the hour, so the region's

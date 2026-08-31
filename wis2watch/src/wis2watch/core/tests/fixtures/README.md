@@ -8,7 +8,8 @@ suggest.
 The first three were captured on **2026-08-11**, the node station registry on
 **2026-08-12**, and the two node message archives on **2026-08-13**.
 
-The CMA paging capture is later, on **2026-08-31**.
+The CMA paging capture and South Africa's own discovery metadata are later,
+both on **2026-08-31**.
 
 ## `global_broker_notifications.jsonl`
 
@@ -104,6 +105,33 @@ A registry longer than the page size links to its next page under `rel: next`,
 the same as a Global Discovery Catalogue does; this capture fits on one page
 and so carries no such link. The default page size of a station endpoint is
 routinely ten, which is why the fetch asks for more.
+
+## `node_discovery_metadata_za_weathersa.json`
+
+South Africa's own discovery metadata
+(`https://wis.weathersa.co.za/oapi/collections/discovery-metadata/items`),
+which is what a wis2box node publishes about the datasets it operates. The
+page is unedited, exactly as the node returned it at `limit=500` — envelope,
+links and all: three records, `numberMatched` and `numberReturned` both 3, and
+no `rel: next` link, because the whole collection fits on one page. A centre
+serving more than a page of records links its next one the same way a
+catalogue does.
+
+**The records are the same WCMP2 features a Global Discovery Catalogue
+serves** — same properties, same links, `wmo:topicHierarchy` and
+`wmo:dataPolicy` and a `canonical` link on the centre's own host — which is
+why the node sync reads them with the catalogue's own extraction and adds no
+parser of its own. The one difference is the notification link: a catalogue
+appends one per Global Broker, and a node advertises only its own
+(`mqtts://…@wis.weathersa.co.za:8883`), so every record here carries an origin
+broker.
+
+Captured for the disagreement it holds. At capture the Canadian GDC carried
+two of these three records; `urn:wmo:md:za-weathersa:xoeh2t` was served by the
+centre and by no catalogue, which is the finding the per-node sync exists to
+make. The three also cover both data policies (`core` and `recommended`), a
+record carrying a `license` link and one carrying no `collection` link, and
+two records that differ only in policy and topic while sharing a title.
 
 ## `node_messages_sc_seychelles_met.json` and `node_messages_gh_gmet.json`
 

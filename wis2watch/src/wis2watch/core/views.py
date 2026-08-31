@@ -20,6 +20,7 @@ from .analysis import (
 )
 from .forms import SyncNodeForm
 from .models import SyncLog, WIS2Node
+from .node_datasets import sync_node_datasets
 from .node_stations import sync_node_stations
 from .stations import node_stations_as_csv
 from .viewsets import WIS2NodeViewSet
@@ -246,6 +247,23 @@ def node_breadcrumbs(node, leaf=None):
     return trail
 
 
+def _report_sync(request, sync_log, *, unadvertised, completed):
+    """Say what one hand-run sync came to, in the terms of the endpoint it read.
+
+    A run that never happened is a warning rather than an error: a centre
+    advertising no address for one of its endpoints has not failed at
+    anything, and nothing went and looked.
+    """
+    if sync_log is None:
+        messages.warning(request, unadvertised)
+    elif sync_log.status == SyncLog.FAILED:
+        messages.error(
+            request, _("Error during synchronization: ") + sync_log.error_message
+        )
+    else:
+        messages.success(request, completed + sync_log.summary)
+
+
 def node_details(request, node_id):
     """Everything known about one centre, on one page.
 
@@ -267,23 +285,25 @@ def node_details(request, node_id):
     if request.method == "POST":
         form = SyncNodeForm(request.POST)
         if form.is_valid():
-            # Datasets come from the catalogue now, so syncing a node by hand
-            # asks it only for its station registry. The node is the page's
-            # own; the form carries its id so a stray post cannot sync another.
-            sync_log = sync_node_stations(node)
-
-            if sync_log is None:
-                messages.warning(request, _("This node advertises no station registry."))
-            elif sync_log.status == SyncLog.FAILED:
-                messages.error(
-                    request,
-                    _("Error during synchronization: ") + sync_log.error_message,
-                )
-            else:
-                messages.success(
-                    request,
-                    _("Station synchronization completed: ") + sync_log.summary,
-                )
+            # Both of the centre's endpoints, and reported apart. They fail
+            # independently -- a centre serving its records may serve no
+            # station registry, and either address may be the one that has
+            # gone -- so one message covering both would leave a reader unable
+            # to tell which half of the page is now current. The node is the
+            # page's own; the form carries its id so a stray post cannot sync
+            # another.
+            _report_sync(
+                request,
+                sync_node_stations(node),
+                unadvertised=_("This node advertises no station registry."),
+                completed=_("Station synchronization completed: "),
+            )
+            _report_sync(
+                request,
+                sync_node_datasets(node),
+                unadvertised=_("This node advertises no discovery metadata."),
+                completed=_("Discovery metadata synchronization completed: "),
+            )
         else:
             messages.error(request, _("Invalid form submission."))
 

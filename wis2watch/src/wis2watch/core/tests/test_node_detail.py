@@ -264,6 +264,18 @@ class DatasetSourceTests(NodeDetailTestCase):
             [DatasetSource.GDC, DatasetSource.OBSERVED],
         )
 
+    def test_the_centres_own_declaration_stands_beside_the_catalogues(self):
+        """The two disagree, and the page is where that is read side by side."""
+        synop = self.dataset("synop")
+        self.declare(synop, DatasetSource.GDC, catalogue=self.catalogue(is_writer=True))
+        self.declare(synop, DatasetSource.NODE, last_seen=NOW)
+
+        by_type = {source.source_type: source for source in self.sources_of()}
+
+        self.assertEqual(sorted(by_type), [DatasetSource.GDC, DatasetSource.NODE])
+        self.assertEqual(by_type[DatasetSource.NODE].last_seen, NOW)
+        self.assertEqual(by_type[DatasetSource.NODE].catalogue_centre_id, "")
+
     def test_a_source_that_names_no_catalogue_says_so(self):
         self.declare(self.dataset("synop"), DatasetSource.OBSERVED, last_seen=NOW)
 

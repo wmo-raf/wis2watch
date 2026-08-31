@@ -1,0 +1,606 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "id": "urn:wmo:md:za-weathersa:xoeh2t",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "type": "Feature",
+   "wis2box": {
+    "topic_hierarchy": "za-weathersa.data.core.weather.surface-based-observations.synop",
+    "centre_id": "za-weathersa",
+    "data_mappings": {
+     "plugins": {
+      "bin": [
+       {
+        "plugin": "wis2box.data.bufr4.ObservationDataBUFR",
+        "notify": true,
+        "buckets": [
+         "wis2box-incoming"
+        ],
+        "file-pattern": "^.*\\.bin$"
+       }
+      ],
+      "txt": [
+       {
+        "plugin": "wis2box.data.synop2bufr.ObservationDataSYNOP2BUFR",
+        "notify": true,
+        "file-pattern": "^.*_(\\d{4})(\\d{2}).*.txt$"
+       }
+      ],
+      "b": [
+       {
+        "plugin": "wis2box.data.bufr4.ObservationDataBUFR",
+        "notify": true,
+        "buckets": [
+         "wis2box-incoming"
+        ],
+        "file-pattern": "^.*\\.b$"
+       }
+      ],
+      "csv": [
+       {
+        "plugin": "wis2box.data.csv2bufr.ObservationDataCSV2BUFR",
+        "template": "aws-template",
+        "notify": true,
+        "buckets": [
+         "wis2box-incoming"
+        ],
+        "file-pattern": "^.*\\.csv$"
+       }
+      ],
+      "bufr4": [
+       {
+        "plugin": "wis2box.data.bufr2geojson.ObservationDataBUFR2GeoJSON",
+        "buckets": [
+         "wis2box-public"
+        ],
+        "file-pattern": "^WIGOS_(\\d-\\d+-\\d+-\\w+)_.*\\.bufr4$"
+       }
+      ]
+     }
+    }
+   },
+   "time": {
+    "interval": [
+     "2025-03-13",
+     ".."
+    ],
+    "resolution": "PT1H"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       12.3449768408952,
+       -18.0913127580676
+      ],
+      [
+       35.8301204770289,
+       -18.0913127580676
+      ],
+      [
+       35.8301204770289,
+       -34.8191663551237
+      ],
+      [
+       12.3449768408952,
+       -34.8191663551237
+      ],
+      [
+       12.3449768408952,
+       -18.0913127580676
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "type": "dataset",
+    "identifier": "urn:wmo:md:za-weathersa:xoeh2t",
+    "title": "Hourly synoptic observations from fixed-land stations (SYNOP) (za-weathersa)",
+    "description": "Hourly synoptic observations",
+    "keywords": [
+     "observations",
+     "temperature",
+     "visibility",
+     "precipitation",
+     "pressure",
+     "clouds",
+     "snow depth",
+     "evaporation",
+     "radiation",
+     "wind",
+     "total sunshine",
+     "humidity"
+    ],
+    "themes": [
+     {
+      "concepts": [
+       {
+        "id": "weather",
+        "title": "Weather"
+       }
+      ],
+      "scheme": "http://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+     }
+    ],
+    "contacts": [
+     {
+      "organization": "South African Weather Service",
+      "emails": [
+       {
+        "value": "rinae.tshibubudze@weathersa.co.za"
+       }
+      ],
+      "addresses": [
+       {
+        "country": "ZAF"
+       }
+      ],
+      "links": [
+       {
+        "rel": "about",
+        "href": "https://www.weathersa.co.za",
+        "type": "text/html"
+       }
+      ],
+      "roles": [
+       "host"
+      ]
+     }
+    ],
+    "created": "2025-03-13T15:59:07Z",
+    "updated": "2025-03-13T15:59:07Z",
+    "wmo:dataPolicy": "core",
+    "wmo:topicHierarchy": "origin/a/wis2/za-weathersa/data/core/weather/surface-based-observations/synop",
+    "id": "urn:wmo:md:za-weathersa:xoeh2t"
+   },
+   "links": [
+    {
+     "href": "https://wis.weathersa.co.za/oapi/collections/urn:wmo:md:za-weathersa:xoeh2t/items?sortby=-reportTime",
+     "type": "application/json",
+     "name": "urn:wmo:md:za-weathersa:xoeh2t",
+     "rel": "collection",
+     "title": "Observations in json format for urn:wmo:md:za-weathersa:xoeh2t"
+    },
+    {
+     "href": "mqtts://everyone:everyone@wis.weathersa.co.za:8883",
+     "type": "application/json",
+     "name": "origin/a/wis2/za-weathersa/data/core/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "origin/a/wis2/za-weathersa/data/core/weather/surface-based-observations/synop",
+     "filters": {
+      "wigos_station_identifier": {
+       "type": "string",
+       "title": "WIGOS Station Identifier",
+       "description": "Filter by WIGOS Station Identifier"
+      }
+     },
+     "title": "Notifications"
+    },
+    {
+     "href": "https://wis.weathersa.co.za/data/metadata/urn:wmo:md:za-weathersa:xoeh2t.json",
+     "type": "application/geo+json",
+     "name": "urn:wmo:md:za-weathersa:xoeh2t",
+     "rel": "canonical",
+     "title": "urn:wmo:md:za-weathersa:xoeh2t"
+    }
+   ]
+  },
+  {
+   "id": "urn:wmo:md:za-weathersa:jwtdpd",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "type": "Feature",
+   "wis2box": {
+    "topic_hierarchy": "za-weathersa.data.core.weather.surface-based-observations.temp",
+    "centre_id": "za-weathersa",
+    "data_mappings": {
+     "plugins": {
+      "b": [
+       {
+        "plugin": "wis2box.data.bufr4.ObservationDataBUFR",
+        "notify": true,
+        "buckets": [
+         "wis2box-incoming"
+        ],
+        "file-pattern": "^.*\\.b$"
+       }
+      ],
+      "bin": [
+       {
+        "plugin": "wis2box.data.bufr4.ObservationDataBUFR",
+        "notify": true,
+        "buckets": [
+         "wis2box-incoming"
+        ],
+        "file-pattern": "^.*\\.bin$"
+       }
+      ],
+      "bufr": [
+       {
+        "plugin": "wis2box.data.bufr4.ObservationDataBUFR",
+        "notify": true,
+        "buckets": [
+         "wis2box-incoming"
+        ],
+        "file-pattern": "^.*\\.bufr$"
+       }
+      ]
+     }
+    }
+   },
+   "time": {
+    "interval": [
+     "2025-03-20",
+     ".."
+    ],
+    "resolution": "PT12H"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -17.6550231591048,
+       -22.091312758067588
+      ],
+      [
+       54.8301204770289,
+       -22.091312758067588
+      ],
+      [
+       54.8301204770289,
+       -44.8191663551237
+      ],
+      [
+       -17.6550231591048,
+       -44.8191663551237
+      ],
+      [
+       -17.6550231591048,
+       -22.091312758067588
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "type": "dataset",
+    "identifier": "urn:wmo:md:za-weathersa:jwtdpd",
+    "title": "Upper-level temperature/humidity/wind reports from fixed-land stations (TEMP) (za-weathersa)",
+    "description": "Upper-level temperature",
+    "keywords": [
+     "observations",
+     "upper air",
+     "humidity",
+     "wind",
+     "observations",
+     "temperature",
+     "dewpoint",
+     "clouds",
+     "pressure",
+     "atmospheric profile"
+    ],
+    "themes": [
+     {
+      "concepts": [
+       {
+        "id": "weather",
+        "title": "Weather"
+       }
+      ],
+      "scheme": "http://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+     }
+    ],
+    "contacts": [
+     {
+      "organization": "South African Weather Service",
+      "emails": [
+       {
+        "value": "christa.ferreira@weathersa.co.za"
+       }
+      ],
+      "addresses": [
+       {
+        "country": "ZAF"
+       }
+      ],
+      "links": [
+       {
+        "rel": "about",
+        "href": "https://weathersa.co.za",
+        "type": "text/html"
+       }
+      ],
+      "roles": [
+       "host"
+      ]
+     }
+    ],
+    "created": "2025-03-20T12:13:00Z",
+    "updated": "2025-03-20T12:13:00Z",
+    "wmo:dataPolicy": "core",
+    "wmo:topicHierarchy": "origin/a/wis2/za-weathersa/data/core/weather/surface-based-observations/temp",
+    "id": "urn:wmo:md:za-weathersa:jwtdpd"
+   },
+   "links": [
+    {
+     "href": "mqtts://everyone:everyone@wis.weathersa.co.za:8883",
+     "type": "application/json",
+     "name": "origin/a/wis2/za-weathersa/data/core/weather/surface-based-observations/temp",
+     "rel": "items",
+     "channel": "origin/a/wis2/za-weathersa/data/core/weather/surface-based-observations/temp",
+     "filters": {
+      "wigos_station_identifier": {
+       "type": "string",
+       "title": "WIGOS Station Identifier",
+       "description": "Filter by WIGOS Station Identifier"
+      }
+     },
+     "title": "Notifications"
+    },
+    {
+     "href": "https://wis.weathersa.co.za/data/metadata/urn:wmo:md:za-weathersa:jwtdpd.json",
+     "type": "application/geo+json",
+     "name": "urn:wmo:md:za-weathersa:jwtdpd",
+     "rel": "canonical",
+     "title": "urn:wmo:md:za-weathersa:jwtdpd"
+    }
+   ]
+  },
+  {
+   "id": "urn:wmo:md:za-weathersa:76h87o",
+   "conformsTo": [
+    "http://wis.wmo.int/spec/wcmp/2/conf/core"
+   ],
+   "type": "Feature",
+   "wis2box": {
+    "data_mappings": {
+     "plugins": {
+      "bin": [
+       {
+        "plugin": "wis2box.data.bufr4.ObservationDataBUFR",
+        "notify": true,
+        "buckets": [
+         "wis2box-incoming"
+        ],
+        "file-pattern": "^.*\\.bin$"
+       }
+      ],
+      "txt": [
+       {
+        "plugin": "wis2box.data.synop2bufr.ObservationDataSYNOP2BUFR",
+        "notify": true,
+        "buckets": [
+         "wis2box-incoming"
+        ],
+        "file-pattern": "^.*_(\\d{4})(\\d{2}).*.txt$"
+       }
+      ],
+      "b": [
+       {
+        "plugin": "wis2box.data.bufr4.ObservationDataBUFR",
+        "notify": true,
+        "buckets": [
+         "wis2box-incoming"
+        ],
+        "file-pattern": "^.*\\.b$"
+       }
+      ],
+      "csv": [
+       {
+        "plugin": "wis2box.data.csv2bufr.ObservationDataCSV2BUFR",
+        "template": "aws-template",
+        "notify": true,
+        "buckets": [
+         "wis2box-incoming"
+        ],
+        "file-pattern": "^.*\\.csv$"
+       }
+      ],
+      "bufr4": [
+       {
+        "plugin": "wis2box.data.bufr2geojson.ObservationDataBUFR2GeoJSON",
+        "buckets": [
+         "wis2box-public"
+        ],
+        "file-pattern": "^WIGOS_(\\d-\\d+-\\d+-\\w+)_.*\\.bufr4$"
+       }
+      ],
+      "grib2": [
+       {
+        "plugin": "wis2box.data.universal.UniversalData",
+        "template": null,
+        "notify": true,
+        "buckets": [
+         "wis2box-incoming"
+        ],
+        "file-pattern": "^.*?_(\\d{8}).*?\\..*$"
+       }
+      ]
+     }
+    },
+    "centre_id": "za-weathersa",
+    "topic_hierarchy": "za-weathersa.data.recommended.weather.surface-based-observations.synop"
+   },
+   "time": {
+    "interval": [
+     "2026-04-13",
+     ".."
+    ],
+    "resolution": "PT1H"
+   },
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       16.344976840895242,
+       -22.091312758067588
+      ],
+      [
+       32.830120477028885,
+       -22.091312758067588
+      ],
+      [
+       32.830120477028885,
+       -34.81916635512371
+      ],
+      [
+       16.344976840895242,
+       -34.81916635512371
+      ],
+      [
+       16.344976840895242,
+       -22.091312758067588
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "type": "dataset",
+    "identifier": "urn:wmo:md:za-weathersa:76h87o",
+    "title": "Hourly synoptic observations from fixed-land stations (SYNOP) (za-weathersa)",
+    "description": "Aviation Recommeded Data",
+    "keywords": [
+     "observations",
+     "temperature",
+     "visibility",
+     "precipitation",
+     "pressure",
+     "clouds",
+     "snow depth",
+     "evaporation",
+     "radiation",
+     "wind",
+     "total sunshine",
+     "humidity"
+    ],
+    "themes": [
+     {
+      "concepts": [
+       {
+        "id": "weather",
+        "title": "Weather"
+       },
+       {
+        "id": "atmospheric-composition",
+        "title": "Atmospheric Composition"
+       },
+       {
+        "id": "space-weather",
+        "title": "Space Weather"
+       }
+      ],
+      "scheme": "http://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+     }
+    ],
+    "contacts": [
+     {
+      "organization": "South African Weather Service",
+      "emails": [
+       {
+        "value": "rinae.tshibubudze@weathersa.co.za"
+       }
+      ],
+      "addresses": [
+       {
+        "country": "ZAF"
+       }
+      ],
+      "links": [
+       {
+        "rel": "about",
+        "href": "https://weathersa.co.za",
+        "type": "text/html"
+       }
+      ],
+      "roles": [
+       "host"
+      ]
+     }
+    ],
+    "created": "2026-04-13T18:35:48Z",
+    "updated": "2026-04-13T18:35:48Z",
+    "wmo:dataPolicy": "recommended",
+    "wmo:topicHierarchy": "origin/a/wis2/za-weathersa/data/recommended/weather/surface-based-observations/synop",
+    "id": "urn:wmo:md:za-weathersa:76h87o"
+   },
+   "links": [
+    {
+     "rel": "license",
+     "href": "https://wis.weathersa.co.za/data/license.txt",
+     "title": "License for this dataset",
+     "type": "text/html"
+    },
+    {
+     "href": "https://wis.weathersa.co.za/oapi/collections/urn:wmo:md:za-weathersa:76h87o/items?sortby=-reportTime",
+     "type": "application/json",
+     "name": "urn:wmo:md:za-weathersa:76h87o",
+     "rel": "collection",
+     "title": "Observations in json format for urn:wmo:md:za-weathersa:76h87o"
+    },
+    {
+     "href": "mqtts://everyone:everyone@wis.weathersa.co.za:8883",
+     "type": "application/json",
+     "name": "origin/a/wis2/za-weathersa/data/recommended/weather/surface-based-observations/synop",
+     "rel": "items",
+     "channel": "origin/a/wis2/za-weathersa/data/recommended/weather/surface-based-observations/synop",
+     "filters": {
+      "wigos_station_identifier": {
+       "type": "string",
+       "title": "WIGOS Station Identifier",
+       "description": "Filter by WIGOS Station Identifier"
+      }
+     },
+     "title": "Notifications"
+    },
+    {
+     "href": "https://wis.weathersa.co.za/data/metadata/urn:wmo:md:za-weathersa:76h87o.json",
+     "type": "application/geo+json",
+     "name": "urn:wmo:md:za-weathersa:76h87o",
+     "rel": "canonical",
+     "title": "urn:wmo:md:za-weathersa:76h87o"
+    }
+   ]
+  }
+ ],
+ "numberMatched": 3,
+ "numberReturned": 3,
+ "links": [
+  {
+   "type": "application/geo+json",
+   "rel": "self",
+   "title": "This document as GeoJSON",
+   "href": "https://wis.weathersa.co.za/oapi/collections/discovery-metadata/items?f=json&limit=500"
+  },
+  {
+   "rel": "alternate",
+   "type": "application/ld+json",
+   "title": "This document as RDF (JSON-LD)",
+   "href": "https://wis.weathersa.co.za/oapi/collections/discovery-metadata/items?f=jsonld&limit=500"
+  },
+  {
+   "type": "text/html",
+   "rel": "alternate",
+   "title": "This document as HTML",
+   "href": "https://wis.weathersa.co.za/oapi/collections/discovery-metadata/items?f=html&limit=500"
+  },
+  {
+   "type": "text/csv; charset=utf-8",
+   "rel": "alternate",
+   "title": "This document as CSV",
+   "href": "https://wis.weathersa.co.za/oapi/collections/discovery-metadata/items?f=csv&limit=500"
+  },
+  {
+   "type": "application/json",
+   "title": "Discovery metadata",
+   "rel": "collection",
+   "href": "https://wis.weathersa.co.za/oapi/collections/discovery-metadata"
+  }
+ ],
+ "timeStamp": "2026-08-31T13:46:09.729342Z"
+}
