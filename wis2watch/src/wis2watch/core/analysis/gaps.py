@@ -8,12 +8,13 @@ stations are declared to the world and have never once transmitted, a centre
 publishing that no catalogue has indexed, data announced to a broker the rest
 of the world never hears.
 
-Eight reports, because there are eight ways the picture can be wrong that no
+Nine reports, because there are nine ways the picture can be wrong that no
 single view of one centre can show:
 
 * what a country declares in OSCAR and has never been heard from;
 * what is transmitting that no registry -- OSCAR's or a centre's own --
   declares;
+* which datasets a centre and its catalogue do not both declare;
 * what a centre published that the Global Broker never carried;
 * which centres publish with no catalogue record at all;
 * whose own station registry has stopped answering, or never did;
@@ -97,6 +98,8 @@ from django.utils.translation import ngettext
 from django_countries.fields import Country
 
 from ..models import (
+    Dataset,
+    DatasetSource,
     GlobalDiscoveryCatalogue,
     HardFailure,
     HourlyRollup,
@@ -119,7 +122,7 @@ from .silence import hours_between
 #: over a day.
 DEFAULT_ATTRIBUTION_WINDOW_HOURS = 168
 
-#: Which report answers "is this share bad?" for a centre. Alone among the eight
+#: Which report answers "is this share bad?" for a centre. Alone among the nine
 #: slugs in being named here, because it is the only one reversed from outside
 #: this module -- the statistics tab links to it. Renaming it should not be a
 #: search for the same string somewhere else in the tree.
@@ -329,6 +332,105 @@ class UndeclaredStationRow:
     def declaring_centre_label(self):
         """What is known of the centre behind it, for a table cell."""
         return DeclaringCentre.label(self.declaring_centre)
+
+
+class DeclarationDrift:
+    """Which way a dataset's sources have come apart.
+
+    Three directions rather than three reports, because measured against the
+    region today only the first of them has any rows: the catalogue carries
+    eleven records across ten centres that the centres themselves do not, and
+    nothing drifts the other way. Three reports would be one report and two
+    empty pages, and an empty page is read as a region with nothing wrong with
+    it rather than as a direction nothing has drifted in yet.
+
+    ``CATALOGUE_ONLY`` is a stale global record: what a centre registered once
+    and has since stopped serving, still advertising data to everyone who
+    reads a catalogue rather than the centre.
+
+    ``NODE_ONLY`` is the reverse, and the worse of the two -- a centre
+    publishing data that nothing reading a catalogue can discover, which is
+    every consumer that is not this tool.
+
+    ``UNDECLARED`` is the dataset twin of a station transmitting that no
+    registry declares. Traffic arrived naming a record, and neither the
+    catalogue nor the centre has ever described it.
+    """
+
+    CATALOGUE_ONLY = "catalogue_only"
+    NODE_ONLY = "node_only"
+    UNDECLARED = "undeclared"
+
+    CHOICES = [
+        (CATALOGUE_ONLY, _("The catalogue carries it, the centre does not")),
+        (NODE_ONLY, _("The centre declares it, the catalogue does not")),
+        (UNDECLARED, _("Transmitting, and neither declares it")),
+    ]
+
+    LABELS = dict(CHOICES)
+
+    @classmethod
+    def of(cls, *, in_catalogue, at_node):
+        """Which of the three a dataset's declarations add up to.
+
+        Asked only of the datasets the report has already picked out, which is
+        what the two absences are read against. A dataset both of them declare
+        has no answer here -- it is not a drift, and the report never gets as
+        far as naming it one -- and one neither declares reached the report by
+        being heard, since traffic is the only other thing that creates a
+        dataset at all.
+        """
+        if in_catalogue:
+            return cls.CATALOGUE_ONLY
+
+        return cls.NODE_ONLY if at_node else cls.UNDECLARED
+
+    @classmethod
+    def label(cls, value):
+        """What that direction is called, for a cell or an email."""
+        return cls.LABELS.get(value, value)
+
+
+@dataclass(frozen=True)
+class DriftingDatasetRow:
+    """A dataset the catalogue and the centre do not both declare.
+
+    The direction is the whole of what makes the row actionable, and is why
+    the three cases are one report: a record the catalogue carries alone is a
+    registration to withdraw or a centre to ask what happened to it, and one
+    the centre declares alone is a registration to make. The same table with
+    that column removed would be a list of identifiers somebody has to go and
+    check one at a time.
+
+    ``last_declared_at`` is when the source that does declare it last said so,
+    and is read from the two registries alone. A catalogue-only record last
+    confirmed this morning is a live disagreement; one last confirmed in March
+    is a record nothing has touched since, and the two are different
+    conversations. Traffic is deliberately not in it: a dataset the catalogue
+    carries and the centre does not is out of step whether or not messages are
+    still arriving under it, and letting an arrival stamp this would date a
+    March record as confirmed today.
+
+    Which leaves the third direction with nothing here, correctly -- nothing
+    declares it -- so when it was last heard is carried beside it as
+    ``last_heard_at``. That is the only instant such a row has, and it is the
+    one that says whether the traffic nobody declared is still arriving.
+    """
+
+    dataset_id: int
+    node_id: int
+    centre_id: str
+    identifier: str
+    title: str
+    topic: str
+    drift: str
+    last_declared_at: datetime | None
+    last_heard_at: datetime | None
+
+    @property
+    def drift_label(self):
+        """Which way it drifts, for a table cell or an email."""
+        return DeclarationDrift.label(self.drift)
 
 
 @dataclass(frozen=True)
@@ -647,6 +749,85 @@ def stations_transmitting_undeclared(*, now=None):
         _undeclared_station_row(observation, now=now)
         for observation in _undeclared_observations()
     ]
+
+
+def datasets_out_of_step(*, now=None):
+    """Datasets a centre and its catalogue do not both declare.
+
+    Args:
+        now: unused; taken so that every report is asked for the same way.
+
+    Returns:
+        list[DriftingDatasetRow]: by centre, then by identifier, each saying
+        which way it drifts.
+
+    What a Global Discovery Catalogue holds is a copy of what a centre once
+    registered, and what a centre serves is what it publishes today. Until
+    both were being read the two could not disagree, because only one of them
+    was written down; now that they are, the disagreement is a finding -- and
+    the direction of it decides whose errand it is.
+
+    Traffic is the third source and settles nothing between them. A dataset
+    the catalogue carries is out of step with its centre whether or not
+    messages are arriving under it: the centre's own metadata is what a
+    consumer reads, and traffic is not a declaration. Where neither declares
+    it, though, traffic is the only reason anything knows the dataset exists
+    at all, and that is the third direction.
+
+    Only centres something has actually read are here. A centre whose own
+    metadata has never been answered for declares nothing as far as this tool
+    knows, and every record its catalogue holds would read as a drift -- which
+    is ADR-0005's mistake made about datasets. Those centres are named by
+    ``datasets_out_of_step_unasked_centres`` below rather than counted here.
+    """
+    return [_drifting_dataset_row(dataset) for dataset in _datasets_out_of_step()]
+
+
+def datasets_out_of_step_unasked_centres(*, now=None):
+    """Which centres this count is measured against, in a sentence.
+
+    Args:
+        now: unused; taken so that every bound is asked in the same way.
+
+    Returns:
+        str | None: the centres whose own metadata has never been read, or
+        nothing where every centre has answered.
+
+    Eleven findings computed from twenty-seven of the region's thirty-two
+    centres is not "the region has eleven drifts"; it is eleven among the
+    centres something could ask. A count read without that is read as the
+    region, which is the whole of what a reader wants it for.
+
+    Read from the sync logs rather than from a live probe, and from every run
+    rather than the newest. The probes are demonstrably flaky -- a centre
+    failed one sweep and answered the next -- and a bound that moved between
+    two readings of the same page would be a page nobody could quote. What is
+    asked here is whether anything has ever had an answer, which only stops
+    being true by never having been true.
+
+    Said even where the report is empty, and most of all there. No rows and
+    nothing beside them announces that the region's catalogues and centres
+    agree about every dataset, which is the one thing this report cannot know
+    about a centre nothing has read.
+    """
+    unasked = list(
+        _nodes_never_answering_for_what_they_publish().values_list(
+            "centre_id", flat=True
+        )
+    )
+
+    if not unasked:
+        return None
+
+    return ngettext(
+        "%(count)d centre is not counted here, nothing having ever read what "
+        "it publishes: %(centres)s. A record only its catalogue carries "
+        "cannot be told from one it agrees with.",
+        "%(count)d centres are not counted here, nothing having ever read "
+        "what they publish: %(centres)s. A record only their catalogue "
+        "carries cannot be told from one they agree with.",
+        len(unasked),
+    ) % {"count": len(unasked), "centres": ", ".join(unasked)}
 
 
 def propagation_gaps(*, now=None):
@@ -1532,6 +1713,120 @@ def _undeclared_station_row(observation, *, now):
     )
 
 
+def _nodes_answering_for_what_they_publish():
+    """The centres whose own discovery metadata something has read.
+
+    One run that answered is enough, and the newest run is not asked about.
+    What a centre last said stands until it says otherwise -- a failed run is
+    recorded as a failure rather than read as a withdrawal, which is the rule
+    the sync writes by -- so a centre that answered a fortnight ago and has
+    been refusing ever since still has declarations, and they are still what
+    it said.
+
+    A centre with no address of its own is not in here either, for the reason
+    it is in no sync log: nothing ever went and looked. It is not asked about
+    separately, because this report has nothing to say about the difference --
+    a centre nothing could ask and a centre that would not answer have both
+    told it nothing, and both are named in the bound. Where the two do have to
+    be told apart the fact is ``advertises_discovery_metadata`` rather than an
+    absence inferred from sync logs, as ADR-0005 settled for stations; the
+    report that comes to need it is the one about unreadable endpoints, not
+    this one.
+
+    A partial run answered. It reached the centre and read its records, and
+    the ones it could not store are the stepped-over report's finding rather
+    than a reason to doubt the rest.
+    """
+    asked = Q(sync_logs__sync_type=SyncLog.DISCOVERY_METADATA)
+    answered = asked & ~Q(sync_logs__status=SyncLog.FAILED)
+
+    return WIS2Node.objects.annotate(
+        last_answered_at=Max("sync_logs__started_at", filter=answered)
+    ).filter(last_answered_at__isnull=False)
+
+
+def _nodes_never_answering_for_what_they_publish():
+    """The centres whose own discovery metadata nothing has ever read.
+
+    The complement of the set above rather than a second predicate over the
+    same logs. The rows the report lists and the centres its bound names have
+    to partition the region between them: a centre in neither would be one
+    nobody was told about, and a centre in both would be counted and
+    disclaimed at once.
+    """
+    return WIS2Node.objects.exclude(
+        pk__in=_nodes_answering_for_what_they_publish().values("pk")
+    ).order_by("centre_id")
+
+
+def _datasets_out_of_step():
+    """The datasets whose sources do not agree that they exist.
+
+    Counted rather than tested for existence, because the three counts and the
+    two instants beside them come off one pass over the declarations of each
+    dataset. What comes back is the three directions and nothing else: a
+    dataset both registries declare is agreement, and one nothing declares and
+    nothing has been heard from is a row no source stands behind at all.
+
+    The two instants are kept apart rather than maxed together, because they
+    answer different questions and one of them would swallow the other. When a
+    registry last confirmed a record is what dates the disagreement; when
+    traffic was last heard is what says the data is still coming. A single
+    newest-of-everything would date a record the catalogue has not carried
+    since March as confirmed this morning, on the strength of a message.
+    """
+    return (
+        Dataset.objects.filter(
+            node__in=_nodes_answering_for_what_they_publish().values("pk")
+        )
+        .annotate(
+            in_catalogue=Count(
+                "sources", filter=Q(sources__source_type=DatasetSource.GDC)
+            ),
+            at_node=Count(
+                "sources", filter=Q(sources__source_type=DatasetSource.NODE)
+            ),
+            heard=Count(
+                "sources", filter=Q(sources__source_type=DatasetSource.OBSERVED)
+            ),
+            last_declared_at=Max(
+                "sources__last_seen",
+                filter=Q(
+                    sources__source_type__in=(DatasetSource.GDC, DatasetSource.NODE)
+                ),
+            ),
+            last_heard_at=Max(
+                "sources__last_seen",
+                filter=Q(sources__source_type=DatasetSource.OBSERVED),
+            ),
+        )
+        .filter(
+            Q(in_catalogue__gt=0, at_node=0)
+            | Q(in_catalogue=0, at_node__gt=0)
+            | Q(in_catalogue=0, at_node=0, heard__gt=0)
+        )
+        .select_related("node")
+        .order_by("node__centre_id", "identifier")
+    )
+
+
+def _drifting_dataset_row(dataset):
+    """One dataset its sources disagree about, as a finding."""
+    return DriftingDatasetRow(
+        dataset_id=dataset.pk,
+        node_id=dataset.node_id,
+        centre_id=dataset.node.centre_id,
+        identifier=dataset.identifier,
+        title=dataset.display_title,
+        topic=dataset.wmo_topic_hierarchy,
+        drift=DeclarationDrift.of(
+            in_catalogue=bool(dataset.in_catalogue), at_node=bool(dataset.at_node)
+        ),
+        last_declared_at=dataset.last_declared_at,
+        last_heard_at=dataset.last_heard_at,
+    )
+
+
 def _reportable_gaps(*, now=None):
     """The open gaps of centres whose own broker still answers.
 
@@ -1765,6 +2060,40 @@ def _undeclared_station_notice(row):
     )
 
 
+def _out_of_step_dataset_notice(row):
+    """A dataset its sources disagree about, in a sentence.
+
+    Three sentences, because the three directions are three errands and a
+    reader who has to work out which one this is from a direction label
+    dropped into the mail will not.
+
+    Keyed on the centre and the identifier, which is the dataset itself: a
+    record that stops drifting because the centre has begun serving it and one
+    that stops because the catalogue withdrew it are the same news, and it is
+    the identifier that has stopped being a finding.
+    """
+    if row.drift == DeclarationDrift.CATALOGUE_ONLY:
+        drifted = (
+            f"is carried by a catalogue and not by {row.centre_id} itself, "
+            f"which serves no record of it"
+        )
+    elif row.drift == DeclarationDrift.NODE_ONLY:
+        drifted = (
+            f"is declared by {row.centre_id} and by no catalogue, so nothing "
+            f"reading a catalogue can discover it"
+        )
+    else:
+        drifted = (
+            f"is transmitting under {row.centre_id} and neither its catalogue "
+            f"record nor the centre's own metadata declares it"
+        )
+
+    return Notice(
+        key=f"{row.centre_id}:{row.identifier}",
+        summary=f"{row.identifier} {drifted}",
+    )
+
+
 def _propagation_gap_notice(row):
     """A centre whose publications are not reaching the world, in a sentence.
 
@@ -1938,7 +2267,7 @@ def _leaves_nothing_unsettled(*, now=None):
 class GapReport:
     """One report: what it finds, and how to ask for it.
 
-    The eight are held as a list rather than as eight hard-wired pages so that
+    The nine are held as a list rather than as nine hard-wired pages so that
     the index, the routing, the report itself and the digest all read from one
     place. A report that exists but is not on the index is a finding nobody
     sees, which is the failure this whole module exists to prevent -- and one
@@ -2003,9 +2332,10 @@ class GapReportSummary:
     bound: str | None = None
 
 
-#: The eight reports, in the order the index shows them: what is declared and
-#: missing, what is arriving and unaccounted for, then the three about the
-#: centres themselves, and last the three about this tool rather than them.
+#: The nine reports, in the order the index shows them: what is declared and
+#: missing, what is arriving and unaccounted for, what the two registries of a
+#: centre's datasets disagree about, then the three about the centres
+#: themselves, and last the three about this tool rather than them.
 GAP_REPORTS = (
     GapReport(
         slug="declared-but-silent",
@@ -2031,6 +2361,21 @@ GAP_REPORTS = (
         find_rows=stations_transmitting_undeclared,
         count_rows=lambda *, now=None: _undeclared_observations().count(),
         describe_row=_undeclared_station_notice,
+    ),
+    GapReport(
+        slug="datasets-out-of-step",
+        title=_("Datasets the sources disagree about"),
+        description=_(
+            "Datasets a Global Discovery Catalogue and the centre's own "
+            "discovery metadata do not both declare, saying which way each "
+            "one drifts, and datasets heard transmitting that neither of them "
+            "declares. Centres whose own metadata has never been read are not "
+            "counted."
+        ),
+        find_rows=datasets_out_of_step,
+        count_rows=lambda *, now=None: _datasets_out_of_step().count(),
+        describe_row=_out_of_step_dataset_notice,
+        describe_bound=datasets_out_of_step_unasked_centres,
     ),
     GapReport(
         slug="propagation-gaps",
@@ -2138,7 +2483,7 @@ def gap_report_summaries(*, now=None):
     """Every report with how much it has found, for the index.
 
     Counted rather than listed: the index exists to say which report is worth
-    opening, and building eight reports in full to show eight numbers would make
+    opening, and building nine reports in full to show nine numbers would make
     the cheapest page in the tool the most expensive.
     """
     now = now or dj_timezone.now()

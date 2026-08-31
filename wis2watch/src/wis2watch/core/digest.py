@@ -2,7 +2,7 @@
 
 The gap reports find the problems nobody was looking for, which is worth
 nothing if nobody looks at the reports. This is the part that goes the other
-way -- a scheduled run that reads the same eight reports the index does and
+way -- a scheduled run that reads the same nine reports the index does and
 mails what is different from the last time somebody was told.
 
 Only the difference. A digest that repeated yesterday's eight hundred silent
@@ -48,7 +48,7 @@ window is not announced either, which is why each report's own account of
 what it has bounded is still carried into the mail beside its news.
 
 The reports are read from the same registry the index and the routing read, so
-a sixth report joins the digest by existing. What each one considers a finding,
+a ninth report joins the digest by existing. What each one considers a finding,
 and what identifies it, is the report's own to say: see ``describe_row`` in
 :mod:`wis2watch.core.analysis.gaps`.
 """

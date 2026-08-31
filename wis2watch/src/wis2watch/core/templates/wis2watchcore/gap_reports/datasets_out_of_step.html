@@ -1,0 +1,51 @@
+{% extends "wis2watchcore/gap_reports/base.html" %}
+
+{% load i18n %}
+
+{% block report_note %}
+    <p class="report-note">
+        {% trans "A Global Discovery Catalogue holds what a centre once registered; the centre's own discovery metadata says what it publishes today. The direction is the finding: a record only the catalogue carries is a registration to withdraw or a centre to ask what became of it, and one only the centre declares is data nothing reading a catalogue can discover." %}
+    </p>
+{% endblock %}
+
+{% block table_head %}
+    <th>{% trans "Centre" %}</th>
+    <th>{% trans "Dataset" %}</th>
+    <th>{% trans "Topic" %}</th>
+    <th>{% trans "Which way it drifts" %}</th>
+    <th>{% trans "Last declared" %}</th>
+{% endblock %}
+
+{% block table_row %}
+    <td>
+        <a href="{% url 'node_details' row.node_id %}"><code>{{ row.centre_id }}</code></a>
+    </td>
+    <td class="wrapping">
+        {{ row.title }}
+        <div class="row-detail"><code>{{ row.identifier }}</code></div>
+    </td>
+    <td class="wrapping"><code>{{ row.topic|default:"—" }}</code></td>
+    <td>
+        <span class="badge badge-warning">{{ row.drift_label }}</span>
+    </td>
+    {% comment %}
+        When the registry that does declare it last said so, which is what
+        separates a live disagreement from a record nothing has touched for
+        months. Empty on a row neither of them declares, which is not a gap in
+        the cell but the finding itself -- so what such a row does have is
+        said underneath it, since when the traffic was last heard is the only
+        instant it has and the one that says it is still arriving.
+    {% endcomment %}
+    <td>
+        {{ row.last_declared_at|date:"Y-m-d H:i"|default:"—" }}
+        {% if not row.last_declared_at and row.last_heard_at %}
+            <div class="row-detail">
+                {% blocktrans with heard=row.last_heard_at|date:"Y-m-d H:i" %}last heard {{ heard }}{% endblocktrans %}
+            </div>
+        {% endif %}
+    </td>
+{% endblock %}
+
+{% block empty_message %}
+    {% trans "Every centre this tool has read agrees with its catalogue about what it publishes" %}
+{% endblock %}
