@@ -1086,6 +1086,7 @@ class NodeDetailViewTests(TestCase):
         return response, patched
 
     def synced(self, sync_type, status=SyncLog.SUCCESS, error=""):
+        """A run of one kind, as the sync that stood in for it would return it."""
         return SyncLog(
             node=self.node, sync_type=sync_type, status=status, error_message=error
         )
@@ -1121,7 +1122,24 @@ class NodeDetailViewTests(TestCase):
         )
 
         self.assertContains(response, "Station synchronization completed")
+        self.assertContains(response, "Error reading the discovery metadata")
         self.assertContains(response, "connection refused")
+
+    def test_a_failure_says_which_endpoint_it_was(self):
+        """Both down is when this is read, and two identical errors help nobody."""
+        response, _patched = self.sync_by_hand(
+            sync_node_stations=self.synced(
+                SyncLog.NODE_STATIONS, status=SyncLog.FAILED, error="registry refused"
+            ),
+            sync_node_datasets=self.synced(
+                SyncLog.DISCOVERY_METADATA,
+                status=SyncLog.FAILED,
+                error="records refused",
+            ),
+        )
+
+        self.assertContains(response, "Error reading the station registry")
+        self.assertContains(response, "Error reading the discovery metadata")
 
     def test_a_node_that_advertises_no_station_registry_says_so(self):
         self.node.stations_url = ""

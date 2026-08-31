@@ -247,8 +247,14 @@ def node_breadcrumbs(node, leaf=None):
     return trail
 
 
-def _report_sync(request, sync_log, *, unadvertised, completed):
+def _report_sync(request, sync_log, *, unadvertised, failed, completed):
     """Say what one hand-run sync came to, in the terms of the endpoint it read.
+
+    Every branch names the endpoint, the failing one included. A centre with
+    both of its addresses down is exactly when this is read, and two messages
+    reading "Error during synchronization" would leave somebody with two
+    faults and no way to tell which belongs to which -- the same reason the
+    two runs are reported apart at all.
 
     A run that never happened is a warning rather than an error: a centre
     advertising no address for one of its endpoints has not failed at
@@ -257,9 +263,7 @@ def _report_sync(request, sync_log, *, unadvertised, completed):
     if sync_log is None:
         messages.warning(request, unadvertised)
     elif sync_log.status == SyncLog.FAILED:
-        messages.error(
-            request, _("Error during synchronization: ") + sync_log.error_message
-        )
+        messages.error(request, failed + sync_log.error_message)
     else:
         messages.success(request, completed + sync_log.summary)
 
@@ -296,12 +300,14 @@ def node_details(request, node_id):
                 request,
                 sync_node_stations(node),
                 unadvertised=_("This node advertises no station registry."),
+                failed=_("Error reading the station registry: "),
                 completed=_("Station synchronization completed: "),
             )
             _report_sync(
                 request,
                 sync_node_datasets(node),
                 unadvertised=_("This node advertises no discovery metadata."),
+                failed=_("Error reading the discovery metadata: "),
                 completed=_("Discovery metadata synchronization completed: "),
             )
         else:
