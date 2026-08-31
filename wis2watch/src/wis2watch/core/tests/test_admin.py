@@ -493,7 +493,7 @@ class NodeOverviewViewTests(TestCase):
 
 
 class GapReportViewTests(TestCase):
-    """The eight reports, and the ways somebody arrives at one.
+    """The nine reports, and the ways somebody arrives at one.
 
     What the reports find is the analysis seam's business; what is guarded here
     is that each of them can actually be reached and rendered, since a finding
@@ -606,6 +606,28 @@ class GapReportViewTests(TestCase):
                     else ""
                 ),
             )
+        # A dataset the catalogue carries and the centre itself does not,
+        # which needs the centre to have answered at all: a centre nothing has
+        # read is bounded out of that report rather than listed by it.
+        SyncLog.objects.create(
+            node=self.node,
+            sync_type=SyncLog.DISCOVERY_METADATA,
+            status=SyncLog.SUCCESS,
+            started_at=dj_timezone.now() - timedelta(hours=1),
+        )
+        DatasetSource.objects.create(
+            dataset=Dataset.objects.create(
+                node=self.node,
+                identifier="urn:wmo:md:ke-kmd:surface-weather",
+                title="Surface weather observations",
+                wmo_data_policy=Dataset.CORE,
+                wmo_topic_hierarchy="origin/a/wis2/ke-kmd/data/core/weather/synop",
+                raw_json={},
+            ),
+            source_type=DatasetSource.GDC,
+            catalogue=catalogue,
+            last_seen=dj_timezone.now(),
+        )
         # A run that reached its source and lost a record out of what it read.
         # Against another of the centre's syncs on purpose: a newer station
         # run would be an answer, and the registry above would stop failing.

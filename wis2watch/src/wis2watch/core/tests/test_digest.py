@@ -20,6 +20,9 @@ from django.test import TestCase, override_settings
 from wis2watch.core.digest import digest_changes, send_digest
 from wis2watch.core.interpretation import OPERATIONAL
 from wis2watch.core.models import (
+    Dataset,
+    DatasetSource,
+    GlobalDiscoveryCatalogue,
     HardFailure,
     HourlyRollup,
     MessageSource,
@@ -145,6 +148,55 @@ class DigestTestCase(TestCase):
         )
 
         return node
+
+    def drifting_dataset(self, centre_id, identifier, *, in_catalogue=True):
+        """A dataset one of a centre's two sources declares and the other does not.
+
+        The centre answers first, because a centre nothing has read is bounded
+        out of that report rather than listed by it.
+        """
+        node = WIS2Node.objects.create(
+            centre_id=centre_id,
+            name=centre_id.upper(),
+            base_url=f"https://{centre_id}.example.int",
+        )
+        SyncLog.objects.create(
+            node=node,
+            sync_type=SyncLog.DISCOVERY_METADATA,
+            status=SyncLog.SUCCESS,
+            started_at=NOW - timedelta(hours=1),
+        )
+        dataset = Dataset.objects.create(
+            node=node,
+            identifier=identifier,
+            title=identifier.rsplit(":", 1)[-1].upper(),
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy=f"origin/a/wis2/{centre_id}/data/core/weather",
+            raw_json={},
+        )
+        DatasetSource.objects.create(
+            dataset=dataset,
+            source_type=(
+                DatasetSource.GDC if in_catalogue else DatasetSource.NODE
+            ),
+            catalogue=self.writing_catalogue() if in_catalogue else None,
+            last_seen=NOW - timedelta(hours=1),
+        )
+
+        return dataset
+
+    def writing_catalogue(self):
+        """The one catalogue that indexes the region, made once."""
+        catalogue, _ = GlobalDiscoveryCatalogue.objects.get_or_create(
+            centre_id="ca-eccc-msc-global-discovery-catalogue",
+            defaults={
+                "name": "Meteorological Service of Canada",
+                "base_url": "https://wis2-gdc.example.ca",
+                "is_writer": True,
+            },
+        )
+
+        return catalogue
 
     def registry_answered(self, node, *, at_):
         """The run that ends a registry's silence."""
@@ -821,3 +873,63 @@ class BadDayTests(DigestTestCase):
         self.send()
 
         self.assertEqual(mail.outbox, [])
+
+
+class DatasetDriftTests(DigestTestCase):
+    """A dataset the catalogue and the centre disagree about, in the mail.
+
+    The report is on a page somebody has to think to open; this is the half
+    that goes to somebody who has not thought of it. Both directions are
+    carried, because the two are opposite errands and a line that said only
+    "drifts" would send the reader to the page to find out which.
+    """
+
+    def test_a_record_only_the_catalogue_carries_is_carried(self):
+        self.drifting_dataset("ke-meteo", "urn:wmo:md:ke-meteo:synop")
+
+        change = self.changes_for("datasets-out-of-step")
+
+        self.assertIn("urn:wmo:md:ke-meteo:synop", change.new[0].summary)
+        self.assertIn("catalogue", change.new[0].summary)
+
+    def test_a_record_only_the_centre_declares_is_carried(self):
+        self.drifting_dataset(
+            "ug-unma", "urn:wmo:md:ug-unma:temp", in_catalogue=False
+        )
+
+        change = self.changes_for("datasets-out-of-step")
+
+        self.assertIn("no catalogue", change.new[0].summary)
+
+    def test_the_mail_says_which_centres_could_not_be_asked(self):
+        """The bound the count is measured against, beside the news itself."""
+        self.drifting_dataset("ke-meteo", "urn:wmo:md:ke-meteo:synop")
+        WIS2Node.objects.create(
+            centre_id="bi-igebu",
+            name="BI-IGEBU",
+            base_url="https://bi-igebu.example.int",
+        )
+
+        self.send()
+
+        self.assertIn("bi-igebu", self.body())
+
+    def test_the_same_drift_is_not_carried_every_morning(self):
+        self.drifting_dataset("ke-meteo", "urn:wmo:md:ke-meteo:synop")
+        self.send()
+
+        self.assertIsNone(self.changes_for("datasets-out-of-step", now=TOMORROW))
+
+    def test_a_drift_the_centre_has_settled_is_carried_as_cleared(self):
+        dataset = self.drifting_dataset("ke-meteo", "urn:wmo:md:ke-meteo:synop")
+        self.send()
+
+        DatasetSource.objects.create(
+            dataset=dataset,
+            source_type=DatasetSource.NODE,
+            last_seen=TOMORROW,
+        )
+        self.send(now=PAST_THE_GRACE)
+
+        self.assertIn("urn:wmo:md:ke-meteo:synop", self.body())
+        self.assertIn("cleared", self.body().lower())

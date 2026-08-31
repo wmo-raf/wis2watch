@@ -19,10 +19,13 @@ from django.test import TestCase, override_settings
 
 from wis2watch.core.analysis import (
     GAP_REPORTS,
+    DeclarationDrift,
     DeclaringCentre,
     OriginTransport,
     RegistryStanding,
     catalogues_that_keep_failing,
+    datasets_out_of_step,
+    datasets_out_of_step_unasked_centres,
     gap_report,
     gap_report_summaries,
     propagation_gaps,
@@ -38,6 +41,7 @@ from wis2watch.core.analysis import (
 from wis2watch.core.interpretation import OPERATIONAL
 from wis2watch.core.models import (
     Dataset,
+    DatasetSource,
     GlobalDiscoveryCatalogue,
     HardFailure,
     HourlyRollup,
@@ -286,7 +290,7 @@ class UnaskedCentresTests(GapReportTestCase):
             summary.slug for summary in gap_report_summaries(now=NOW) if summary.bound
         }
 
-        self.assertEqual(bounded, set())
+        self.assertNotIn("declared-but-silent", bounded)
 
 
 class TransmittingUndeclaredTests(GapReportTestCase):
@@ -647,7 +651,7 @@ class PropagationGapHorizonTests(PropagationGapTestCase):
             summary.slug: summary.bound for summary in gap_report_summaries(now=NOW)
         }
 
-        self.assertEqual(set(bounds.values()), {None})
+        self.assertIsNone(bounds["propagation-gaps"])
 
     def test_a_report_listing_everything_it_holds_says_nothing(self):
         origin_broker(self.kenya, is_reachable=True)
@@ -921,11 +925,15 @@ class FrozenRegistryTests(GapReportTestCase):
         self.assertEqual(self.unsettled(), set())
 
     def test_nothing_else_is_withheld_by_a_frozen_registry(self):
-        """The other four are about the region rather than about the registry.
+        """The others are about the region rather than about the registry.
 
         A centre with no catalogue record is the one finding a frozen registry
         makes unanswerable. A station OSCAR declares and nobody has heard is
         still a station OSCAR declares and nobody has heard.
+
+        The dataset drift report is left out for the opposite reason: its
+        bound is about centres whose own metadata nothing has ever read, which
+        it says whether the registry is being rebuilt or not.
         """
         self.in_oscar("0-20000-0-63741")
         self.seen("ml-meteo")
@@ -937,7 +945,7 @@ class FrozenRegistryTests(GapReportTestCase):
         bounds = {
             summary.slug: summary.bound
             for summary in gap_report_summaries(now=NOW)
-            if summary.slug != "unregistered-centres"
+            if summary.slug not in ("unregistered-centres", "datasets-out-of-step")
         }
 
         self.assertEqual(counted["declared-but-silent"], 1)
@@ -1320,10 +1328,11 @@ class EveryRegistryFailingTests(GapReportTestCase):
         self.registry("cg-met", answering=False)
         self.registry("rw-rma", answering=False)
 
-        self.assertEqual(
-            [summary.bound for summary in gap_report_summaries(now=NOW)],
-            [None] * len(GAP_REPORTS),
-        )
+        bounded = {
+            summary.slug for summary in gap_report_summaries(now=NOW) if summary.bound
+        }
+
+        self.assertNotIn("registries-not-answering", bounded)
 
 
 class SteppedOverRunTestCase(GapReportTestCase):
@@ -1592,7 +1601,7 @@ class SteppedOverRunNoticeTests(SteppedOverRunTestCase):
 
 
 class GapReportSummaryTests(GapReportTestCase):
-    """The index that says which of the eight is worth opening."""
+    """The index that says which of the nine is worth opening."""
 
     def test_every_report_is_summarised(self):
         self.assertEqual(
@@ -1890,3 +1899,381 @@ class FailingCatalogueNoticeTests(CatalogueRunTestCase):
         self.history(failed=14, succeeded=14)
 
         self.assertEqual(self.notice().key, "ca-eccc-msc-global-discovery-catalogue")
+
+
+class DatasetDriftTestCase(GapReportTestCase):
+    """Datasets as each of the three sources describes them.
+
+    What is seeded is the provenance combinations again, one level up from a
+    station: a Global Discovery Catalogue's record of what a centre once
+    registered, the centre's own record of what it publishes now, and traffic
+    that proves what it is actually sending -- present and absent in every
+    combination that changes the answer.
+
+    Beside them, the fact the whole report is bounded by: whether anything
+    ever got an answer out of the centre's own metadata. Seeded as the
+    discovery-metadata sync logs recorded it, because that is where the report
+    reads it -- a live probe of a host that hangs would have the same centre in
+    and out of the bound on consecutive readings.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.catalogue = GlobalDiscoveryCatalogue.objects.create(
+            centre_id="ca-eccc-msc-global-discovery-catalogue",
+            name="Meteorological Service of Canada",
+            base_url="https://wis2-gdc.example.ca",
+            is_writer=True,
+        )
+        self.answered(self.kenya)
+
+    def answered(self, node, *, hours_ago=1, status=SyncLog.SUCCESS):
+        """A run that asked a centre what it publishes and got an answer."""
+        return SyncLog.objects.create(
+            node=node,
+            sync_type=SyncLog.DISCOVERY_METADATA,
+            status=status,
+            started_at=NOW - timedelta(hours=hours_ago),
+        )
+
+    def failed_to_answer(self, node, *, hours_ago=1):
+        """A run that asked and was refused."""
+        return self.answered(node, hours_ago=hours_ago, status=SyncLog.FAILED)
+
+    def dataset(
+        self,
+        identifier,
+        *,
+        node=None,
+        in_catalogue=False,
+        at_node=False,
+        heard=False,
+        hours_ago=1,
+    ):
+        """One dataset, declared by whichever sources the test names."""
+        node = self.kenya if node is None else node
+        dataset = Dataset.objects.create(
+            node=node,
+            identifier=identifier,
+            title=identifier.rsplit(":", 1)[-1].upper(),
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy=f"origin/a/wis2/{node.centre_id}/data/core/weather",
+            raw_json={},
+        )
+
+        declaring = (
+            (DatasetSource.GDC, in_catalogue, self.catalogue),
+            (DatasetSource.NODE, at_node, None),
+            (DatasetSource.OBSERVED, heard, None),
+        )
+
+        for source_type, declared, catalogue in declaring:
+            if declared:
+                DatasetSource.objects.create(
+                    dataset=dataset,
+                    source_type=source_type,
+                    catalogue=catalogue,
+                    last_seen=NOW - timedelta(hours=hours_ago),
+                )
+
+        return dataset
+
+    def report(self):
+        return datasets_out_of_step(now=NOW)
+
+    def drifts(self):
+        """Which way each reported dataset drifts, by identifier."""
+        return {row.identifier: row.drift for row in self.report()}
+
+    def bound(self):
+        return datasets_out_of_step_unasked_centres(now=NOW)
+
+
+class DatasetDriftTests(DatasetDriftTestCase):
+    """The datasets the catalogue and the centre do not both declare."""
+
+    def test_a_dataset_only_the_catalogue_carries_is_reported(self):
+        """A stale global record, advertising data the centre no longer serves."""
+        self.dataset("urn:wmo:md:ke-meteo:synop", in_catalogue=True)
+
+        self.assertEqual(
+            self.drifts(),
+            {"urn:wmo:md:ke-meteo:synop": DeclarationDrift.CATALOGUE_ONLY},
+        )
+
+    def test_a_dataset_only_the_centre_declares_is_reported(self):
+        """A centre publishing data nobody reading a catalogue can discover."""
+        self.dataset("urn:wmo:md:ke-meteo:temp", at_node=True)
+
+        self.assertEqual(
+            self.drifts(),
+            {"urn:wmo:md:ke-meteo:temp": DeclarationDrift.NODE_ONLY},
+        )
+
+    def test_a_dataset_heard_that_neither_declares_is_reported(self):
+        """Traffic arriving under a record no registry of either kind holds."""
+        self.dataset("urn:wmo:md:ke-meteo:climate", heard=True)
+
+        self.assertEqual(
+            self.drifts(),
+            {"urn:wmo:md:ke-meteo:climate": DeclarationDrift.UNDECLARED},
+        )
+
+    def test_a_dataset_both_of_them_declare_is_not_reported(self):
+        self.dataset("urn:wmo:md:ke-meteo:synop", in_catalogue=True, at_node=True)
+
+        self.assertEqual(self.report(), [])
+
+    def test_traffic_settles_nothing_where_the_two_already_agree(self):
+        """The third source is what the other two are compared against."""
+        self.dataset(
+            "urn:wmo:md:ke-meteo:synop", in_catalogue=True, at_node=True, heard=True
+        )
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_dataset_the_catalogue_carries_and_traffic_confirms_still_drifts(self):
+        """Traffic is not the centre's own declaration and cannot stand in for it."""
+        self.dataset("urn:wmo:md:ke-meteo:synop", in_catalogue=True, heard=True)
+
+        self.assertEqual(
+            self.drifts(),
+            {"urn:wmo:md:ke-meteo:synop": DeclarationDrift.CATALOGUE_ONLY},
+        )
+
+    def test_two_catalogues_carrying_it_is_still_one_absence_at_the_centre(self):
+        dataset = self.dataset("urn:wmo:md:ke-meteo:synop", in_catalogue=True)
+        DatasetSource.objects.create(
+            dataset=dataset,
+            source_type=DatasetSource.GDC,
+            catalogue=GlobalDiscoveryCatalogue.objects.create(
+                centre_id="de-dwd-global-discovery-catalogue",
+                name="DWD",
+                base_url="https://wis2-gdc.example.de",
+            ),
+            last_seen=NOW,
+        )
+
+        (row,) = self.report()
+
+        self.assertEqual(row.drift, DeclarationDrift.CATALOGUE_ONLY)
+
+    def test_the_row_carries_what_it_takes_to_open_the_conversation(self):
+        self.dataset("urn:wmo:md:ke-meteo:synop", in_catalogue=True, hours_ago=3)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.centre_id, "ke-meteo")
+        self.assertEqual(row.node_id, self.kenya.pk)
+        self.assertEqual(row.identifier, "urn:wmo:md:ke-meteo:synop")
+        self.assertEqual(row.title, "SYNOP")
+        self.assertEqual(row.topic, "origin/a/wis2/ke-meteo/data/core/weather")
+        self.assertEqual(row.last_declared_at, NOW - timedelta(hours=3))
+
+    def test_a_dataset_nothing_has_ever_named_carries_its_identifier(self):
+        """A dataset created from traffic has no title to show."""
+        dataset = self.dataset("urn:wmo:md:ke-meteo:climate", heard=True)
+        dataset.title = ""
+        dataset.save(update_fields=["title"])
+
+        (row,) = self.report()
+
+        self.assertEqual(row.title, "urn:wmo:md:ke-meteo:climate")
+
+    def test_the_report_reads_by_centre_and_then_by_identifier(self):
+        uganda = self.node("ug-unma")
+        self.answered(uganda)
+        self.dataset("urn:wmo:md:ug-unma:synop", node=uganda, in_catalogue=True)
+        self.dataset("urn:wmo:md:ke-meteo:temp", in_catalogue=True)
+        self.dataset("urn:wmo:md:ke-meteo:synop", in_catalogue=True)
+
+        self.assertEqual(
+            [row.identifier for row in self.report()],
+            [
+                "urn:wmo:md:ke-meteo:synop",
+                "urn:wmo:md:ke-meteo:temp",
+                "urn:wmo:md:ug-unma:synop",
+            ],
+        )
+
+    def test_the_index_counts_what_the_report_lists(self):
+        """A count arrived at twice is a count that comes to disagree."""
+        self.dataset("urn:wmo:md:ke-meteo:synop", in_catalogue=True)
+        self.dataset("urn:wmo:md:ke-meteo:temp", at_node=True)
+        self.dataset("urn:wmo:md:ke-meteo:climate", heard=True)
+        self.dataset("urn:wmo:md:ke-meteo:agreed", in_catalogue=True, at_node=True)
+
+        counts = {
+            summary.slug: summary.count for summary in gap_report_summaries(now=NOW)
+        }
+
+        self.assertEqual(counts["datasets-out-of-step"], 3)
+        self.assertEqual(len(self.report()), 3)
+
+    def test_the_report_writes_nothing(self):
+        """It reads: nothing is retired, created or restamped by looking."""
+        self.dataset("urn:wmo:md:ke-meteo:synop", in_catalogue=True, hours_ago=5)
+        before = list(
+            DatasetSource.objects.values_list("pk", "source_type", "last_seen")
+        )
+
+        self.report()
+
+        self.assertEqual(
+            list(DatasetSource.objects.values_list("pk", "source_type", "last_seen")),
+            before,
+        )
+        self.assertEqual(Dataset.objects.count(), 1)
+
+
+class DatasetDriftBoundTests(DatasetDriftTestCase):
+    """The centres the report could not ask, which its count is measured against.
+
+    Eleven findings computed from twenty-seven of thirty-two centres is not
+    "the region has eleven": it is eleven among the centres something could
+    ask. A count read without that is read as the region.
+    """
+
+    def test_a_centre_that_has_never_answered_contributes_no_rows(self):
+        silent = self.node("bi-igebu")
+        self.failed_to_answer(silent)
+        self.dataset("urn:wmo:md:bi-igebu:synop", node=silent, in_catalogue=True)
+
+        self.assertEqual(self.report(), [])
+
+    def test_that_centre_is_named_in_the_bound_instead(self):
+        silent = self.node("bi-igebu")
+        self.failed_to_answer(silent)
+        self.dataset("urn:wmo:md:bi-igebu:synop", node=silent, in_catalogue=True)
+
+        self.assertIn("bi-igebu", self.bound())
+
+    def test_a_centre_nothing_could_ask_at_all_is_named_too(self):
+        """No address of its own is the same absence as one that never answers."""
+        self.node("bf-anam", registry=False)
+
+        self.assertIn("bf-anam", self.bound())
+
+    def test_a_centre_that_answered_once_and_stopped_is_still_read(self):
+        """The bound is about never having been read, not about being current.
+
+        A probe that failed this sweep and answered the last is the ordinary
+        case in this region. What the centre last said stands, and dropping
+        its rows on a failed run would have the report empty every time a host
+        blinked.
+        """
+        blinking = self.node("bi-igebu")
+        self.answered(blinking, hours_ago=26)
+        self.failed_to_answer(blinking, hours_ago=1)
+        self.dataset("urn:wmo:md:bi-igebu:synop", node=blinking, in_catalogue=True)
+
+        self.assertEqual(
+            self.drifts(),
+            {"urn:wmo:md:bi-igebu:synop": DeclarationDrift.CATALOGUE_ONLY},
+        )
+        self.assertIsNone(self.bound())
+
+    def test_a_run_that_stepped_over_a_record_still_answered(self):
+        """It reached the centre and read it; what it lost is another report's."""
+        partial = self.node("cg-met")
+        self.answered(partial, status=SyncLog.PARTIAL)
+        self.dataset("urn:wmo:md:cg-met:synop", node=partial, in_catalogue=True)
+
+        self.assertEqual(len(self.report()), 1)
+        self.assertIsNone(self.bound())
+
+    def test_a_station_registry_answering_says_nothing_about_the_metadata(self):
+        """Two endpoints that fail independently, and only one of them is this."""
+        silent = self.node("bi-igebu")
+        SyncLog.objects.create(
+            node=silent,
+            sync_type=SyncLog.NODE_STATIONS,
+            status=SyncLog.SUCCESS,
+            started_at=NOW - timedelta(hours=1),
+        )
+
+        self.assertIn("bi-igebu", self.bound())
+
+    def test_nothing_is_said_where_every_centre_has_answered(self):
+        self.assertIsNone(self.bound())
+
+    def test_more_than_one_reads_as_more_than_one(self):
+        for centre_id in ("bi-igebu", "cg-met"):
+            self.failed_to_answer(self.node(centre_id))
+
+        bound = self.bound()
+
+        self.assertIn("bi-igebu", bound)
+        self.assertIn("cg-met", bound)
+        self.assertIn("2", bound)
+
+    def test_the_bound_is_said_over_a_report_that_found_nothing(self):
+        """The reading it exists to prevent: no rows read as no drift."""
+        self.failed_to_answer(self.node("bi-igebu"))
+
+        self.assertEqual(self.report(), [])
+        self.assertIsNotNone(self.bound())
+
+    def test_the_bound_travels_with_the_count_on_the_index(self):
+        self.failed_to_answer(self.node("bi-igebu"))
+
+        (summary,) = [
+            summary
+            for summary in gap_report_summaries(now=NOW)
+            if summary.slug == "datasets-out-of-step"
+        ]
+
+        self.assertIn("bi-igebu", summary.bound)
+
+    def test_the_report_carries_the_sentence_as_its_bound(self):
+        self.failed_to_answer(self.node("bi-igebu"))
+
+        self.assertEqual(
+            gap_report("datasets-out-of-step").describe_bound(now=NOW), self.bound()
+        )
+
+
+class DatasetDriftNoticeTests(DatasetDriftTestCase):
+    """The same findings as the sentences the morning digest carries."""
+
+    def notice(self):
+        (row,) = self.report()
+
+        return gap_report("datasets-out-of-step").describe_row(row)
+
+    def test_a_catalogue_only_dataset_says_which_way_it_drifts(self):
+        self.dataset("urn:wmo:md:ke-meteo:synop", in_catalogue=True)
+
+        summary = self.notice().summary
+
+        self.assertIn("urn:wmo:md:ke-meteo:synop", summary)
+        self.assertIn("ke-meteo", summary)
+        self.assertIn("catalogue", summary)
+
+    def test_a_node_only_dataset_says_which_way_it_drifts(self):
+        self.dataset("urn:wmo:md:ke-meteo:temp", at_node=True)
+
+        self.assertIn("no catalogue", self.notice().summary)
+
+    def test_an_undeclared_dataset_says_the_traffic_is_what_found_it(self):
+        self.dataset("urn:wmo:md:ke-meteo:climate", heard=True)
+
+        summary = self.notice().summary
+
+        self.assertIn("transmitting", summary)
+        self.assertIn("neither", summary)
+
+    def test_it_is_keyed_on_the_centre_and_the_identifier(self):
+        """One dataset drifting is one finding, wherever else it is declared."""
+        self.dataset("urn:wmo:md:ke-meteo:synop", in_catalogue=True)
+
+        self.assertEqual(self.notice().key, "ke-meteo:urn:wmo:md:ke-meteo:synop")
+
+    def test_a_dataset_that_stops_drifting_leaves_the_report(self):
+        """Which is what the digest reads as the drift having been settled."""
+        dataset = self.dataset("urn:wmo:md:ke-meteo:synop", in_catalogue=True)
+        DatasetSource.objects.create(
+            dataset=dataset, source_type=DatasetSource.NODE, last_seen=NOW
+        )
+
+        self.assertEqual(self.report(), [])
