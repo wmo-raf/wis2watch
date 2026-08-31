@@ -45,7 +45,14 @@ from django.db import transaction
 from .dataset_sources import record_declaration
 from .interpretation import extract_discovery_records
 from .models import Dataset, DatasetSource, SyncLog
-from .sync import CREATED, UPDATED, SteppedOver, SyncCounts, fetch_pages
+from .sync import (
+    CREATED,
+    UPDATED,
+    SteppedOver,
+    SyncCounts,
+    declared_dataset_fields,
+    fetch_pages,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -89,10 +96,18 @@ def _fill_canonical_record(dataset, declared):
     that reads both declarations whole, and a canonical record rewritten
     hourly would leave that report comparing the centre with itself -- the
     disagreement erased by the very sync that found it.
+
+    What is filled is what a centre's record says. ``last_synced`` is not
+    among it and is never written here: it is when the *catalogue* last
+    confirmed the record, which is what a backfilled catalogue declaration is
+    dated from, and a centre stamping it would have this sync reporting the
+    catalogue as current every hour on records the catalogue may not have
+    carried for months. When the centre itself last said so is on the centre's
+    own declaration, which is where a reader compares the two.
     """
     filled = {
         field: value
-        for field, value in _declared_fields(declared).items()
+        for field, value in declared_dataset_fields(declared).items()
         if value and not getattr(dataset, field)
     }
 
@@ -103,27 +118,6 @@ def _fill_canonical_record(dataset, declared):
         setattr(dataset, field, value)
 
     dataset.save(update_fields=[*filled, "modified"])
-
-
-def _declared_fields(declared):
-    """What a centre's record says, under the canonical record's own names.
-
-    ``last_synced`` is not among them and is not written at all. It is when
-    the catalogue last confirmed the record -- what a backfilled catalogue
-    declaration is dated from -- and a centre stamping it would have this sync
-    reporting the catalogue as current every hour on records the catalogue may
-    not have carried for months. When the centre itself last said so is on the
-    centre's own declaration, which is where a reader compares the two.
-    """
-    return {
-        "title": declared.title,
-        "wmo_data_policy": declared.data_policy,
-        "wmo_topic_hierarchy": declared.topic,
-        "self_link": declared.canonical_link,
-        "raw_json": declared.raw,
-        "metadata_created": declared.metadata_created,
-        "metadata_updated": declared.metadata_updated,
-    }
 
 
 def apply_declared_dataset(node, declared):
@@ -142,7 +136,7 @@ def apply_declared_dataset(node, declared):
             dataset, created = Dataset.objects.get_or_create(
                 node=node,
                 identifier=declared.identifier,
-                defaults=_declared_fields(declared),
+                defaults=declared_dataset_fields(declared),
             )
 
             if not created:

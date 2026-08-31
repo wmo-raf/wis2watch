@@ -253,10 +253,12 @@ class WIS2Node(TimeStampedModel):
     def advertises_discovery_metadata(self):
         """Whether there is anywhere to ask this centre what datasets it declares.
 
-        Read for the same reason the station registry's counterpart is: a
-        centre nobody could ask is not a centre that declares nothing, and the
-        two states have to be told apart wherever what a centre publishes is
-        reported (ADR-0005).
+        Read before the centre is asked, and by nothing else yet -- which is
+        the narrower half of what its station counterpart does. The surfaces
+        reporting on a centre's datasets do not yet tell a centre that
+        answered and declared nothing from one nothing could ask, the
+        distinction ADR-0005 drew for stations; when one of them comes to, this
+        is the fact it reads rather than a second reading of an empty URL.
         """
         return bool(self.discovery_metadata_url)
 
