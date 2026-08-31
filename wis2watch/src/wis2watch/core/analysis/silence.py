@@ -386,7 +386,7 @@ def _row(dataset, *, now, records_from):
         dataset_id=dataset.pk,
         node_id=dataset.node_id,
         centre_id=dataset.node.centre_id,
-        title=dataset.title,
+        title=dataset.display_title,
         topic=dataset.wmo_topic_hierarchy,
         expected_interval_hours=expected,
         expectation=expectation,

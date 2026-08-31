@@ -143,7 +143,11 @@ class DatasetViewSet(SnippetViewSet):
     menu_label = "Datasets"
     add_to_admin_menu = True
     menu_order = 130
-    list_display = ["title", "node", "status", "expected_interval_override_hours"]
+    # Named by ``display_title`` rather than by the title column: a dataset
+    # this tool learned about from traffic carries no title, and the first
+    # column is the one that opens the record -- so a blank there would be a
+    # row nobody could edit the one editable thing on.
+    list_display = ["display_title", "node", "status", "expected_interval_override_hours"]
     list_filter = ["status", "node"]
     search_fields = ["title", "identifier", "wmo_topic_hierarchy"]
 

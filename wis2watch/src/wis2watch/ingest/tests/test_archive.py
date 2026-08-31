@@ -16,6 +16,7 @@ from django.utils import timezone as dj_timezone
 
 from wis2watch.core.models import (
     Dataset,
+    DatasetSource,
     NodeLastSeen,
     NotificationMessage,
     Station,
@@ -130,16 +131,29 @@ class AttributionTests(ArchiveTestCase):
         """The strongest evidence a centre is transmitting undeclared data.
 
         It comes from the centre's own archive, and discarding it would leave
-        the finding resting on nothing.
+        the finding resting on nothing. The record it names is created from
+        it, so the traffic is filed under the dataset the centre says it
+        belongs to -- and the dataset carries the observation saying that is
+        the only source that has ever named it.
         """
-        self.dataset(identifier="urn:wmo:md:sc-seychelles-met:something-else")
+        registered = self.dataset(
+            identifier="urn:wmo:md:sc-seychelles-met:something-else"
+        )
 
         self.poll_capture()
 
-        undeclared = NotificationMessage.objects.filter(dataset__isnull=True)
+        undeclared = NotificationMessage.objects.filter(
+            dataset__sources__source_type=DatasetSource.OBSERVED
+        )
 
         self.assertEqual(undeclared.count(), 13)
         self.assertEqual(undeclared.exclude(node=self.node).count(), 0)
+        self.assertEqual(
+            NotificationMessage.objects.filter(dataset=registered).count(), 0
+        )
+        self.assertEqual(
+            Dataset.objects.get(identifier=SC_DATASET).node, self.node
+        )
 
     def test_the_centre_s_announcement_of_its_own_record_is_set_aside(self):
         """The archive names no topic, so the data identifier answers it.

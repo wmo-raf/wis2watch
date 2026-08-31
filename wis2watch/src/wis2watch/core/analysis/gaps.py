@@ -1565,7 +1565,7 @@ def _propagation_gap_row(gap, *, now):
         node_id=gap.node_id,
         centre_id=gap.node.centre_id,
         node_name=gap.node.name,
-        dataset_title=gap.dataset.title if gap.dataset_id else "",
+        dataset_title=gap.dataset.display_title if gap.dataset_id else "",
         notification_id=gap.notification_id,
         topic=gap.topic,
         origin_transport=_transport_of(gap),

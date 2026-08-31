@@ -26,6 +26,7 @@ from wis2watch.core.catalogue import (
 )
 from wis2watch.core.models import (
     Dataset,
+    DatasetSource,
     GlobalDiscoveryCatalogue,
     MessageSource,
     SyncLog,
@@ -151,6 +152,109 @@ class WriterCatalogueTests(CatalogueSyncTestCase):
         self.assertEqual(
             WIS2Node.objects.filter(centre_id__iexact="ke-meteo").count(), 1
         )
+
+
+class DatasetDeclarationTests(CatalogueSyncTestCase):
+    """A sync records that this catalogue says the dataset exists.
+
+    The dataset is no longer something one writer owns outright: a centre's own
+    metadata will describe the same records, and traffic already names records
+    no catalogue holds. So a run writes the canonical dataset and, beside it,
+    which catalogue declared it and what that catalogue said -- which is what
+    a later report of the disagreement has to read.
+    """
+
+    def declaration(self, identifier=KE_DATASET):
+        return DatasetSource.objects.get(
+            dataset__identifier=identifier, source_type=DatasetSource.GDC
+        )
+
+    def test_every_synced_dataset_carries_a_catalogue_declaration(self):
+        self.sync()
+
+        self.assertEqual(
+            DatasetSource.objects.filter(source_type=DatasetSource.GDC).count(),
+            Dataset.objects.count(),
+        )
+
+    def test_the_declaration_names_the_catalogue_the_record_was_read_from(self):
+        self.sync()
+
+        self.assertEqual(self.declaration().catalogue, self.catalogue)
+
+    def test_the_declaration_keeps_the_record_as_the_catalogue_published_it(self):
+        self.sync()
+
+        self.assertEqual(self.declaration().raw_json["id"], KE_DATASET)
+
+    def test_a_second_run_refreshes_the_declaration_rather_than_adding_one(self):
+        self.sync()
+        first_seen = self.declaration().first_seen
+        last_seen = self.declaration().last_seen
+
+        self.sync()
+
+        self.assertEqual(
+            DatasetSource.objects.filter(dataset__identifier=KE_DATASET).count(), 1
+        )
+        self.assertEqual(self.declaration().first_seen, first_seen)
+        self.assertGreater(self.declaration().last_seen, last_seen)
+
+    def test_a_reading_catalogue_declares_nothing(self):
+        """It writes no records, so it has recorded no claim about any."""
+        reader = GlobalDiscoveryCatalogue.objects.create(
+            centre_id="cn-cma-global-discovery-catalogue",
+            name="China Global Discovery Catalogue",
+            base_url="https://gdc.wis.cma.cn",
+        )
+
+        sync_catalogue(reader, fetch=pages(self.payload))
+
+        self.assertEqual(DatasetSource.objects.count(), 0)
+
+
+class OperatorExpectationTests(CatalogueSyncTestCase):
+    """What a person set is theirs, and no source of the dataset's may take it.
+
+    The expected interval is the one field on a sync-managed record that is a
+    person's to say. It belongs to no catalogue and to no node registry, so
+    every sync has to leave it exactly where it was found -- otherwise the
+    correction somebody made this morning is gone by the six-hourly run.
+    """
+
+    def test_a_stated_expectation_survives_a_catalogue_sync(self):
+        self.sync()
+
+        dataset = Dataset.objects.get(identifier=KE_DATASET)
+        dataset.expected_interval_override_hours = 72
+        dataset.save(update_fields=["expected_interval_override_hours", "modified"])
+
+        self.sync()
+
+        dataset.refresh_from_db()
+        self.assertEqual(dataset.expected_interval_override_hours, 72)
+
+    def test_it_survives_a_run_that_rewrote_everything_else(self):
+        """The record itself changing is no reason for the expectation to."""
+        self.sync()
+
+        dataset = Dataset.objects.get(identifier=KE_DATASET)
+        dataset.expected_interval_override_hours = 72
+        dataset.status = Dataset.INACTIVE
+        dataset.save()
+
+        changed = copy.deepcopy(self.payload)
+
+        for feature in changed["features"]:
+            if feature.get("id") == KE_DATASET:
+                feature["properties"]["title"] = "Renamed by the catalogue"
+
+        self.sync(changed)
+
+        dataset.refresh_from_db()
+        self.assertEqual(dataset.title, "Renamed by the catalogue")
+        self.assertEqual(dataset.status, Dataset.ACTIVE)
+        self.assertEqual(dataset.expected_interval_override_hours, 72)
 
 
 class NodeAddressTests(CatalogueSyncTestCase):

@@ -30,6 +30,7 @@ from wis2watch.core.analysis import (
 from wis2watch.core.models import (
     CadenceBaseline,
     Dataset,
+    DatasetSource,
     GlobalDiscoveryCatalogue,
     HourlyRollup,
     MessageSource,
@@ -221,6 +222,88 @@ class DatasetTests(NodeDetailTestCase):
         self.assertEqual(retired.title, "withdrawn")
         self.assertIsNone(retired.quiet)
         self.assertEqual(retired.last_active_hour, NOW - timedelta(hours=300))
+
+
+class DatasetSourceTests(NodeDetailTestCase):
+    """Where each dataset came from, said on the page rather than assumed.
+
+    A dataset used to have exactly one possible origin, so the page had
+    nothing to say about it. Now a centre may publish under a record no
+    catalogue holds, and a catalogue may go on listing one the centre has
+    dropped -- and a row that looked the same either way would hide the
+    disagreement somebody opened this page to find.
+    """
+
+    def declare(self, dataset, source_type, *, catalogue=None, last_seen=None):
+        return DatasetSource.objects.create(
+            dataset=dataset,
+            source_type=source_type,
+            catalogue=catalogue,
+            last_seen=last_seen,
+        )
+
+    def sources_of(self, title="synop"):
+        return {row.title: row for row in self.detail().datasets}[title].sources
+
+    def test_a_dataset_says_which_source_declared_it(self):
+        writer = self.catalogue(is_writer=True)
+        self.declare(self.dataset("synop"), DatasetSource.GDC, catalogue=writer)
+
+        source = self.sources_of()[0]
+
+        self.assertEqual(source.source_type, DatasetSource.GDC)
+        self.assertEqual(source.catalogue_id, writer.centre_id)
+
+    def test_every_source_that_declared_it_is_shown(self):
+        synop = self.dataset("synop")
+        self.declare(synop, DatasetSource.GDC, catalogue=self.catalogue())
+        self.declare(synop, DatasetSource.OBSERVED, last_seen=NOW)
+
+        self.assertEqual(
+            sorted(source.source_type for source in self.sources_of()),
+            [DatasetSource.GDC, DatasetSource.OBSERVED],
+        )
+
+    def test_a_source_that_names_no_catalogue_says_so(self):
+        self.declare(self.dataset("synop"), DatasetSource.OBSERVED, last_seen=NOW)
+
+        self.assertEqual(self.sources_of()[0].catalogue_id, "")
+
+    def test_a_source_carries_when_it_last_said_so(self):
+        self.declare(self.dataset("synop"), DatasetSource.OBSERVED, last_seen=NOW)
+
+        self.assertEqual(self.sources_of()[0].last_seen, NOW)
+
+    def test_another_centres_declarations_are_not_this_centres(self):
+        djibouti = self.node("dj-anm")
+        self.declare(self.dataset("synop"), DatasetSource.GDC)
+        self.declare(self.dataset("synop", node=djibouti), DatasetSource.OBSERVED)
+
+        self.assertEqual(
+            [source.source_type for source in self.sources_of()],
+            [DatasetSource.GDC],
+        )
+
+    def test_a_dataset_nothing_has_declared_carries_no_sources(self):
+        """Every existing dataset is backfilled, so this is a gap, not a state."""
+        self.dataset("synop")
+
+        self.assertEqual(self.sources_of(), [])
+
+    def test_a_dataset_the_traffic_named_is_readable_by_its_identifier(self):
+        """It has no title: a notification names its record and nothing else."""
+        observed = Dataset.objects.create(
+            node=self.kenya,
+            identifier="urn:wmo:md:ke-meteo:aws810",
+            raw_json={},
+        )
+        self.declare(observed, DatasetSource.OBSERVED, last_seen=NOW)
+
+        row = {row.dataset_id: row for row in self.detail().datasets}[observed.pk]
+
+        self.assertEqual(row.title, "urn:wmo:md:ke-meteo:aws810")
+        self.assertEqual(row.policy, "undeclared")
+        self.assertEqual(row.policy_label, "Not declared")
 
 
 class StationRegistryTests(NodeDetailTestCase):

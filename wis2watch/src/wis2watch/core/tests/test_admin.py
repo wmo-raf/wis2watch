@@ -12,6 +12,7 @@ from wis2watch.core.analysis import GAP_REPORTS
 from wis2watch.core.models import (
     CadenceBaseline,
     Dataset,
+    DatasetSource,
     GlobalDiscoveryCatalogue,
     HourlyRollup,
     MessageSource,
@@ -916,6 +917,58 @@ class NodeDetailViewTests(TestCase):
         self.assertContains(response, "2026-08-01 00:00")
         self.assertContains(response, "Set by hand")
         self.assertContains(response, "Silent")
+
+    def test_where_a_dataset_came_from_is_on_the_page(self):
+        """Two sources describing one dataset, and the page says which is which."""
+        catalogue = GlobalDiscoveryCatalogue.objects.create(
+            centre_id="int-wmo-global-discovery",
+            name="WMO Global Discovery Catalogue",
+            base_url="https://gdc.example.int",
+            is_writer=True,
+        )
+        dataset = Dataset.objects.create(
+            node=self.node,
+            identifier="urn:wmo:md:ke-kmd:synop",
+            title="Surface observations",
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy="origin/a/wis2/ke-kmd/data/core/weather/synop",
+            raw_json={},
+        )
+        DatasetSource.objects.create(
+            dataset=dataset,
+            source_type=DatasetSource.GDC,
+            catalogue=catalogue,
+            last_seen=at("2026-08-11T06:00:00"),
+        )
+        DatasetSource.objects.create(
+            dataset=dataset,
+            source_type=DatasetSource.OBSERVED,
+            last_seen=at("2026-08-11T10:45:00"),
+        )
+
+        response = self.page()
+
+        self.assertContains(response, "Declared by a Global Discovery Catalogue")
+        self.assertContains(response, "Observed in notification messages")
+        self.assertContains(response, "int-wmo-global-discovery")
+
+    def test_a_dataset_the_traffic_named_is_named_on_the_page(self):
+        """It carries no title, and a row nobody can read is not a row."""
+        observed = Dataset.objects.create(
+            node=self.node,
+            identifier="urn:wmo:md:ke-kmd:aws810",
+            raw_json={},
+        )
+        DatasetSource.objects.create(
+            dataset=observed,
+            source_type=DatasetSource.OBSERVED,
+            last_seen=at("2026-08-11T10:45:00"),
+        )
+
+        response = self.page()
+
+        self.assertContains(response, "urn:wmo:md:ke-kmd:aws810")
+        self.assertContains(response, "Not declared")
 
     def test_a_failing_sync_run_is_on_the_page_with_what_it_said(self):
         """Missing data traced to a failing sync, without leaving the page."""

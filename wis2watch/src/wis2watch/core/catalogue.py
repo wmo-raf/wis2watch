@@ -29,10 +29,12 @@ from django.db import transaction
 from django.utils import timezone as dj_timezone
 
 from .analysis import registries_not_answering_centre_ids
+from .dataset_sources import record_declaration
 from .interpretation import extract_discovery_records
 from .models import (
     DERIVED_ENDPOINTS,
     Dataset,
+    DatasetSource,
     GlobalDiscoveryCatalogue,
     MessageSource,
     SyncLog,
@@ -310,8 +312,8 @@ def _apply_origin_api(node):
     )
 
 
-def _apply_dataset(node, discovered):
-    """The dataset a record describes, created or refreshed.
+def _apply_dataset(node, discovered, catalogue):
+    """The dataset a record describes, created or refreshed, and who says so.
 
     Keyed on the centre and the identifier its record carries, which is the
     grain the catalogue publishes at. The topic is not part of the key: a
@@ -323,8 +325,19 @@ def _apply_dataset(node, discovered):
     same dataset under a corrected identifier" and "a different dataset, the
     old one retired" cannot be told apart from outside, and guessing wrong
     would silently rewrite the history of whichever row it landed on.
+
+    The declaration recorded beside it is what makes a second source possible.
+    A catalogue saying a dataset exists is one claim about it, and once the
+    centre's own metadata is read as well, one of the two payloads has to lose
+    the canonical record -- so which catalogue said what, and when it last said
+    it, is kept on a row of its own rather than inferred from the dataset
+    having been written.
+
+    What is counted is still the dataset. A declaration a run refreshed is not
+    news the way a station's is: a station is shared between centres and a
+    dataset belongs to one, so the two counts would never differ.
     """
-    _, created = Dataset.objects.update_or_create(
+    dataset, created = Dataset.objects.update_or_create(
         node=node,
         identifier=discovered.identifier,
         defaults={
@@ -342,11 +355,22 @@ def _apply_dataset(node, discovered):
         },
     )
 
+    record_declaration(
+        dataset,
+        DatasetSource.GDC,
+        catalogue=catalogue,
+        raw=discovered.raw,
+    )
+
     return CREATED if created else UPDATED
 
 
-def apply_discovery_record(record, *, registries_not_answering=frozenset()):
+def apply_discovery_record(record, catalogue, *, registries_not_answering=frozenset()):
     """Write one discovery record to the registry, reporting what happened.
+
+    ``catalogue`` is the one the record was read from, which the dataset's
+    declaration is recorded against: "a catalogue declares this" is not a
+    finding, and "this catalogue declares it and that one does not" is.
 
     Each record is applied in its own savepoint, so a record the database
     refuses -- one carrying a title longer than the column, say -- is counted
@@ -363,7 +387,7 @@ def apply_discovery_record(record, *, registries_not_answering=frozenset()):
 
             _apply_origin_api(node)
 
-            return _apply_dataset(node, record.dataset)
+            return _apply_dataset(node, record.dataset, catalogue)
     except Exception as exc:
         logger.warning(
             "Could not apply discovery record %s: %s", record.dataset.identifier, exc
@@ -407,7 +431,9 @@ def sync_catalogue(catalogue, fetch=None):
                 if catalogue.is_writer:
                     counts.record(
                         apply_discovery_record(
-                            record, registries_not_answering=not_answering
+                            record,
+                            catalogue,
+                            registries_not_answering=not_answering,
                         )
                     )
     except Exception as exc:

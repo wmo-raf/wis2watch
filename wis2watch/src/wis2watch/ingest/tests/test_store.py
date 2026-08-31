@@ -17,6 +17,7 @@ from django.utils import timezone as dj_timezone
 from wis2watch.core.interpretation import announces_catalogue_record
 from wis2watch.core.models import (
     Dataset,
+    DatasetSource,
     MessageSource,
     NodeLastSeen,
     NotificationMessage,
@@ -121,6 +122,30 @@ def message_pair(topic):
     return (message["topic"], message["payload"])
 
 
+def naming_no_record(pairs):
+    """The same messages with the record each names taken out.
+
+    Plenty of centres publish without a ``metadata_id``, and since a message
+    that carries one is taken at its word -- the record it names is created
+    where no registry holds it -- this is the only traffic whose dataset the
+    topic still decides.
+    """
+    return [
+        (
+            topic,
+            dict(
+                payload,
+                properties={
+                    name: value
+                    for name, value in payload["properties"].items()
+                    if name != "metadata_id"
+                },
+            ),
+        )
+        for topic, payload in pairs
+    ]
+
+
 def store_one(source, topic, payload):
     """Store one message the way a flush does, and return the row it wrote.
 
@@ -158,6 +183,10 @@ class StoreTestCase(TestCase):
         message = message_on(topic)
 
         return store_one(self.source, message["topic"], message["payload"])
+
+    def store_naming_no_record(self, topic):
+        """Store a captured message with the record it names taken out."""
+        return store_one(self.source, *naming_no_record([message_pair(topic)])[0])
 
 
 class StoredFieldsTests(StoreTestCase):
@@ -315,9 +344,15 @@ class CacheVantagePointTests(StoreTestCase):
         self.assertEqual(counts.cached, 2)
 
     def test_how_a_centre_publishes_is_counted_over_what_it_published(self):
-        """Otherwise a centre's unattributed rate is the caches' doing."""
+        """Otherwise a centre's unattributed rate is the caches' doing.
+
+        Told with traffic that names no record of its own, which is the only
+        traffic a topic nothing claims can leave unattributed: a message that
+        names its record always resolves to it.
+        """
         counts = store_notifications(
-            self.source, [message_pair(KE_TOPIC), *self.cached_copies_of()]
+            self.source,
+            naming_no_record([message_pair(KE_TOPIC), *self.cached_copies_of()]),
         )
 
         self.assertEqual(counts.unknown_dataset, 1)
@@ -554,28 +589,174 @@ class DatasetAttributionTests(StoreTestCase):
         self.dataset(identifier=KE_OTHER_METADATA_ID)
         self.dataset(identifier=KE_THIRD_METADATA_ID)
 
-        self.assertIsNone(self.store(KE_TOPIC).dataset)
+        self.assertIsNone(self.store_naming_no_record(KE_TOPIC).dataset)
 
     def test_a_topic_one_live_dataset_claims_resolves_to_it(self):
         """A retired record is not one of the several a topic is shared by."""
         self.dataset(identifier=KE_OTHER_METADATA_ID, status=Dataset.INACTIVE)
         current = self.dataset(identifier=KE_THIRD_METADATA_ID)
 
-        self.assertEqual(self.store(KE_TOPIC).dataset, current)
+        self.assertEqual(self.store_naming_no_record(KE_TOPIC).dataset, current)
 
     def test_another_centre_s_dataset_is_never_resolved_to(self):
-        """Both keys are the node's: a record declared elsewhere is not it."""
+        """Both keys are the node's: a record declared elsewhere is not it.
+
+        Two centres naming one identifier are two datasets, so the message is
+        attributed to a record of its own centre's rather than to the one
+        another centre happens to have registered under the same name.
+        """
         other_node = WIS2Node.objects.create(centre_id="gh-gmet", name="Ghana Met")
-        self.dataset(node=other_node)
+        theirs = self.dataset(node=other_node)
 
-        self.assertIsNone(self.store(KE_TOPIC).dataset)
-
-    def test_a_topic_no_dataset_claims_is_stored_with_no_dataset(self):
         record = self.store(KE_TOPIC)
+
+        self.assertNotEqual(record.dataset, theirs)
+        self.assertEqual(record.dataset.node, self.node)
+
+    def test_traffic_naming_no_record_on_an_unclaimed_topic_has_no_dataset(self):
+        """Nothing names it and nothing claims its topic, so nothing owns it."""
+        record = self.store_naming_no_record(KE_TOPIC)
 
         self.assertIsNone(record.dataset)
         self.assertEqual(record.topic, KE_TOPIC)
-        self.assertEqual(record.metadata_id, KE_METADATA_ID)
+        self.assertEqual(record.metadata_id, "")
+
+
+class ObservedDatasetTests(StoreTestCase):
+    """A dataset the traffic names and no registry holds is written down.
+
+    The same finding a station nobody declares is: the centre is publishing
+    under a discovery metadata record nothing has ever told this tool about,
+    and filing that traffic under nobody would hide the one thing worth asking
+    the centre. So the record is taken at its word and the dataset created,
+    with an observation beside it saying where it came from.
+    """
+
+    def observation(self, dataset):
+        return DatasetSource.objects.get(
+            dataset=dataset, source_type=DatasetSource.OBSERVED
+        )
+
+    def test_a_message_naming_a_record_nothing_holds_creates_the_dataset(self):
+        record = self.store(KE_TOPIC)
+
+        created = Dataset.objects.get(identifier=KE_METADATA_ID)
+
+        self.assertEqual(record.dataset, created)
+        self.assertEqual(created.node, self.node)
+
+    def test_the_created_dataset_carries_a_declaration_saying_it_was_observed(self):
+        self.store(KE_TOPIC)
+
+        observation = self.observation(Dataset.objects.get())
+
+        self.assertEqual(observation.source_type, DatasetSource.OBSERVED)
+        self.assertIsNone(observation.catalogue)
+
+    def test_the_observation_keeps_the_topic_the_traffic_arrived_on(self):
+        """What the source said, which for traffic is where it was published."""
+        self.store(KE_TOPIC)
+
+        self.assertEqual(self.observation(Dataset.objects.get()).raw_json["topic"], KE_TOPIC)
+
+    def test_a_cached_copy_records_the_topic_the_centre_published_on(self):
+        """A cache prefix is the cache's, not something the centre declared."""
+        self.store(KE_CACHE_TOPIC)
+
+        self.assertEqual(self.observation(Dataset.objects.get()).raw_json["topic"], KE_TOPIC)
+
+    def test_nothing_is_claimed_of_the_dataset_beyond_its_identifier(self):
+        """A notification names its record and says nothing else about it.
+
+        The topic especially. Written onto the canonical record it would join
+        the centre's declared datasets in claiming that topic, and could leave
+        a message naming no record unattributed where it used to resolve.
+        """
+        self.store(KE_TOPIC)
+
+        created = Dataset.objects.get()
+
+        self.assertEqual(created.title, "")
+        self.assertEqual(created.wmo_topic_hierarchy, "")
+        self.assertEqual(created.wmo_data_policy, "")
+        self.assertEqual(created.raw_json, {})
+
+    def test_a_centre_heard_only_through_a_cache_still_gets_its_dataset(self):
+        """The copy carries the centre's own record; the cache added nothing."""
+        self.store(KE_CACHE_TOPIC)
+
+        self.assertEqual(Dataset.objects.get().node, self.node)
+
+    def test_a_dataset_the_registry_already_holds_is_not_created_again(self):
+        declared = self.dataset()
+
+        record = self.store(KE_TOPIC)
+
+        self.assertEqual(record.dataset, declared)
+        self.assertEqual(Dataset.objects.count(), 1)
+
+    def test_a_dataset_the_registry_holds_records_that_it_was_observed(self):
+        """The half of the picture a catalogue cannot supply: it is still live."""
+        declared = self.dataset()
+
+        store_notifications(
+            self.source, [published_at("2026-08-11T10:00:00Z")]
+        )
+
+        self.assertEqual(
+            self.observation(declared).last_seen.isoformat(),
+            "2026-08-11T10:00:00+00:00",
+        )
+
+    def test_an_observation_moves_forward_with_the_traffic(self):
+        declared = self.dataset()
+
+        store_notifications(self.source, [published_at("2026-08-11T10:00:00Z")])
+        store_notifications(self.source, [published_at("2026-08-11T11:00:00Z")])
+
+        self.assertEqual(
+            self.observation(declared).last_seen.isoformat(),
+            "2026-08-11T11:00:00+00:00",
+        )
+
+    def test_an_older_message_does_not_move_an_observation_back(self):
+        """Brokers redeliver, and a sweep runs alongside the subscriptions."""
+        declared = self.dataset()
+
+        store_notifications(self.source, [published_at("2026-08-11T11:00:00Z")])
+        store_notifications(self.source, [published_at("2026-08-11T10:00:00Z")])
+
+        self.assertEqual(
+            self.observation(declared).last_seen.isoformat(),
+            "2026-08-11T11:00:00+00:00",
+        )
+
+    def test_traffic_naming_no_record_creates_nothing(self):
+        """There is no identifier to key a dataset on, so there is no dataset."""
+        self.store_naming_no_record(KE_TOPIC)
+
+        self.assertEqual(Dataset.objects.count(), 0)
+        self.assertEqual(DatasetSource.objects.count(), 0)
+
+    def test_a_centre_the_registry_does_not_know_gets_no_dataset(self):
+        """A dataset belongs to a centre, and there is no centre to hang it on."""
+        self.store(DJ_TOPIC)
+
+        self.assertEqual(Dataset.objects.count(), 0)
+
+    def test_a_centre_announcing_its_own_record_creates_nothing(self):
+        """An announcement is not a publication, so it declares nothing here.
+
+        A metadata announcement names a record like any other message. It is
+        set aside before anything is written, which is what keeps a dataset
+        from being created by the one kind of traffic that is not data.
+        """
+        WIS2Node.objects.create(centre_id="sc-seychelles-met", name="Seychelles Met")
+
+        store_one(self.source, SC_METADATA_TOPIC, catalogue_record_announcement())
+
+        self.assertEqual(Dataset.objects.count(), 0)
+        self.assertEqual(DatasetSource.objects.count(), 0)
 
 
 class StationAttributionTests(StoreTestCase):
