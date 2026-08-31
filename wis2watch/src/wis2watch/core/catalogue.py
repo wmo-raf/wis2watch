@@ -40,7 +40,14 @@ from .models import (
     SyncLog,
     WIS2Node,
 )
-from .sync import CREATED, UPDATED, SteppedOver, SyncCounts, fetch_pages
+from .sync import (
+    CREATED,
+    UPDATED,
+    SteppedOver,
+    SyncCounts,
+    declared_dataset_fields,
+    fetch_pages,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -341,13 +348,7 @@ def _apply_dataset(node, discovered, catalogue):
         node=node,
         identifier=discovered.identifier,
         defaults={
-            "title": discovered.title,
-            "wmo_data_policy": discovered.data_policy,
-            "wmo_topic_hierarchy": discovered.topic,
-            "self_link": discovered.canonical_link,
-            "raw_json": discovered.raw,
-            "metadata_created": discovered.metadata_created,
-            "metadata_updated": discovered.metadata_updated,
+            **declared_dataset_fields(discovered),
             "last_synced": dj_timezone.now(),
             # Datasets are the catalogue's to describe: one it still publishes
             # is active, whatever an earlier run concluded about it.

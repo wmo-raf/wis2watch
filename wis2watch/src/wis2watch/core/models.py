@@ -101,6 +101,16 @@ class WIS2NodeQuerySet(models.QuerySet):
         """
         return self.filter(stations_url="")
 
+    def advertising_discovery_metadata(self):
+        """The centres there is somewhere to ask what datasets they declare.
+
+        A different endpoint from the station registry and asked apart from
+        it, because the two fail independently: a centre serving its records
+        may serve no station registry at all, and either address may be the
+        one that has gone.
+        """
+        return self.exclude(discovery_metadata_url="")
+
 
 class WIS2Node(TimeStampedModel):
     """
@@ -238,6 +248,19 @@ class WIS2Node(TimeStampedModel):
         centre, when what is true is that nobody asked it.
         """
         return bool(self.stations_url)
+
+    @property
+    def advertises_discovery_metadata(self):
+        """Whether there is anywhere to ask this centre what datasets it declares.
+
+        Read before the centre is asked, and by nothing else yet -- which is
+        the narrower half of what its station counterpart does. The surfaces
+        reporting on a centre's datasets do not yet tell a centre that
+        answered and declared nothing from one nothing could ask, the
+        distinction ADR-0005 drew for stations; when one of them comes to, this
+        is the fact it reads rather than a second reading of an empty URL.
+        """
+        return bool(self.discovery_metadata_url)
 
     @property
     def country_center_point(self):

@@ -34,7 +34,9 @@ from wis2watch.core.tasks import (
     run_probe_canonical_links,
     run_probe_node_links,
     run_send_daily_digest,
+    run_sync_all_node_datasets,
     run_sync_all_node_stations,
+    run_sync_node_datasets,
     run_sync_node_stations,
     run_sync_oscar_stations,
     run_update_daily_rollups,
@@ -99,6 +101,80 @@ class NodeStationTaskTests(TestCase):
 
         self.assertIsNone(run_sync_node_stations(node.id))
         self.assertEqual(SyncLog.objects.count(), 0)
+
+
+class NodeDatasetTaskTests(TestCase):
+    """Which centres are asked what they publish, and on whose beat.
+
+    Asked apart from the station registries though both read the same hosts:
+    the two endpoints fail independently, and each run states its own bound.
+    """
+
+    def setUp(self):
+        self.node = WIS2Node.objects.create(
+            centre_id="za-weathersa",
+            name="South African Weather Service",
+            base_url="https://wis.weathersa.co.za",
+        )
+        self.entry = settings.CELERY_BEAT_SCHEDULE["sync-node-discovery-metadata"]
+
+    def test_every_node_advertising_its_records_is_queued(self):
+        with mock.patch("wis2watch.core.tasks.run_sync_node_datasets.delay"):
+            self.assertEqual(run_sync_all_node_datasets(), [self.node.id])
+
+    def test_a_node_advertising_no_records_is_not_asked_for_them(self):
+        WIS2Node.objects.create(centre_id="ke-meteo", name="Kenya Met")
+
+        with mock.patch("wis2watch.core.tasks.run_sync_node_datasets.delay"):
+            self.assertEqual(run_sync_all_node_datasets(), [self.node.id])
+
+    def test_a_run_reports_the_log_it_wrote(self):
+        with mock.patch("wis2watch.core.tasks.sync_node_datasets") as sync:
+            sync.return_value = SyncLog.objects.create(
+                node=self.node,
+                sync_type=SyncLog.DISCOVERY_METADATA,
+                status=SyncLog.SUCCESS,
+            )
+
+            self.assertEqual(
+                run_sync_node_datasets(self.node.id), sync.return_value.id
+            )
+
+    def test_a_node_that_was_not_asked_reports_nothing(self):
+        node = WIS2Node.objects.create(centre_id="ke-meteo", name="Kenya Met")
+
+        self.assertIsNone(run_sync_node_datasets(node.id))
+        self.assertEqual(SyncLog.objects.count(), 0)
+
+    def test_the_scheduled_task_is_the_one_that_answers_to_that_name(self):
+        self.assertEqual(self.entry["task"], run_sync_all_node_datasets.name)
+
+    def test_it_runs_hourly(self):
+        self.assertEqual(self.entry["schedule"].hour, {*range(24)})
+
+    def test_it_is_not_asked_in_the_same_minute_as_the_regions_other_fetches(self):
+        """One centre's two endpoints in one minute is the region's slow hosts
+        in a single pile.
+
+        The station registry first, since it is the one this reads the same
+        hosts as. An interval schedule would defeat the whole comparison --
+        its minute is whenever the beat was last restarted -- so what is
+        asserted is that both name a minute and that the minutes differ.
+        """
+        others = (
+            "sync-node-stations",
+            "poll-message-archives",
+            "probe-canonical-links",
+        )
+
+        self.assertTrue(self.entry["schedule"].minute)
+
+        for name in others:
+            with self.subTest(schedule=name):
+                self.assertNotEqual(
+                    self.entry["schedule"].minute,
+                    settings.CELERY_BEAT_SCHEDULE[name]["schedule"].minute,
+                )
 
 
 class LinkProbeTaskTests(TestCase):

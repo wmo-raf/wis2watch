@@ -545,9 +545,22 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'wis2watch.core.tasks.run_sync_catalogues',
         'schedule': 21600.0,  # Every 6 hours
     },
+    # On the hour, which the schedules below are offset from. An interval of
+    # 3600 seconds would be hourly too, and every one of those offsets is a
+    # coincidence of when the beat was last restarted: the whole point of
+    # asking a centre's endpoints at different minutes is lost the moment the
+    # minute is whatever the worker happened to start at.
     'sync-node-stations': {
         'task': 'wis2watch.core.tasks.run_sync_all_node_stations',
-        'schedule': 3600.0,  # Every hour
+        'schedule': crontab(minute=0),
+    },
+    # Hourly, like the station registries and against the same hosts, but at
+    # its own minute: a centre's two endpoints are two fetches, several of the
+    # region's hosts hang until the timeout, and asking both of a centre in the
+    # same minute would put the whole region's slow hosts in one pile.
+    'sync-node-discovery-metadata': {
+        'task': 'wis2watch.core.tasks.run_sync_all_node_datasets',
+        'schedule': crontab(minute=40),
     },
     # Hourly, and only for the centres whose own broker will not answer -- see
     # wis2watch.ingest.tasks for why an hour is soon enough and why the centres

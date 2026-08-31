@@ -1,9 +1,9 @@
 """What every synchronisation run does the same way.
 
 Every sync WIS2Watch runs -- the registry from a Global Discovery Catalogue,
-the stations a node's own registry declares -- reads an OGC API Features
-collection page by page and writes what it can. Two things are therefore said
-once, here, rather than once per sync:
+the datasets and stations a centre's own endpoints declare -- reads an OGC API
+Features collection page by page and writes what it can. Four things are
+therefore said once, here, rather than once per sync:
 
 - **How a collection is read.** Page after page, following the server's own
   ``next`` link while it advances, resuming from an offset of our own where it
@@ -18,6 +18,10 @@ once, here, rather than once per sync:
 - **Where a source places a station.** Every source that declares a station
   gives it a latitude, a longitude and sometimes an elevation, and the canonical
   location is one three-dimensional point whichever source supplied it.
+- **What a source says about a dataset.** A catalogue's record and a centre's
+  own are the same WCMP2 feature, so what either of them contributes to the
+  canonical dataset is one mapping rather than one per sync -- two copies of
+  it would drift, and the drift would read as the two sources disagreeing.
 
 What differs between the syncs -- which URL, which credentials, how long to
 wait -- stays with the sync that knows it.
@@ -323,6 +327,33 @@ def declared_position(declared):
         declared.elevation if declared.elevation is not None else 0,
         srid=4326,
     )
+
+
+def declared_dataset_fields(declared):
+    """What a source says about a dataset, under the canonical record's names.
+
+    Written once because two sources describe a dataset in the identical WCMP2
+    feature -- a catalogue's copy of what a centre registered, and the centre's
+    own records -- so the mapping onto the canonical row is the same mapping.
+    Kept apart from either sync, in the way a station's declared position is,
+    because two copies of it would drift and the drift would show up as the
+    two sources disagreeing about a dataset neither had read differently.
+
+    What each sync does with these is its own: the catalogue writes them over
+    the record it owns, and a centre fills in only what nothing else has. The
+    fields no source supplies -- ``last_synced``, ``status`` -- are named by
+    the sync that has something to say about them, and are deliberately not
+    here.
+    """
+    return {
+        "title": declared.title,
+        "wmo_data_policy": declared.data_policy,
+        "wmo_topic_hierarchy": declared.topic,
+        "self_link": declared.canonical_link,
+        "raw_json": declared.raw,
+        "metadata_created": declared.metadata_created,
+        "metadata_updated": declared.metadata_updated,
+    }
 
 
 @dataclass(frozen=True)

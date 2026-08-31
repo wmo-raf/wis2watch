@@ -12,6 +12,7 @@ from .cadence import learn_cadence_baselines, learn_station_activity_baselines
 from .catalogue import sync_catalogues
 from .daily_rollups import update_daily_rollups
 from .digest import send_digest
+from .node_datasets import sync_node_datasets
 from .node_stations import sync_node_stations
 from .oscar import sync_oscar_stations
 from .probes import nodes_advertising_links, probe_node_links, probed_hour
@@ -97,6 +98,56 @@ def run_sync_all_node_stations():
 
     for node_id in node_ids:
         run_sync_node_stations.delay(node_id)
+
+    return node_ids
+
+
+@shared_task
+def run_sync_node_datasets(node_id):
+    """Ask one centre what datasets it declares.
+
+    Failures are diagnostic state rather than task failures: a centre that
+    cannot be reached is recorded on its own sync log, and the next scheduled
+    run asks again. Retrying here would only duplicate the schedule.
+    """
+    from .models import WIS2Node
+
+    sync_log = sync_node_datasets(WIS2Node.objects.get(id=node_id))
+
+    if sync_log is None:
+        return None
+
+    logger.info(
+        "[DISCOVERY METADATA SYNC] %s: %s", sync_log.node.centre_id, sync_log.summary
+    )
+
+    return sync_log.id
+
+
+@shared_task
+def run_sync_all_node_datasets():
+    """Ask every centre for its own records, so a new one needs no manual trigger.
+
+    One task per centre rather than one run over all of them, for the reason
+    the station fan-out gives: each is an HTTP fetch against a different
+    centre, several of the region's are slow or unreachable from outside, and
+    fanning out keeps one of those from holding up the rest of the region.
+
+    Queued apart from the station registry even though both read the same
+    host. The two endpoints fail independently -- a centre serving its records
+    may serve no station registry at all -- and each run has to be able to
+    state its own bound.
+    """
+    from .models import WIS2Node
+
+    node_ids = list(
+        WIS2Node.objects.advertising_discovery_metadata().values_list("id", flat=True)
+    )
+
+    logger.info("[DISCOVERY METADATA SYNC] queueing %s nodes", len(node_ids))
+
+    for node_id in node_ids:
+        run_sync_node_datasets.delay(node_id)
 
     return node_ids
 
