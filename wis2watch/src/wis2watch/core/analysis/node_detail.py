@@ -30,6 +30,7 @@ from django.utils.translation import gettext_lazy as _
 
 from ..models import (
     Dataset,
+    DatasetSource,
     GlobalDiscoveryCatalogue,
     MessageSource,
     NodeLastSeen,
@@ -56,6 +57,11 @@ from .stations import NodeStationRow, StationStanding, node_stations
 #: would be off the bottom of the one table that was meant to explain it.
 DEFAULT_RUNS_PER_TYPE = 5
 
+#: What a dataset nothing has described falls under. Not a data policy: it is
+#: the absence of one, and it is given a name so that the page can say so
+#: rather than leaving a cell that reads as whichever policy the eye supplies.
+UNDECLARED = "undeclared"
+
 
 class SyncScope:
     """Whose run a sync run was.
@@ -80,6 +86,24 @@ class SyncScope:
 
 
 @dataclass(frozen=True)
+class DatasetSourceRow:
+    """One source's declaration of a dataset, as the page reports it.
+
+    Shown rather than reduced to a verdict, because the reader of this page is
+    the person who has to put the disagreement to a centre: "the catalogue
+    still lists this and the centre no longer declares it" is a conversation,
+    and a badge saying "diverged" is not. Which catalogue said it is part of
+    that, since two catalogues describing one region routinely disagree.
+    """
+
+    source_type: str
+    source_label: str
+    catalogue_centre_id: str
+    first_seen: datetime
+    last_seen: datetime | None
+
+
+@dataclass(frozen=True)
 class NodeDatasetRow:
     """One dataset of a centre's: what the registry says, and whether it is quiet.
 
@@ -88,6 +112,12 @@ class NodeDatasetRow:
     overview counts. A dataset the registry no longer calls active carries
     none: nobody is waiting to hear from it, and a silence finding about it
     would be a finding nobody should act on.
+
+    The sources beside it are where the dataset came from. A dataset is no
+    longer something the catalogue alone can have said -- a centre publishing
+    under a record no catalogue holds is one this tool learns about from the
+    traffic -- so the page says which source knows it rather than letting a
+    row look the same either way.
     """
 
     dataset_id: int
@@ -101,6 +131,7 @@ class NodeDatasetRow:
     last_synced: datetime | None
     last_active_hour: datetime | None
     quiet: DatasetSilenceRow | None
+    sources: list[DatasetSourceRow]
 
     @property
     def is_silent(self):
@@ -293,15 +324,16 @@ def _datasets(node, *, now):
             Dataset.objects.filter(node=node), now=now
         )
     }
+    declarations = _declarations(node)
 
     # The silent first and furthest overdue before them: the order the silence
     # module put them in, which is the order somebody reads for what broke.
     live = [
-        _dataset_row(datasets[quiet.dataset_id], quiet)
+        _dataset_row(datasets[quiet.dataset_id], quiet, declarations)
         for quiet in dataset_silence(now=now, node=node)
     ]
     retired = [
-        _dataset_row(dataset, None)
+        _dataset_row(dataset, None, declarations)
         for dataset in datasets.values()
         if dataset.status != Dataset.ACTIVE
     ]
@@ -309,20 +341,58 @@ def _datasets(node, *, now):
     return live, retired
 
 
-def _dataset_row(dataset, quiet):
-    """One dataset as a finding, judged or not."""
+def _declarations(node):
+    """Every source behind the centre's datasets, keyed by the dataset."""
+    by_dataset = {}
+
+    for declaration in DatasetSource.objects.declared_for_node(node):
+        by_dataset.setdefault(declaration.dataset_id, []).append(
+            _dataset_source_row(declaration)
+        )
+
+    return by_dataset
+
+
+def _dataset_source_row(declaration):
+    """One declaration as a finding."""
+    return DatasetSourceRow(
+        source_type=declaration.source_type,
+        source_label=declaration.get_source_type_display(),
+        catalogue_centre_id=(
+            declaration.catalogue.centre_id if declaration.catalogue_id else ""
+        ),
+        first_seen=declaration.first_seen,
+        last_seen=declaration.last_seen,
+    )
+
+
+def _dataset_row(dataset, quiet, declarations):
+    """One dataset as a finding, judged or not, and where it came from.
+
+    The title is the dataset's own where it has one and its identifier where
+    it has not: a dataset this tool learned about from traffic has never been
+    named by anything, and a row with an empty first column is one nobody can
+    click on or ask a centre about.
+
+    The policy is treated the same way and says so in as many words. A dataset
+    no registry has described falls under no data policy this tool knows of,
+    and a blank cell there would read as core -- which is a claim about what a
+    centre is obliged to publish freely, and not one to make on a centre's
+    behalf.
+    """
     return NodeDatasetRow(
         dataset_id=dataset.pk,
-        title=dataset.title,
+        title=dataset.display_title,
         topic=dataset.wmo_topic_hierarchy,
         identifier=dataset.identifier,
-        policy=dataset.wmo_data_policy,
-        policy_label=dataset.get_wmo_data_policy_display(),
+        policy=dataset.wmo_data_policy or UNDECLARED,
+        policy_label=dataset.get_wmo_data_policy_display() or _("Not declared"),
         status=dataset.status,
         status_label=dataset.get_status_display(),
         last_synced=dataset.last_synced,
         last_active_hour=dataset.last_active_hour,
         quiet=quiet,
+        sources=declarations.get(dataset.pk, []),
     )
 
 

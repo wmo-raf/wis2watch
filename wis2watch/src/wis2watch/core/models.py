@@ -706,8 +706,118 @@ class Dataset(TimeStampedModel):
             models.Index(fields=["status"]),
         ]
 
+    @property
+    def display_title(self):
+        """What to call this dataset on a page, in a listing, anywhere.
+
+        A dataset created from traffic has no title: a notification names the
+        record it belongs to and says nothing else about it, and inventing a
+        title here would put words in a source's mouth. So the identifier
+        stands in -- it is the only name such a dataset has, and a row nobody
+        can read is worse than one named by its URN.
+        """
+        return self.title or self.identifier
+
     def __str__(self):
+        if not self.title:
+            return self.identifier
+
         return f"{self.title} ({self.identifier})"
+
+
+class DatasetSourceQuerySet(models.QuerySet):
+    def declared_for_node(self, node):
+        """Every declaration behind one centre's datasets, in one query.
+
+        Read for a whole centre rather than per dataset: a page listing a
+        centre's datasets asks this once, and asking it per row would be a
+        query per dataset on the page.
+        """
+        return self.filter(dataset__node=node).select_related("catalogue")
+
+
+class DatasetSource(TimeStampedModel):
+    """One source's declaration of a dataset.
+
+    The same shape :class:`StationSource` has for stations, and for the same
+    reason: several sources describe one dataset, they disagree, and the
+    disagreement is the finding. A Global Discovery Catalogue publishes what a
+    centre registered; the centre's own discovery metadata says what it
+    publishes now; and traffic on the wire proves what it is actually sending.
+
+    Two rules keep them from fighting over one record, the same two the
+    station picture is held together by. **Declaring is not owning**: the
+    canonical :class:`Dataset` is keyed on the centre and the identifier and
+    shared by all three sources, and a declaration is recorded beside it
+    rather than as the dataset itself. **Fill, do not overwrite**: what one
+    source said is kept on its own row, so a later run can report what each
+    of them says rather than only that they differ.
+
+    ``expected_interval_override_hours`` belongs to none of them. It is the
+    operator's statement about what to expect of the dataset, it lives on the
+    canonical record, and no declaration touches it.
+    """
+
+    GDC = "gdc"
+    NODE = "node"
+    OBSERVED = "observed"
+
+    SOURCE_TYPE_CHOICES = [
+        (GDC, _("Declared by a Global Discovery Catalogue")),
+        (NODE, _("Declared by the centre's own discovery metadata")),
+        (OBSERVED, _("Observed in notification messages")),
+    ]
+
+    dataset = models.ForeignKey(
+        Dataset,
+        on_delete=models.CASCADE,
+        related_name="sources",
+    )
+    source_type = models.CharField(max_length=20, choices=SOURCE_TYPE_CHOICES)
+    catalogue = models.ForeignKey(
+        GlobalDiscoveryCatalogue,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="dataset_declarations",
+        help_text=_("The catalogue that declared the dataset, where applicable"),
+    )
+
+    raw_json = models.JSONField(
+        null=True,
+        blank=True,
+        help_text=_("What this source said about the dataset, as it said it"),
+    )
+    first_seen = models.DateTimeField(default=dj_timezone.now)
+    last_seen = models.DateTimeField(null=True, blank=True)
+
+    objects = DatasetSourceQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["dataset", "source_type"]
+        constraints = [
+            # One declaration per source, and the catalogue is part of which
+            # source it is: two Global Discovery Catalogues describing one
+            # dataset are two declarations, and which of them said what is the
+            # whole of what a divergence report is about. A centre's own
+            # metadata and its traffic name no catalogue, so those are one
+            # apiece -- said twice, because a partial unique index is how
+            # PostgreSQL is told that nulls do not collide.
+            models.UniqueConstraint(
+                fields=["dataset", "source_type", "catalogue"],
+                name="unique_dataset_declaration_per_catalogue",
+            ),
+            models.UniqueConstraint(
+                fields=["dataset", "source_type"],
+                condition=models.Q(catalogue__isnull=True),
+                name="unique_dataset_declaration_without_catalogue",
+            ),
+        ]
+        verbose_name = _("Dataset Source")
+        verbose_name_plural = _("Dataset Sources")
+
+    def __str__(self):
+        return f"{self.dataset.identifier} - {self.get_source_type_display()}"
 
 
 class StationQuerySet(models.QuerySet):

@@ -141,6 +141,25 @@
             color: #555;
         }
 
+        /* Where a dataset came from. Deliberately not the health palette:
+           a source is not a verdict, and colouring the catalogue green and
+           the traffic red would say which of them is right -- which is the
+           question a divergence report exists to ask, not to presume. */
+        .badge-source-gdc {
+            background: #e5e0f5;
+            color: #3f3266;
+        }
+
+        .badge-source-node {
+            background: #dbe9f7;
+            color: #21456b;
+        }
+
+        .badge-source-observed {
+            background: #e2eee0;
+            color: #2f5029;
+        }
+
         .row-detail {
             margin-top: 4px;
             color: #555;
@@ -318,7 +337,7 @@
             {% endif %}
         </div>
         <p class="section-note">
-            {% trans "Each dataset judged against its own cadence, learned from its history or stated by hand, so that which part of this centre's output stopped is readable rather than that something did." %}
+            {% trans "Each dataset judged against its own cadence, learned from its history or stated by hand, so that which part of this centre's output stopped is readable rather than that something did. Beside each one, where this tool learned of it: a catalogue, the centre's own metadata, or the centre's traffic naming a record nothing had declared." %}
         </p>
 
         {% if detail.datasets %}
@@ -326,6 +345,7 @@
                 <thead>
                 <tr>
                     <th>{% trans "Dataset" %}</th>
+                    <th>{% trans "Declared by" %}</th>
                     <th>{% trans "Policy" %}</th>
                     <th>{% trans "Last published" %}</th>
                     <th class="numeric">{% trans "Quiet for" %}</th>
@@ -344,6 +364,25 @@
                                     {% blocktrans with synced=row.last_synced|date:"Y-m-d H:i" %}catalogue read {{ synced }}{% endblocktrans %}
                                 </div>
                             {% endif %}
+                        </td>
+                        <td>
+                            {% for source in row.sources %}
+                                <div>
+                                    <span class="badge badge-source-{{ source.source_type }}">{{ source.source_label }}</span>
+                                    {% if source.catalogue_centre_id %}
+                                        <div class="row-detail"><code>{{ source.catalogue_centre_id }}</code></div>
+                                    {% endif %}
+                                    <div class="row-detail">
+                                        {% if source.last_seen %}
+                                            {% blocktrans with seen=source.last_seen|date:"Y-m-d H:i" %}last said {{ seen }}{% endblocktrans %}
+                                        {% else %}
+                                            {% blocktrans with seen=source.first_seen|date:"Y-m-d H:i" %}first said {{ seen }}{% endblocktrans %}
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            {% empty %}
+                                <span class="badge badge-unknown">{% trans "no source recorded" %}</span>
+                            {% endfor %}
                         </td>
                         <td>
                             <span class="badge badge-{{ row.policy }}">{{ row.policy_label }}</span>
