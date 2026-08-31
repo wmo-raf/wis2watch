@@ -14,6 +14,7 @@ import csv
 from io import StringIO
 from unittest import mock
 
+import requests
 from django.contrib.gis.geos import Point
 from django.test import TestCase
 from django.utils import timezone as dj_timezone
@@ -25,6 +26,7 @@ from wis2watch.core.sync import (
     MAX_PAGES,
     MAX_REASON_CHARS,
     MAX_STEPPED_OVER_RECORDED,
+    ReadKeptFailing,
 )
 
 from .support import failing_fetch, load_json_fixture, pages
@@ -416,6 +418,17 @@ class FetchTests(NodeStationsTestCase):
 
         self.assertEqual(get.call_args.args[0], self.node.stations_url)
         self.assertIs(get.call_args.kwargs["verify"], True)
+
+    def test_a_registry_that_will_not_answer_is_asked_once(self):
+        """The hourly schedule is this sync's retry, across fifty-four centres
+        of which a large share are at addresses nothing answers at."""
+        with mock.patch("wis2watch.core.sync.requests.get") as get:
+            get.side_effect = requests.exceptions.ConnectionError("refused")
+
+            with self.assertRaises(ReadKeptFailing):
+                list(fetch_station_pages(self.node))
+
+        self.assertEqual(get.call_count, 1)
 
     def test_it_follows_the_next_link_until_there_is_none(self):
         first = {

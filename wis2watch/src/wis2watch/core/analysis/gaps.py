@@ -8,7 +8,7 @@ stations are declared to the world and have never once transmitted, a centre
 publishing that no catalogue has indexed, data announced to a broker the rest
 of the world never hears.
 
-Seven reports, because there are seven ways the picture can be wrong that no
+Eight reports, because there are eight ways the picture can be wrong that no
 single view of one centre can show:
 
 * what a country declares in OSCAR and has never been heard from;
@@ -18,13 +18,15 @@ single view of one centre can show:
 * which centres publish with no catalogue record at all;
 * whose own station registry has stopped answering, or never did;
 * which syncs are reading a source and losing records out of what they read;
+* which discovery catalogues fail a share of their runs while succeeding at
+  the rest;
 * how much of each centre's traffic says nothing about which station it came
   from.
 
-The last two are findings about this tool rather than about the region alone
--- what it could not attribute to a station, and what it read and could not
-store -- and they earn their place beside the others for the reason all of
-them are here: nobody was looking.
+The last three are findings about this tool rather than about the region alone
+-- what it could not attribute to a station, what it read and could not store,
+and how much of the time it could not read at all -- and they earn their place
+beside the others for the reason all of them are here: nobody was looking.
 
 That reason is worth spelling out once, on the report that shows it plainest.
 A registry that fails every hourly run leaves a failed sync log every hour,
@@ -41,6 +43,13 @@ records it read is recorded as a partial success, and everything downstream
 answers about those nine as though the region had never declared them. Which
 nine, and what refused them, lives on the run; until this listed them it lived
 where nobody reads.
+
+The failing-catalogue report is that reason a third time, and the sharpest
+case of it. A catalogue that stops answering altogether is announced within
+the day. One that fails every other run is announced by nothing at all, since
+the registry keeps coming back and only the rate has halved -- so the tool
+went on reporting confidently on a region it was rebuilding half as often as
+it said, and the whole of the evidence was a column of failed runs.
 
 Every one of them is a list of named entities rather than a count. "Seventeen
 stations are silent" is not a finding anybody can act on; a WIGOS identifier, a
@@ -78,7 +87,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from django.conf import settings
-from django.db.models import Exists, F, Max, Min, OuterRef, Q, Subquery, Sum
+from django.db.models import Count, Exists, F, Max, Min, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone as dj_timezone
 from django.utils.formats import date_format
@@ -88,6 +97,7 @@ from django.utils.translation import ngettext
 from django_countries.fields import Country
 
 from ..models import (
+    GlobalDiscoveryCatalogue,
     HardFailure,
     HourlyRollup,
     MessageSource,
@@ -109,7 +119,7 @@ from .silence import hours_between
 #: over a day.
 DEFAULT_ATTRIBUTION_WINDOW_HOURS = 168
 
-#: Which report answers "is this share bad?" for a centre. Alone among the seven
+#: Which report answers "is this share bad?" for a centre. Alone among the eight
 #: slugs in being named here, because it is the only one reversed from outside
 #: this module -- the statistics tab links to it. Renaming it should not be a
 #: search for the same string somewhere else in the tree.
@@ -122,6 +132,29 @@ UNATTRIBUTED_MESSAGES_SLUG = "unattributed-messages"
 #: registry went. Deliberately not one of the alerting thresholds: this is not
 #: a failure of the tool, and nobody is being interrupted for it.
 DEFAULT_REGISTRY_UNANSWERED_HOURS = 48
+
+#: Over how many days a catalogue's runs are judged. A week of a six-hourly
+#: schedule is twenty-eight runs, which is enough for a share to mean anything
+#: and short enough that a catalogue mended on Tuesday is off the report by
+#: the weekend.
+DEFAULT_CATALOGUE_FAILING_DAYS = 7
+
+#: How many of a catalogue's runs may fail before it is named, as a percentage.
+#: One run in five, which is set by two things rather than by what looks bad.
+#: The registry is rebuilt every six hours because somebody decided six hours
+#: was current enough, and a catalogue losing a fifth of its runs is delivering
+#: three rebuilds a day rather than four. And over the week this is measured
+#: across, a fifth is six separate failures -- more than any single outage can
+#: produce, since an outage long enough to cost six six-hourly runs lasts a day
+#: and a half and is announced as staleness instead. So what is left over the
+#: line is a source that keeps failing, which is what the report is named for.
+DEFAULT_CATALOGUE_FAILING_SHARE = 20
+
+#: How many runs it takes before a share is a rate rather than an accident.
+#: A day of the six-hourly schedule. Not a setting: it is not a judgement about
+#: the region but arithmetic about the window, and one failure out of two is a
+#: hundred per cent of nothing.
+RUNS_ENOUGH_TO_JUDGE = 4
 
 #: How long after it ran a run still speaks for its sync, in days. Long enough
 #: that the weekly OSCAR run is never dropped by the window alone, and short
@@ -181,6 +214,20 @@ def default_registry_unanswered_hours():
 def default_stepped_over_days():
     """How long after it ran a run still speaks for its sync."""
     return getattr(settings, "WIS2WATCH_STEPPED_OVER_DAYS", DEFAULT_STEPPED_OVER_DAYS)
+
+
+def default_catalogue_failing_days():
+    """Over how many days a catalogue's runs are judged."""
+    return getattr(
+        settings, "WIS2WATCH_CATALOGUE_FAILING_DAYS", DEFAULT_CATALOGUE_FAILING_DAYS
+    )
+
+
+def default_catalogue_failing_share():
+    """How many of a catalogue's runs may fail before it is named."""
+    return getattr(
+        settings, "WIS2WATCH_CATALOGUE_FAILING_SHARE", DEFAULT_CATALOGUE_FAILING_SHARE
+    )
 
 
 @dataclass(frozen=True)
@@ -431,6 +478,49 @@ class UnansweredRegistryRow:
     def standing_label(self):
         """Whether it ever answered, for a table cell."""
         return RegistryStanding.label(self.standing)
+
+
+@dataclass(frozen=True)
+class FailingCatalogueRow:
+    """A Global Discovery Catalogue that fails some of its runs and not others.
+
+    The share is the finding, because it is the thing no other surface can
+    say. One failed run is on the catalogue's own sync log and means nothing;
+    a catalogue that has failed fourteen of its last twenty-eight runs is
+    rebuilding the registry at half the rate the schedule promises, and the
+    only way anybody knew was by reading twenty-eight rows and counting.
+
+    Whether it writes is on the row because it decides what the failures cost.
+    The registry is one catalogue's to build, so a writer failing half its runs
+    is a region half as current as it looks; a reading catalogue failing is a
+    Global Service somebody should hear about and nothing this tool is
+    currently the poorer for.
+
+    Beside them, what the last failure said and when records last came back --
+    the first because a refused connection, a read timeout and a 404 are three
+    different conversations, and the second because a catalogue with a rate
+    and no successful run at all is not failing intermittently, it is down.
+    """
+
+    centre_id: str
+    name: str
+    is_writer: bool
+    runs: int
+    failures: int
+    share: int
+    last_failed_at: datetime | None
+    last_error: str
+    records_last_read_at: datetime | None
+
+    @property
+    def role_label(self):
+        """Which of the two this catalogue is, for a table cell.
+
+        Not called a standing, which everywhere else here is a verdict on
+        something's health -- a centre's, a registry's, a station's. This is
+        the catalogue's job rather than how it is doing at it.
+        """
+        return _("Writer") if self.is_writer else _("Read-only")
 
 
 @dataclass(frozen=True)
@@ -864,6 +954,195 @@ def registries_not_answering(*, now=None, unanswered_hours=None):
         _unanswered_registry_row(node, error=errors.get(node.pk, ""), now=now)
         for node in unanswered
     ]
+
+
+def catalogues_that_keep_failing(*, now=None, within_days=None, share=None):
+    """The Global Discovery Catalogues failing a share of their runs.
+
+    Args:
+        now: the instant the window is measured back from.
+        within_days: how many days of runs are judged.
+        share: how many of them may fail, as a percentage, before it is named.
+
+    Returns:
+        list[FailingCatalogueRow]: the writing catalogue first, then the worst
+        share, and among equals the catalogue's own name.
+
+    The failure ADR-0004's staleness check is blind to, by construction. That
+    check asks when the registry was last rebuilt, and a catalogue failing
+    every other run rebuilds it every twelve hours instead of every six --
+    which never reaches a threshold of twenty-four and is never announced. The
+    registry is meanwhile half as current as the schedule says, everything
+    read against it is quietly that much staler, and the whole of the evidence
+    is a column of failed runs on a page nobody opens.
+
+    Reported rather than alerted, for the reason ADR-0006 gave the
+    not-answering report: it is a pattern over time rather than one bad run,
+    and nobody can do anything about a foreign host at three in the morning.
+    What the reader gets is the rate and the reason, which is what it takes to
+    decide whether to chase the catalogue, the network in between, or nothing.
+
+    A catalogue that fails every run is here as well as being announced stale.
+    They are the same catalogue and two different readings of it -- the rate
+    says how it is failing, the alert says what to stop believing -- and a
+    report that dropped it at a hundred per cent would be a rate that stopped
+    being reported exactly when it got worst.
+    """
+    now = now or dj_timezone.now()
+    days = default_catalogue_failing_days() if within_days is None else within_days
+    share = default_catalogue_failing_share() if share is None else share
+    since = now - timedelta(days=days)
+
+    failing = _catalogues_that_keep_failing(now=now, days=days, share=share)
+
+    # Asked of the reported catalogues together rather than per row, the way
+    # the not-answering report asks its registries: a page of findings is two
+    # queries rather than two each.
+    failures = _last_catalogue_failures(failing, since=since)
+    read = _catalogue_records_last_read(failing, since=since)
+
+    return [
+        _failing_catalogue_row(
+            catalogue,
+            failure=failures.get(catalogue.pk),
+            read_at=read.get(catalogue.pk),
+        )
+        for catalogue in failing
+    ]
+
+
+def _catalogues_that_keep_failing(*, now, days, share):
+    """Those catalogues whose runs in the window failed often enough to name.
+
+    Counted over the window rather than off a streak, because the failure is
+    that runs fail *among* runs that work: a streak of one is what this looks
+    like from close up, and a streak is what "not answering" already means
+    everywhere else in this module.
+
+    Only the catalogue sync counts. A wildcard sweep or anything else logged
+    against the same catalogue is not evidence about reading its registry, in
+    the way a station sync is not evidence about a centre's archive.
+    """
+    counted = (
+        GlobalDiscoveryCatalogue.objects.filter(is_active=True)
+        .annotate(
+            runs=Count("sync_logs", filter=_ran_in(now=now, days=days)),
+            failures=Count(
+                "sync_logs",
+                filter=_ran_in(now=now, days=days)
+                & Q(sync_logs__status=SyncLog.FAILED),
+            ),
+        )
+        # A catalogue that failed nothing is excluded here rather than left to
+        # the share, which would let it through were the threshold ever set to
+        # nought -- a setting of zero means "name anything failing", not "name
+        # every catalogue there is".
+        .filter(runs__gte=RUNS_ENOUGH_TO_JUDGE, failures__gt=0)
+        # By name among equals, which survives the sort below because Python's
+        # is stable: two catalogues failing identically are listed in the same
+        # order every time the page is read.
+        .order_by("-is_writer", "name")
+    )
+
+    # The share is worked out once per catalogue and carried, rather than
+    # recomputed by the filter and again by the sort: three readings of one
+    # division are three chances for them to be three different numbers.
+    over_the_line = [
+        (catalogue, _share_failed(catalogue))
+        for catalogue in counted
+        if _share_failed(catalogue) >= share
+    ]
+
+    return [
+        catalogue
+        for catalogue, _share in sorted(
+            over_the_line, key=lambda pair: (not pair[0].is_writer, -pair[1])
+        )
+    ]
+
+
+def _ran_in(*, now, days):
+    """The runs of the catalogue sync that fall inside the window."""
+    return Q(
+        sync_logs__sync_type=SyncLog.CATALOGUE,
+        sync_logs__started_at__gte=now - timedelta(days=days),
+    )
+
+
+def _share_failed(catalogue):
+    """How many of a catalogue's runs failed, as a whole percentage.
+
+    Whole, because the difference between 48 and 48.2 per cent is not a
+    difference anybody acts on, and a column of decimals reads as a precision
+    the measure does not have.
+    """
+    return round(100 * catalogue.failures / catalogue.runs)
+
+
+def _failing_catalogue_row(catalogue, *, failure, read_at):
+    """One catalogue's failure rate as a finding."""
+    started_at, error = failure or (None, "")
+
+    return FailingCatalogueRow(
+        centre_id=catalogue.centre_id,
+        name=catalogue.name,
+        is_writer=catalogue.is_writer,
+        runs=catalogue.runs,
+        failures=catalogue.failures,
+        share=_share_failed(catalogue),
+        last_failed_at=started_at,
+        last_error=_error_excerpt(error),
+        records_last_read_at=read_at,
+    )
+
+
+def _catalogue_runs(catalogues, *, since):
+    """The catalogue sync's runs in the window, against these catalogues."""
+    return SyncLog.objects.filter(
+        catalogue_id__in=[catalogue.pk for catalogue in catalogues],
+        sync_type=SyncLog.CATALOGUE,
+        started_at__gte=since,
+    )
+
+
+def _last_catalogue_failures(catalogues, *, since):
+    """When each of them last failed and what it said, per catalogue.
+
+    A refused connection, a read timeout and a 404 are three different
+    conversations, and a report that said only "failing" would send somebody to
+    open the sync logs it exists to have read for them. A run that failed
+    without recording why -- a worker killed mid-fetch -- carries nothing, and
+    the row says nothing rather than inventing a cause.
+    """
+    return {
+        run["catalogue_id"]: (run["started_at"], run["error_message"])
+        for run in _catalogue_runs(catalogues, since=since)
+        .filter(status=SyncLog.FAILED)
+        .order_by("catalogue_id", "-started_at")
+        .distinct("catalogue_id")
+        .values("catalogue_id", "started_at", "error_message")
+    }
+
+
+def _catalogue_records_last_read(catalogues, *, since):
+    """When a run of each last brought registry records back, per catalogue.
+
+    Which runs those are is ``SyncLog``'s to say, and is the same predicate the
+    staleness alert reads: a run that failed, one that answered with nothing,
+    and one every record of which was stepped over all leave the registry
+    exactly where they found it. Here it is what separates a catalogue failing
+    intermittently from one that is simply down -- a rate with no run behind it
+    that brought anything back is the second, and the row says so by having
+    nothing to put here.
+    """
+    return {
+        run["catalogue_id"]: run["completed_at"] or run["started_at"]
+        for run in _catalogue_runs(catalogues, since=since)
+        .brought_records_back()
+        .order_by("catalogue_id", "-started_at")
+        .distinct("catalogue_id")
+        .values("catalogue_id", "completed_at", "started_at")
+    }
 
 
 def syncs_stepping_over_records(*, now=None, within_days=None):
@@ -1573,6 +1852,30 @@ def _unanswered_registry_notice(row):
     )
 
 
+def _failing_catalogue_notice(row):
+    """A catalogue that keeps failing, in a sentence.
+
+    Keyed on the catalogue rather than on the window it was measured over, so
+    that a catalogue failing all week is one finding announced once and
+    announced again if it comes back. A key carrying the rate would announce
+    the same catalogue afresh every time the share moved by a point.
+
+    The last failure is quoted because it is the errand. "Failing 50% of runs"
+    sends nobody anywhere; a refused connection sends somebody to the network
+    between here and the host, and a 404 sends them to the catalogue.
+    """
+    which = "the writing catalogue" if row.is_writer else "a read-only catalogue"
+    because = f": {row.last_error}" if row.last_error else ""
+
+    return Notice(
+        key=row.centre_id,
+        summary=(
+            f"{row.centre_id}, {which}, failed {row.failures} of {row.runs} runs "
+            f"({row.share}%){because}"
+        ),
+    )
+
+
 def _stepped_over_run_notice(row):
     """A sync that is losing records, in a sentence.
 
@@ -1635,7 +1938,7 @@ def _leaves_nothing_unsettled(*, now=None):
 class GapReport:
     """One report: what it finds, and how to ask for it.
 
-    The seven are held as a list rather than as seven hard-wired pages so that
+    The eight are held as a list rather than as eight hard-wired pages so that
     the index, the routing, the report itself and the digest all read from one
     place. A report that exists but is not on the index is a finding nobody
     sees, which is the failure this whole module exists to prevent -- and one
@@ -1700,9 +2003,9 @@ class GapReportSummary:
     bound: str | None = None
 
 
-#: The seven reports, in the order the index shows them: what is declared and
+#: The eight reports, in the order the index shows them: what is declared and
 #: missing, what is arriving and unaccounted for, then the three about the
-#: centres themselves, and last the two about this tool rather than them.
+#: centres themselves, and last the three about this tool rather than them.
 GAP_REPORTS = (
     GapReport(
         slug="declared-but-silent",
@@ -1790,6 +2093,26 @@ GAP_REPORTS = (
         describe_row=_stepped_over_run_notice,
     ),
     GapReport(
+        slug="catalogues-that-keep-failing",
+        title=_("Catalogues that keep failing"),
+        description=_(
+            "Global Discovery Catalogues failing a share of their scheduled "
+            "runs while succeeding at the rest, saying how often and what the "
+            "last failure was. A catalogue failing every other run rebuilds "
+            "the registry at half the rate the schedule promises and never "
+            "reaches the staleness threshold."
+        ),
+        find_rows=catalogues_that_keep_failing,
+        count_rows=lambda *, now=None: len(
+            _catalogues_that_keep_failing(
+                now=now or dj_timezone.now(),
+                days=default_catalogue_failing_days(),
+                share=default_catalogue_failing_share(),
+            )
+        ),
+        describe_row=_failing_catalogue_notice,
+    ),
+    GapReport(
         slug=UNATTRIBUTED_MESSAGES_SLUG,
         title=_("Unattributed messages"),
         description=_(
@@ -1815,7 +2138,7 @@ def gap_report_summaries(*, now=None):
     """Every report with how much it has found, for the index.
 
     Counted rather than listed: the index exists to say which report is worth
-    opening, and building seven reports in full to show seven numbers would make
+    opening, and building eight reports in full to show eight numbers would make
     the cheapest page in the tool the most expensive.
     """
     now = now or dj_timezone.now()

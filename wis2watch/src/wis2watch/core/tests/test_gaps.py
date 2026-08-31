@@ -22,6 +22,7 @@ from wis2watch.core.analysis import (
     DeclaringCentre,
     OriginTransport,
     RegistryStanding,
+    catalogues_that_keep_failing,
     gap_report,
     gap_report_summaries,
     propagation_gaps,
@@ -1591,7 +1592,7 @@ class SteppedOverRunNoticeTests(SteppedOverRunTestCase):
 
 
 class GapReportSummaryTests(GapReportTestCase):
-    """The index that says which of the seven is worth opening."""
+    """The index that says which of the eight is worth opening."""
 
     def test_every_report_is_summarised(self):
         self.assertEqual(
@@ -1651,3 +1652,241 @@ class GapReportSummaryTests(GapReportTestCase):
 
         self.assertTrue(summary.title)
         self.assertTrue(summary.description)
+
+
+class CatalogueRunTestCase(GapReportTestCase):
+    """Catalogues with run histories behind them, seeded as the runs recorded them.
+
+    Seeded as sync logs rather than by running a sync: what is under test is
+    which of a run history the report reads, and how a run comes to fail is
+    what the sync's own tests cover.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.writer = GlobalDiscoveryCatalogue.objects.create(
+            centre_id="ca-eccc-msc-global-discovery-catalogue",
+            name="Meteorological Service of Canada",
+            base_url="https://wis2-gdc.example.ca",
+            is_writer=True,
+        )
+
+    def reader(self, centre_id="de-dwd-global-discovery-catalogue", **kwargs):
+        return GlobalDiscoveryCatalogue.objects.create(
+            centre_id=centre_id,
+            name=centre_id,
+            base_url=f"https://{centre_id}.example.int",
+            **kwargs,
+        )
+
+    def run_of(
+        self,
+        catalogue=None,
+        *,
+        status=SyncLog.SUCCESS,
+        hours_ago=1,
+        sync_type=SyncLog.CATALOGUE,
+        found=559,
+        error="",
+    ):
+        """One run of the catalogue sync, as it was recorded."""
+        started = NOW - timedelta(hours=hours_ago)
+
+        return SyncLog.objects.create(
+            catalogue=catalogue or self.writer,
+            sync_type=sync_type,
+            status=status,
+            started_at=started,
+            completed_at=started,
+            items_found=found if status != SyncLog.FAILED else 0,
+            error_message=error,
+        )
+
+    def history(self, catalogue=None, *, failed, succeeded, error="Connection aborted"):
+        """A run history: so many failures, so many runs that brought records back."""
+        for n in range(failed):
+            self.run_of(
+                catalogue, status=SyncLog.FAILED, hours_ago=n * 6 + 1, error=error
+            )
+
+        for n in range(succeeded):
+            self.run_of(catalogue, hours_ago=(failed + n) * 6 + 1)
+
+    def report(self, **kwargs):
+        return catalogues_that_keep_failing(now=NOW, **kwargs)
+
+    def counted(self):
+        return {
+            summary.slug: summary.count for summary in gap_report_summaries(now=NOW)
+        }["catalogues-that-keep-failing"]
+
+
+class CataloguesThatKeepFailingTests(CatalogueRunTestCase):
+    """A catalogue whose runs fail some of the time and succeed the rest.
+
+    This is the failure ADR-0004's staleness check cannot see. The writing
+    catalogue was failing about half its six-hourly runs on refused
+    connections, and because every other run brought the registry back the
+    24-hour threshold was never reached: nothing was ever announced, the
+    registry was rebuilt at half the rate it was supposed to be, and the only
+    evidence was seven rows in a sync log nobody opens.
+    """
+
+    def test_a_catalogue_failing_half_its_runs_is_reported(self):
+        self.history(failed=14, succeeded=14)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.centre_id, "ca-eccc-msc-global-discovery-catalogue")
+        self.assertEqual(row.runs, 28)
+        self.assertEqual(row.failures, 14)
+        self.assertEqual(row.share, 50)
+
+    def test_a_catalogue_that_answers_every_time_is_not_reported(self):
+        self.history(failed=0, succeeded=28)
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_catalogue_failing_the_odd_run_is_not_reported(self):
+        """One blip in a week is the schedule working, not a finding."""
+        self.history(failed=1, succeeded=27)
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_catalogue_failing_every_run_is_reported_too(self):
+        """It is stale as well, and announced as such; that is a different reader."""
+        self.history(failed=28, succeeded=0)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.share, 100)
+
+    def test_too_few_runs_to_judge_is_not_a_finding(self):
+        """A fresh installation with one failed run behind it has no rate yet."""
+        self.history(failed=2, succeeded=0)
+
+        self.assertEqual(self.report(), [])
+
+    def test_runs_older_than_the_window_are_not_counted(self):
+        self.history(failed=14, succeeded=14)
+        self.run_of(status=SyncLog.FAILED, hours_ago=24 * 30)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.runs, 28)
+
+    def test_a_partial_run_reached_the_catalogue_and_is_not_a_failure(self):
+        self.history(failed=0, succeeded=20)
+
+        for n in range(8):
+            self.run_of(status=SyncLog.PARTIAL, hours_ago=n * 6 + 3)
+
+        self.assertEqual(self.report(), [])
+
+    def test_another_sync_logged_against_the_catalogue_is_not_evidence(self):
+        self.history(failed=0, succeeded=28)
+
+        for n in range(20):
+            self.run_of(
+                status=SyncLog.FAILED,
+                sync_type=SyncLog.WILDCARD_SWEEP,
+                hours_ago=n + 1,
+            )
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_catalogue_switched_off_is_not_reported(self):
+        self.history(failed=14, succeeded=14)
+        self.writer.is_active = False
+        self.writer.save()
+
+        self.assertEqual(self.report(), [])
+
+    def test_the_row_says_which_of_them_writes_the_registry(self):
+        self.history(failed=14, succeeded=14)
+        self.history(self.reader(), failed=14, succeeded=14)
+
+        writing = {row.centre_id: row.is_writer for row in self.report()}
+
+        self.assertEqual(
+            writing,
+            {
+                "ca-eccc-msc-global-discovery-catalogue": True,
+                "de-dwd-global-discovery-catalogue": False,
+            },
+        )
+
+    def test_the_writer_is_listed_first(self):
+        """The registry is one catalogue's to build; the others cost nothing yet."""
+        self.history(self.reader(), failed=28, succeeded=0)
+        self.history(failed=14, succeeded=14)
+
+        self.assertTrue(self.report()[0].is_writer)
+
+    def test_the_row_carries_what_the_last_failure_said(self):
+        self.history(
+            failed=14, succeeded=14, error="Connection aborted, RemoteDisconnected"
+        )
+
+        (row,) = self.report()
+
+        self.assertIn("RemoteDisconnected", row.last_error)
+
+    def test_the_row_says_when_records_last_came_back(self):
+        self.history(failed=14, succeeded=14)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.records_last_read_at, NOW - timedelta(hours=14 * 6 + 1))
+
+    def test_a_catalogue_that_has_never_brought_records_back_says_so(self):
+        self.history(failed=28, succeeded=0)
+
+        (row,) = self.report()
+
+        self.assertIsNone(row.records_last_read_at)
+
+    def test_the_index_counts_what_the_report_lists(self):
+        self.history(failed=14, succeeded=14)
+
+        self.assertEqual(self.counted(), 1)
+        self.assertEqual(self.counted(), len(self.report()))
+
+    def test_the_share_it_takes_to_be_reported_is_a_setting(self):
+        self.history(failed=3, succeeded=25)
+
+        with override_settings(WIS2WATCH_CATALOGUE_FAILING_SHARE=10):
+            self.assertEqual(len(self.report()), 1)
+
+
+class FailingCatalogueNoticeTests(CatalogueRunTestCase):
+    """The same finding as the sentence the morning digest carries."""
+
+    def notice(self):
+        report = gap_report("catalogues-that-keep-failing")
+
+        return report.describe_row(self.report()[0])
+
+    def test_the_notice_names_the_catalogue_and_how_often_it_fails(self):
+        self.history(failed=14, succeeded=14)
+
+        notice = self.notice()
+
+        self.assertIn("ca-eccc-msc-global-discovery-catalogue", notice.summary)
+        self.assertIn("14 of 28", notice.summary)
+
+    def test_the_notice_says_which_of_them_writes_the_registry(self):
+        self.history(failed=14, succeeded=14)
+
+        self.assertIn("writ", self.notice().summary)
+
+    def test_the_notice_quotes_the_last_failure(self):
+        self.history(failed=14, succeeded=14, error="Max retries exceeded")
+
+        self.assertIn("Max retries exceeded", self.notice().summary)
+
+    def test_it_is_keyed_on_the_catalogue_rather_than_on_the_run(self):
+        """A catalogue failing all week is one finding, announced once."""
+        self.history(failed=14, succeeded=14)
+
+        self.assertEqual(self.notice().key, "ca-eccc-msc-global-discovery-catalogue")

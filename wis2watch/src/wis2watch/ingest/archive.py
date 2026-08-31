@@ -119,6 +119,12 @@ def fetch_archive_pages(source, since, until, max_pages=MAX_ARCHIVE_PAGES):
     Paging follows the server's own ``next`` link, which carries the interval
     forward -- a resumed page that dropped it would read on through the whole
     archive believing it was still inside the window.
+
+    Asked once. The scheduled poll asks hourly for a window six hours deep, so
+    every message here is fetched six times over before it falls out of it: a
+    poll that fails has already been retried five times and will be five more,
+    and the centres this path exists for are precisely the ones whose servers
+    hang. What a retry would buy is redundancy the window already has.
     """
     return fetch_pages(
         archive_items_url(source),
@@ -130,6 +136,7 @@ def fetch_archive_pages(source, since, until, max_pages=MAX_ARCHIVE_PAGES):
         verify=source.node.verify_ssl,
         read_from=f"{source.owning_centre_id}'s message archive",
         max_pages=max_pages,
+        attempts=1,
     )
 
 

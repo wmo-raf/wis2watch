@@ -491,7 +491,7 @@ class NodeOverviewViewTests(TestCase):
 
 
 class GapReportViewTests(TestCase):
-    """The seven reports, and the ways somebody arrives at one.
+    """The eight reports, and the ways somebody arrives at one.
 
     What the reports find is the analysis seam's business; what is guarded here
     is that each of them can actually be reached and rendered, since a finding
@@ -576,6 +576,33 @@ class GapReportViewTests(TestCase):
                 status=status,
                 started_at=dj_timezone.now() - timedelta(days=days_ago),
                 error_message="connection refused" if status == SyncLog.FAILED else "",
+            )
+        # A catalogue answering half the time: half its runs brought the
+        # registry back and half were refused, which is the row that has a
+        # rate on it rather than a failure.
+        catalogue = GlobalDiscoveryCatalogue.objects.create(
+            centre_id="ca-eccc-msc-global-discovery-catalogue",
+            name="Meteorological Service of Canada",
+            base_url="https://wis2-gdc.example.ca",
+            is_writer=True,
+        )
+        for hours_ago, status in (
+            (6, SyncLog.FAILED),
+            (12, SyncLog.SUCCESS),
+            (18, SyncLog.FAILED),
+            (24, SyncLog.SUCCESS),
+        ):
+            SyncLog.objects.create(
+                catalogue=catalogue,
+                sync_type=SyncLog.CATALOGUE,
+                status=status,
+                started_at=dj_timezone.now() - timedelta(hours=hours_ago),
+                items_found=0 if status == SyncLog.FAILED else 559,
+                error_message=(
+                    "('Connection aborted.', RemoteDisconnected(...))"
+                    if status == SyncLog.FAILED
+                    else ""
+                ),
             )
         # A run that reached its source and lost a record out of what it read.
         # Against another of the centre's syncs on purpose: a newer station

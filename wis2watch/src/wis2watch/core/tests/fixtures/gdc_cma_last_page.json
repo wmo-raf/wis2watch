@@ -1,0 +1,370 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "id": "urn:wmo:md:ca-eccc-msc:92c24ae8-3e3a-4264-b8b0-a2a53448f186",
+      "conformsTo": [
+        "http://wis.wmo.int/spec/wcmp/2/conf/core",
+        "http://www.opengis.net/spec/ogcapi-records-1/1.0/req/record-core"
+      ],
+      "type": "Feature",
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [
+              -172.17,
+              36.5
+            ],
+            [
+              -172.17,
+              83.6
+            ],
+            [
+              -10.42,
+              83.6
+            ],
+            [
+              -10.42,
+              36.5
+            ],
+            [
+              -172.17,
+              36.5
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "title": "Marine Standard Forecast Zones",
+        "description": "The Marine Standard Forecast Zones layer is a collection of forecast location polygons that represents bounded (zone) locations at the Marine Program Standard level. The Marine Program standard level is used in most forecasts, warnings, watches, advisories and special marine weather statements. This layer is comprised mainly of water based Marine regions, Met Areas, Lakes, Great Lakes and many of the larger Inland water bodies. The layer is further comprised of four depictions, cartographic detailed (with proper shorelines and high resolution polygons), cartographic coarse (with generalized shorelines and low resolution polygons), and digital exaggerated (with exaggerated shorelines and low resolution polygons) and the hybrid (mix of cartographic detail and exaggerated). The digital layer (exaggerated) is a collection of polygons where shoreline boundaries are stretched inland. In this \"Exaggerated\" part of the layer, the boundaries are made smooth to reduce the number of polygon vertices. Boundaries of the forecast regions of this hybrid set are derived from the polygon boundaries of both the exaggerated digital, and the cartographic detailed set. Polygon boundaries along the shoreline of this set follow the exaggerated boundaries while the inland boundaries follow the detailed lines. The Marine Standard Forecast Zones layer is also presented in the polygon package in two coordinate systems, \"Projected\" (Lambert Conic Conformal) and \"Unprojected\" (Geographical Coordinated System).",
+        "themes": [
+          {
+            "concepts": [
+              {
+                "id": "Weather forecasts"
+              },
+              {
+                "id": "Weather warnings"
+              }
+            ],
+            "scheme": "https://canada.multites.net/cst/EAEAD1E6-7DD2-4997-BE7F-40BFB1CBE8A2/CST20230912.rdf"
+          },
+          {
+            "concepts": [
+              {
+                "id": "weather"
+              }
+            ],
+            "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+          }
+        ],
+        "type": "dataset",
+        "language": {
+          "code": "en"
+        },
+        "created": "2013-08-02T00:00:00Z",
+        "rights": "Open Government Licence - Canada (https://open.canada.ca/en/open-government-licence-canada)",
+        "contacts": [
+          {
+            "addresses": [
+              {
+                "deliveryPoint": [
+                  "77 Westmorland Street, suite 260"
+                ],
+                "city": "Fredericton",
+                "administrativeArea": "New Brunswick",
+                "postalCode": "E3B 6Z4",
+                "country": "Canada"
+              }
+            ],
+            "roles": [
+              "host"
+            ],
+            "organization": "Government of Canada; Environment and Climate Change Canada; Meteorological Service of Canada",
+            "name": "National Inquiry Response Team / Équipe nationale de réponse des demandes du public",
+            "position": "National Inquiry Response Team",
+            "hoursOfService": "0700h - 1500h EST",
+            "contactInstructions": "email",
+            "phones": [
+              {
+                "value": "+18199972800"
+              }
+            ],
+            "emails": [
+              {
+                "value": "ECWeather-Meteo@ec.gc.ca"
+              }
+            ],
+            "links": [
+              {
+                "rel": "canonical",
+                "type": "text/html",
+                "href": "https://www.canada.ca/en/environment-climate-change.html"
+              }
+            ]
+          }
+        ],
+        "keywords": [
+          "Polygons",
+          "Boundaries",
+          "Shapes",
+          "Forecast zones",
+          "Forecast sites",
+          "Forecast locations",
+          "Shape files",
+          "Locations",
+          "CLC",
+          "Marine program",
+          "Standard level",
+          "Weather and Climate",
+          "National (CA)",
+          "Geography"
+        ],
+        "wmo:dataPolicy": "core"
+      },
+      "links": [
+        {
+          "rel": "license",
+          "href": "https://eccc-msc.github.io/open-data/licence/readme_en",
+          "type": "text/html",
+          "title": "Environment and Climate Change Canada Data Servers End-use Licence"
+        },
+        {
+          "type": "application/geo+json",
+          "title": "Notifications from Brazil Instituto Nacional de Meteorologia Global Broker",
+          "rel": "items",
+          "href": "mqtts://everyone:everyone@globalbroker.inmet.gov.br:8883",
+          "channel": "cache/a/wis2/ca-eccc-msc/data/core/weather/experimental",
+          "name": ""
+        },
+        {
+          "type": "application/geo+json",
+          "title": "Notifications from Météo-France Global Broker",
+          "rel": "items",
+          "href": "mqtts://everyone:everyone@globalbroker.meteo.fr:8883",
+          "channel": "cache/a/wis2/ca-eccc-msc/data/core/weather/experimental",
+          "name": ""
+        },
+        {
+          "type": "application/geo+json",
+          "title": "Notifications from China Meteorological Administration Global Broker",
+          "rel": "items",
+          "href": "mqtts://everyone:everyone@gb.wis.cma.cn:8883",
+          "channel": "cache/a/wis2/ca-eccc-msc/data/core/weather/experimental",
+          "name": ""
+        }
+      ],
+      "time": {
+        "interval": [
+          "2013-08-02",
+          ".."
+        ]
+      },
+      "generated_by": "pygeometa 0.18.dev0"
+    },
+    {
+      "id": "urn:wmo:md:ca-eccc-msc:6b02c778-8eaa-46f5-8786-ae80b0ea0f72",
+      "conformsTo": [
+        "http://wis.wmo.int/spec/wcmp/2/conf/core",
+        "http://www.opengis.net/spec/ogcapi-records-1/1.0/req/record-core"
+      ],
+      "type": "Feature",
+      "geometry": {
+        "type": "MultiPolygon",
+        "coordinates": [
+          [
+            [
+              [
+                -174.894,
+                13.929
+              ],
+              [
+                -174.894,
+                68.855
+              ],
+              [
+                -49.941,
+                68.855
+              ],
+              [
+                -49.941,
+                13.929
+              ],
+              [
+                -174.894,
+                13.929
+              ]
+            ]
+          ]
+        ]
+      },
+      "properties": {
+        "title": "Dynamic Radar Composite Coverage",
+        "description": "Radar coverage is provided to dynamically display the zones covered by the radars every 6 minutes, and to provide information on the availability (or not) of the contributing radars as well as on the areas of overlap.",
+        "themes": [
+          {
+            "concepts": [
+              {
+                "id": "Radar"
+              },
+              {
+                "id": "Remote sensing"
+              },
+              {
+                "id": "Weather"
+              }
+            ],
+            "scheme": "https://canada.multites.net/cst/EAEAD1E6-7DD2-4997-BE7F-40BFB1CBE8A2/CST20230912.rdf"
+          },
+          {
+            "concepts": [
+              {
+                "id": "weather"
+              }
+            ],
+            "scheme": "https://codes.wmo.int/wis/topic-hierarchy/earth-system-discipline"
+          }
+        ],
+        "type": "dataset",
+        "language": {
+          "code": "en"
+        },
+        "created": "2022-11-04T00:00:00Z",
+        "rights": "Open Government Licence - Canada (https://open.canada.ca/en/open-government-licence-canada)",
+        "formats": [
+          {
+            "name": "WMS"
+          }
+        ],
+        "contacts": [
+          {
+            "addresses": [
+              {
+                "deliveryPoint": [
+                  "77 Westmorland Street, suite 260"
+                ],
+                "city": "Fredericton",
+                "administrativeArea": "New Brunswick",
+                "postalCode": "E3B 6Z4",
+                "country": "Canada"
+              }
+            ],
+            "roles": [
+              "host"
+            ],
+            "organization": "Government of Canada; Environment and Climate Change Canada; Meteorological Service of Canada",
+            "name": "National Inquiry Response Team / Équipe nationale de réponse des demandes du public",
+            "position": "National Inquiry Response Team",
+            "hoursOfService": "0700h - 1500h EST",
+            "contactInstructions": "email",
+            "phones": [
+              {
+                "value": "+18199972800"
+              }
+            ],
+            "emails": [
+              {
+                "value": "ECWeather-Meteo@ec.gc.ca"
+              }
+            ],
+            "links": [
+              {
+                "rel": "canonical",
+                "type": "text/html",
+                "href": "https://www.canada.ca/en/environment-climate-change.html"
+              }
+            ]
+          }
+        ],
+        "keywords": [
+          "Atmospheric conditions",
+          "Meteorology",
+          "Radar coverage",
+          "Weather and Climate",
+          "National (CA)",
+          "Atmosphere"
+        ],
+        "wmo:dataPolicy": "core"
+      },
+      "links": [
+        {
+          "href": "https://geo.weather.gc.ca/geomet?lang=en&service=WMS&request=GetCapabilities&layers=RADAR_COVERAGE_RRAI",
+          "type": "application/xml",
+          "rel": "data",
+          "title": "Dynamic radar coverage (Rain) (1 km)"
+        },
+        {
+          "href": "https://eccc-msc.github.io/open-data/licence/readme_en",
+          "type": "text/html",
+          "rel": "license",
+          "title": "Environment and Climate Change Canada Data Servers End-use Licence"
+        },
+        {
+          "type": "application/geo+json",
+          "title": "Notifications from Brazil Instituto Nacional de Meteorologia Global Broker",
+          "rel": "items",
+          "href": "mqtts://everyone:everyone@globalbroker.inmet.gov.br:8883",
+          "channel": "",
+          "name": ""
+        },
+        {
+          "type": "application/geo+json",
+          "title": "Notifications from Météo-France Global Broker",
+          "rel": "items",
+          "href": "mqtts://everyone:everyone@globalbroker.meteo.fr:8883",
+          "channel": "",
+          "name": ""
+        },
+        {
+          "type": "application/geo+json",
+          "title": "Notifications from China Meteorological Administration Global Broker",
+          "rel": "items",
+          "href": "mqtts://everyone:everyone@gb.wis.cma.cn:8883",
+          "channel": "",
+          "name": ""
+        }
+      ],
+      "time": {
+        "interval": [
+          "2018-04-25",
+          ".."
+        ]
+      },
+      "generated_by": "pygeometa 0.22.dev1"
+    }
+  ],
+  "links": [
+    {
+      "rel": "self",
+      "type": "application/geo+json",
+      "title": "This document as GeoJSON",
+      "href": "https://gdc.wis.cma.cn/api/collections/wis2-discovery-metadata/items?limit=1&f=json",
+      "hreflang": "en-US"
+    },
+    {
+      "rel": "alternate",
+      "type": "text/html",
+      "title": "This document as HTML",
+      "href": "https://gdc.wis.cma.cn/collections/wis2-discovery-metadata/items?limit=1&f=html",
+      "hreflang": "en-US"
+    },
+    {
+      "rel": "collection",
+      "type": "application/json",
+      "title": "Collection URL",
+      "href": "https://gdc.wis.cma.cn/api/collections/wis2-discovery-metadata",
+      "hreflang": "en-US"
+    },
+    {
+      "rel": "next",
+      "type": "application/geo+json",
+      "title": "items (next)",
+      "href": "https://gdc.wis.cma.cn/api/collections/wis2-discovery-metadata/items?limit=1&offset=1",
+      "hreflang": "en-US"
+    }
+  ],
+  "numberMatched": 560,
+  "numberReturned": 2,
+  "distributedFeatures": []
+}

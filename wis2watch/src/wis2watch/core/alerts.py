@@ -78,7 +78,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from django.conf import settings
-from django.db.models import F
 from django.template.loader import render_to_string
 from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext as _
@@ -752,13 +751,12 @@ def _registry_last_rebuilt(writer):
     datasets. That a writer keeps losing the same nine is a real finding and a
     different one, about the region's records rather than about this tool's
     reach, and it is reported as a gap: see ``syncs_stepping_over_records``.
+
+    Which runs those are is ``SyncLog``'s to say, because the report that
+    names a catalogue failing a share of its runs asks the same question about
+    the same rows and the two must not answer it differently.
     """
-    last = (
-        _runs_against(writer)
-        .filter(items_found__gt=F("items_errored"))
-        .exclude(status=SyncLog.FAILED)
-        .first()
-    )
+    last = _runs_against(writer).brought_records_back().first()
 
     if last is None:
         return None

@@ -8,6 +8,8 @@ suggest.
 The first three were captured on **2026-08-11**, the node station registry on
 **2026-08-12**, and the two node message archives on **2026-08-13**.
 
+The CMA paging capture is later, on **2026-08-31**.
+
 ## `global_broker_notifications.jsonl`
 
 WIS2 Notification Messages taken off the Météo-France Global Broker
@@ -164,6 +166,31 @@ in `properties.datetime`: at capture, a window of `10:00Z/11:00Z` returned
 notifications published between 10:09 and 10:24 whose observation times were
 all 09:00. That is what makes the reply comparable with what the Global Broker
 carried — the same claim, by the same publisher, about the same moment.
+
+## `gdc_cma_last_page.json`
+
+The **last** page of the Chinese Global Discovery Catalogue's discovery
+metadata (`https://gdc.wis.cma.cn/collections/wis2-discovery-metadata/items`),
+requested at `limit=500&offset=500`. The envelope is as returned; the feature
+list is a two-record subset of the 60 that came back, with `numberReturned`
+set to that subset and `numberMatched` left at the 560 the catalogue really
+holds.
+
+Captured for one thing only: **the `next` link is wrong, and wrong the same way
+on every page.** Sixty records into the collection, having already served 500,
+the response still offers
+
+```json
+{"rel": "next", "href": ".../items?limit=1&offset=1"}
+```
+
+Asked at `offset=550`, `560` and `600` — the last two returning no features at
+all — the catalogue offers the identical link. Its `self` link is stale in the
+same way, saying `limit=1&f=json` for a request that asked for 500. So a reader
+following the link as given walks the second record of the collection forever,
+which is why this catalogue had never once completed a run and why
+`fetch_pages` now refuses a link that resumes behind what it has read. See
+ADR-0012.
 
 ## Refreshing a fixture
 

@@ -2,7 +2,7 @@
 
 The gap reports find the problems nobody was looking for, which is worth
 nothing if nobody looks at the reports. This is the part that goes the other
-way -- a scheduled run that reads the same seven reports the index does and
+way -- a scheduled run that reads the same eight reports the index does and
 mails what is different from the last time somebody was told.
 
 Only the difference. A digest that repeated yesterday's eight hundred silent
