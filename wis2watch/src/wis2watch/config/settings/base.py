@@ -415,6 +415,14 @@ WIS2WATCH_ATTRIBUTION_WINDOW_HOURS = env.int("WIS2WATCH_ATTRIBUTION_WINDOW_HOURS
 # other answer the tool gives stays good.
 WIS2WATCH_REGISTRY_UNANSWERED_HOURS = env.int("WIS2WATCH_REGISTRY_UNANSWERED_HOURS", 48)
 
+# Over how many days a Global Discovery Catalogue's runs are judged, and how
+# many of them may fail before the gap reports name it, as a percentage. This
+# is the failure the staleness alert cannot see: a catalogue failing every
+# other run rebuilds the registry every twelve hours instead of every six,
+# never reaches the staleness threshold, and is announced by nothing.
+WIS2WATCH_CATALOGUE_FAILING_DAYS = env.int("WIS2WATCH_CATALOGUE_FAILING_DAYS", 7)
+WIS2WATCH_CATALOGUE_FAILING_SHARE = env.int("WIS2WATCH_CATALOGUE_FAILING_SHARE", 20)
+
 # Who is told what changed, and who is told when the tool itself has stopped
 # working. There is one operator of a regional diagnostic tool rather than a
 # subscriber list, so both are configuration. Leaving the alert list unset

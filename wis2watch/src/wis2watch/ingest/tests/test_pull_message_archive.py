@@ -111,6 +111,16 @@ class PullTests(PullMessageArchiveTestCase):
         self.assertEqual(fetch_pages.call_args.kwargs["max_pages"], 2000)
         self.assertEqual(fetch_pages.call_args.kwargs["params"]["limit"], PAGE_SIZE)
 
+    def test_an_archive_is_asked_once_because_the_window_overlaps(self):
+        """A scheduled poll asks hourly for six hours, so every message here is
+        fetched six times over: a retry would buy redundancy it already has."""
+        with mock.patch("wis2watch.ingest.archive.fetch_pages") as fetch_pages:
+            fetch_pages.return_value = iter([load_json_fixture(CAPTURE)])
+
+            self.run_command("sc-seychelles-met", hours=2)
+
+        self.assertEqual(fetch_pages.call_args.kwargs["attempts"], 1)
+
     def test_it_reports_what_it_fetched_through_the_usual_sync_log(self):
         output = self.run_command("sc-seychelles-met", hours=2)
 

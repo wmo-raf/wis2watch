@@ -6,7 +6,9 @@ collection page by page and writes what it can. Two things are therefore said
 once, here, rather than once per sync:
 
 - **How a collection is read.** Page after page, following the server's own
-  ``next`` link, with a ceiling so that links which cycle cannot spin.
+  ``next`` link while it advances, resuming from an offset of our own where it
+  does not, retrying a page whose transport failed, and with a ceiling so that
+  links which cycle cannot spin.
 - **What became of the records.** The same four counts, and a run that stepped
   over a record it could not store succeeded only partly -- and says which
   records those were and what refused them, because the count on its own is a
@@ -21,14 +23,23 @@ What differs between the syncs -- which URL, which credentials, how long to
 wait -- stays with the sync that knows it.
 """
 
+import logging
+import time
 from dataclasses import dataclass, field
 
 import requests
 from django.contrib.gis.geos import Point
 from django.utils import timezone as dj_timezone
 
-from .interpretation import next_page_url
+from .interpretation import (
+    next_page_url,
+    page_offset,
+    records_matched,
+    records_returned,
+)
 from .models import SyncLog, one_line
+
+logger = logging.getLogger(__name__)
 
 CREATED = "created"
 UPDATED = "updated"
@@ -43,6 +54,39 @@ ERRORED = "errored"
 MAX_PAGES = 50
 
 FETCH_TIMEOUT = 60
+
+#: The query parameter a read of our own resumes at, when the server's own
+#: link will not.
+OFFSET = "offset"
+
+#: How many times one page is asked for before the read is given up.
+#:
+#: A page is a GET and asking again costs the source one more read of
+#: something it is already serving, so this is set by what a blip looks like
+#: rather than by what the source can bear. What it is set against is the
+#: writing catalogue's four-megabyte page: eight seconds of transfer, over
+#: which a refused connection or a body cut off partway was failing about half
+#: its six-hourly runs, and one further attempt clears nearly all of that. A
+#: source that has failed three times in half a minute is not blipping, and
+#: going on asking would turn a sync into a load test.
+FETCH_ATTEMPTS = 3
+
+#: How long to wait after a failed attempt, in seconds, doubling each time. A
+#: connection refused because the host is restarting is not helped by asking
+#: again immediately, and the whole ladder still costs a run six seconds.
+FETCH_BACKOFF_SECONDS = 2
+
+#: What counts as the transport failing rather than the source answering.
+#: These are the three the writing catalogue actually failed on -- a connection
+#: refused or timed out, a connection closed without a reply, a body that
+#: stopped partway -- and they have in common that the source said nothing.
+#: An HTTP status is deliberately not here: a 404 or a 500 is an answer, and
+#: asking a source to repeat an answer is not a retry but a hope.
+TRANSPORT_FAULTS = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
 
 #: How many of a run's stepped-over records are recorded with their reasons.
 #: A run that steps over a handful has a list of records somebody can go and
@@ -69,6 +113,17 @@ class PagingDidNotTerminate(Exception):
     """
 
 
+class ReadKeptFailing(Exception):
+    """Raised when every attempt at one page failed before the source answered.
+
+    Named apart from whatever ``requests`` raised, because what a reader needs
+    from the sync log is not that a connection was aborted -- it is that this
+    source was asked three times over half a minute and said nothing each time.
+    The last fault is quoted inside, since a refused connection, a read timeout
+    and a body cut off partway are three different conversations.
+    """
+
+
 def fetch_pages(
     url,
     params=None,
@@ -76,6 +131,7 @@ def fetch_pages(
     timeout=FETCH_TIMEOUT,
     read_from="",
     max_pages=MAX_PAGES,
+    attempts=FETCH_ATTEMPTS,
 ):
     """Every page of an OGC API Features collection, exactly as returned.
 
@@ -86,34 +142,144 @@ def fetch_pages(
     filter would page on through the whole collection believing it was still
     reading the window it asked for.
 
-    ``read_from`` names what is being read, for the failure raised when the
-    collection never stops offering another page. ``max_pages`` is how many it
-    is given to stop, and is worth raising only where the collection really is
-    longer than a registry.
+    It follows that link only while it advances. See :func:`_next_page` for the
+    catalogue that made that a rule rather than an assumption, and for what
+    this does instead.
+
+    ``read_from`` names what is being read, for the failures raised when the
+    source will not answer and when the collection never stops offering another
+    page. ``max_pages`` is how many it is given to stop, and is worth raising
+    only where the collection really is longer than a registry. ``attempts`` is
+    how many times a page whose transport failed is asked for, and is worth
+    lowering to one where the schedule is itself the retry.
     """
+    resume_from, query = url, params
+    read = 0
+
     for _ in range(max_pages):
-        response = requests.get(
+        payload = _fetch_page(
             url,
-            params=params,
-            timeout=timeout,
-            headers={"Accept": "application/json"},
+            params,
             verify=verify,
+            timeout=timeout,
+            read_from=read_from,
+            attempts=attempts,
         )
-        response.raise_for_status()
-        payload = response.json()
 
         yield payload
 
-        url = next_page_url(payload)
+        read += records_returned(payload)
+        url, params = _next_page(
+            payload, resume_from=resume_from, query=query, read=read
+        )
+
         if not url:
             return
-
-        params = None
 
     raise PagingDidNotTerminate(
         f"stopped paging {read_from} after {max_pages} pages; "
         "its next links do not terminate"
     )
+
+
+def _fetch_page(url, params, *, verify, timeout, read_from, attempts):
+    """One page, asked for again while it is the transport that is failing.
+
+    A page is a GET, so asking again is safe in the way retrying a write never
+    is. What makes it worth doing is what one blip costs: a catalogue sync is
+    one four-megabyte transfer every six hours, a connection closed anywhere
+    inside it failed the whole run, and the registry then stood unwritten until
+    the next one -- which is how a source that answers most of the time came to
+    fail half of its runs.
+
+    Only the transport is retried. A source that answered with a status has
+    said something, and asking it to say it again is a hope rather than a
+    retry; the same goes for a body that arrived whole and was not JSON.
+
+    ``attempts`` is the caller's, because what one lost run costs is the
+    caller's. A read on an hourly schedule, or one whose window overlaps the
+    last five, has a retry already and does not need a second one against
+    fifty-four hosts of which many hang until the timeout.
+    """
+    for attempt in range(1, attempts + 1):
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                timeout=timeout,
+                headers={"Accept": "application/json"},
+                verify=verify,
+            )
+            response.raise_for_status()
+
+            return response.json()
+        except TRANSPORT_FAULTS as fault:
+            if attempt == attempts:
+                raise ReadKeptFailing(
+                    f"{read_from or url} did not answer in {attempts} "
+                    f"attempts; the last of them: {fault}"
+                ) from fault
+
+            logger.warning(
+                "Attempt %s of %s reading %s failed, waiting to ask again: %s",
+                attempt,
+                attempts,
+                read_from or url,
+                fault,
+            )
+
+            time.sleep(FETCH_BACKOFF_SECONDS * 2 ** (attempt - 1))
+
+
+def _next_page(payload, *, resume_from, query, read):
+    """Where the read goes after this page, and with what query.
+
+    The server's own link, while it advances. A link that says it resumes at an
+    offset behind what has already been read is not a next page: it is this
+    page again, or one before it. That is not a hypothetical -- one of the
+    three Global Discovery Catalogues serves ``limit=1&offset=1`` as its next
+    link on every page it has, so a reader following it as given walks the
+    second record of the collection forever and reaches the ceiling instead of
+    the end. Its registry had never once been read through.
+
+    A link naming no offset at all is followed as given. It may be paging by
+    something this knows nothing about, and refusing a cursor for not being an
+    offset would break every server that pages properly by one.
+
+    Where the link will not advance, the read resumes from an offset of its
+    own -- the original URL and the original query, which is what keeps a
+    filtered read inside its filter, plus how much has been read. That is only
+    worth doing while the collection says there is more to come, and only
+    while pages keep coming back with records in them: a server that answers
+    an offset it does not understand with the same page every time would
+    otherwise be asked until the ceiling.
+    """
+    following = next_page_url(payload)
+    offset = page_offset(following)
+
+    if following and (offset is None or offset >= read):
+        return following, None
+
+    if not _more_to_read(payload, read=read):
+        return None, None
+
+    return resume_from, {**(query or {}), OFFSET: read}
+
+
+def _more_to_read(payload, *, read):
+    """Whether the collection says there is more of it than has been read.
+
+    Says, rather than is guessed at. A collection that reports no count has
+    told the reader nothing, and a read that resumed on a guess would be
+    inventing the evidence it acts on -- so it stops where the server's own
+    links stopped advancing, which is what it did before any of this.
+    """
+    matched = records_matched(payload)
+
+    if matched is None or not records_returned(payload):
+        return False
+
+    return read < matched
 
 
 def declared_position(declared):

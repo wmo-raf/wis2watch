@@ -1,0 +1,60 @@
+{% extends "wis2watchcore/gap_reports/base.html" %}
+
+{% load i18n %}
+
+{% block report_note %}
+    <p class="report-note">
+        {% trans "The registry is rebuilt from a catalogue every six hours, and every attempt leaves a sync log whether it worked or not. A catalogue that fails outright and stays failed is announced as a hard failure; one that fails half its runs and succeeds the rest is announced by nothing, because the registry does keep coming back — at half the rate the schedule promises. This is where the rate is said." %}
+    </p>
+{% endblock %}
+
+{% block table_head %}
+    <th>{% trans "Catalogue" %}</th>
+    <th>{% trans "Standing" %}</th>
+    <th class="numeric">{% trans "Runs" %}</th>
+    <th class="numeric">{% trans "Failed" %}</th>
+    <th>{% trans "Records last read" %}</th>
+    <th>{% trans "What the last failure said" %}</th>
+{% endblock %}
+
+{% block table_row %}
+    <td>
+        <code>{{ row.centre_id }}</code>
+        <div class="row-detail">{{ row.name }}</div>
+    </td>
+    <td>
+        {% if row.is_writer %}
+            <span class="badge badge-warning">{{ row.standing_label }}</span>
+        {% else %}
+            <span class="badge badge-quiet">{{ row.standing_label }}</span>
+        {% endif %}
+    </td>
+    <td class="numeric">{{ row.runs }}</td>
+    {# The column the report exists for: one failure is a blip, a share is a rate. #}
+    <td class="numeric">
+        <span class="badge badge-warning">{{ row.failures }} ({{ row.share }}%)</span>
+    </td>
+    {% comment %}
+        A catalogue with a rate and nothing here is not failing intermittently:
+        it has never once brought records back, and is down rather than flaky.
+    {% endcomment %}
+    <td>
+        {% if row.records_last_read_at %}
+            {{ row.records_last_read_at|date:"Y-m-d H:i" }}
+        {% else %}
+            {% trans "Never" %}
+        {% endif %}
+    </td>
+    <td class="wrapping">
+        {% if row.last_error %}
+            {{ row.last_error }}
+            <div class="row-detail">{{ row.last_failed_at|date:"Y-m-d H:i" }}</div>
+        {% else %}
+            —
+        {% endif %}
+    </td>
+{% endblock %}
+
+{% block empty_message %}
+    {% trans "Every catalogue is answering as often as it is asked" %}
+{% endblock %}

@@ -57,6 +57,14 @@ def fetch_station_pages(node):
     The response format is whatever the stored endpoint asks for -- the URL a
     wis2box node advertises names it already -- so a page size is all that is
     added here.
+
+    Asked once, unlike a catalogue. This sync runs hourly against every centre
+    advertising a registry, a large share of them at addresses nothing answers
+    at and some of them at hosts that hang until the timeout; the schedule is
+    already the retry, and asking each of them three times an hour would spend
+    the difference on the centres least likely to be there. A registry that
+    misses an hour of a picture that moves in months has missed nothing, which
+    is not true of a six-hourly registry rebuild.
     """
     return fetch_pages(
         node.stations_url,
@@ -64,6 +72,7 @@ def fetch_station_pages(node):
         verify=node.verify_ssl,
         timeout=FETCH_TIMEOUT,
         read_from=node.centre_id,
+        attempts=1,
     )
 
 

@@ -35,7 +35,7 @@ from .notifications import (
     parse_notification,
     station_attribution,
 )
-from .ogcapi import next_page_url
+from .ogcapi import next_page_url, page_offset, records_matched, records_returned
 from .oscar import (
     OPERATIONAL,
     OscarStation,
@@ -82,10 +82,13 @@ __all__ = [
     "is_monitored_centre_id",
     "monitored_country_code_for_centre_id",
     "next_page_url",
+    "page_offset",
     "parse_broker_url",
     "parse_notification",
     "parse_timestamp",
     "parse_topic",
+    "records_matched",
+    "records_returned",
     "station_attribution",
     "subscription_topic",
     "sweep_topic",
