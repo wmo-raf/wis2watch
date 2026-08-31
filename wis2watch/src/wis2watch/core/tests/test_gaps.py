@@ -1949,8 +1949,14 @@ class DatasetDriftTestCase(GapReportTestCase):
         at_node=False,
         heard=False,
         hours_ago=1,
+        heard_hours_ago=None,
     ):
-        """One dataset, declared by whichever sources the test names."""
+        """One dataset, declared by whichever sources the test names.
+
+        ``heard_hours_ago`` stamps the traffic apart from the declarations,
+        which is what tells a column reading the registries from one reading
+        everything that ever mentioned the dataset.
+        """
         node = self.kenya if node is None else node
         dataset = Dataset.objects.create(
             node=node,
@@ -1962,18 +1968,18 @@ class DatasetDriftTestCase(GapReportTestCase):
         )
 
         declaring = (
-            (DatasetSource.GDC, in_catalogue, self.catalogue),
-            (DatasetSource.NODE, at_node, None),
-            (DatasetSource.OBSERVED, heard, None),
+            (DatasetSource.GDC, in_catalogue, self.catalogue, hours_ago),
+            (DatasetSource.NODE, at_node, None, hours_ago),
+            (DatasetSource.OBSERVED, heard, None, heard_hours_ago or hours_ago),
         )
 
-        for source_type, declared, catalogue in declaring:
+        for source_type, declared, catalogue, said_hours_ago in declaring:
             if declared:
                 DatasetSource.objects.create(
                     dataset=dataset,
                     source_type=source_type,
                     catalogue=catalogue,
-                    last_seen=NOW - timedelta(hours=hours_ago),
+                    last_seen=NOW - timedelta(hours=said_hours_ago),
                 )
 
         return dataset
@@ -2069,6 +2075,44 @@ class DatasetDriftTests(DatasetDriftTestCase):
         self.assertEqual(row.title, "SYNOP")
         self.assertEqual(row.topic, "origin/a/wis2/ke-meteo/data/core/weather")
         self.assertEqual(row.last_declared_at, NOW - timedelta(hours=3))
+
+    def test_traffic_does_not_date_a_record_the_catalogue_has_not_touched(self):
+        """The column exists to separate a live disagreement from a stale one.
+
+        A record last confirmed in March and still receiving messages is the
+        ordinary shape of this finding, and a cell that read the traffic would
+        report it as confirmed this morning -- which is the one thing it is
+        there to say it is not.
+        """
+        self.dataset(
+            "urn:wmo:md:ke-meteo:synop",
+            in_catalogue=True,
+            heard=True,
+            hours_ago=2000,
+            heard_hours_ago=1,
+        )
+
+        (row,) = self.report()
+
+        self.assertEqual(row.last_declared_at, NOW - timedelta(hours=2000))
+        self.assertEqual(row.last_heard_at, NOW - timedelta(hours=1))
+
+    def test_a_dataset_neither_declares_has_no_declaration_to_date(self):
+        """Which is the finding, not a gap in the row: nothing declares it."""
+        self.dataset("urn:wmo:md:ke-meteo:climate", heard=True, hours_ago=6)
+
+        (row,) = self.report()
+
+        self.assertIsNone(row.last_declared_at)
+        self.assertEqual(row.last_heard_at, NOW - timedelta(hours=6))
+
+    def test_a_dataset_nothing_is_arriving_under_has_nothing_heard(self):
+        self.dataset("urn:wmo:md:ke-meteo:synop", in_catalogue=True)
+
+        (row,) = self.report()
+
+        self.assertIsNone(self.report()[0].last_heard_at)
+        self.assertIsNotNone(row.last_declared_at)
 
     def test_a_dataset_nothing_has_ever_named_carries_its_identifier(self):
         """A dataset created from traffic has no title to show."""

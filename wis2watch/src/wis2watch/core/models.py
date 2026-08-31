@@ -254,11 +254,15 @@ class WIS2Node(TimeStampedModel):
         """Whether there is anywhere to ask this centre what datasets it declares.
 
         Read before the centre is asked, and by nothing else yet -- which is
-        the narrower half of what its station counterpart does. The surfaces
-        reporting on a centre's datasets do not yet tell a centre that
-        answered and declared nothing from one nothing could ask, the
-        distinction ADR-0005 drew for stations; when one of them comes to, this
-        is the fact it reads rather than a second reading of an empty URL.
+        the narrower half of what its station counterpart does. The drift
+        report does make ADR-0005's distinction now, and makes it without
+        this: it separates the centres something has had an answer out of from
+        the centres it has not, which puts a centre with no address and a
+        centre whose address never answers on the same side of the line, where
+        that report wants them (ADR-0013). This is still the fact to read
+        wherever the two have to be told apart -- a report about unreadable
+        dataset endpoints would -- rather than a second reading of an empty
+        URL.
         """
         return bool(self.discovery_metadata_url)
 

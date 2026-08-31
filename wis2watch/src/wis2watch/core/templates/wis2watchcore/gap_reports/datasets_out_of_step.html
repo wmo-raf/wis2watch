@@ -29,14 +29,21 @@
         <span class="badge badge-warning">{{ row.drift_label }}</span>
     </td>
     {% comment %}
-        When whichever source does declare it last said so, which is what
+        When the registry that does declare it last said so, which is what
         separates a live disagreement from a record nothing has touched for
-        months. A dataset carrying no declaration at all cannot arise here --
-        it is a declaration that put every row on this page -- but a
-        declaration recorded before anything stamped one says nothing rather
-        than inventing an instant.
+        months. Empty on a row neither of them declares, which is not a gap in
+        the cell but the finding itself -- so what such a row does have is
+        said underneath it, since when the traffic was last heard is the only
+        instant it has and the one that says it is still arriving.
     {% endcomment %}
-    <td>{{ row.last_declared_at|date:"Y-m-d H:i"|default:"—" }}</td>
+    <td>
+        {{ row.last_declared_at|date:"Y-m-d H:i"|default:"—" }}
+        {% if not row.last_declared_at and row.last_heard_at %}
+            <div class="row-detail">
+                {% blocktrans with heard=row.last_heard_at|date:"Y-m-d H:i" %}last heard {{ heard }}{% endblocktrans %}
+            </div>
+        {% endif %}
+    </td>
 {% endblock %}
 
 {% block empty_message %}

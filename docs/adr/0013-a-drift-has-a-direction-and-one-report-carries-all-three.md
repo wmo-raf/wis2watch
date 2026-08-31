@@ -77,11 +77,17 @@ card, as they do for the propagation and unregistered reports, because a count
 measured against twenty-seven of thirty-two centres is exactly the thing that
 decides whether the report is worth opening.
 
-**`advertises_discovery_metadata` finally has a reader outside the sync.**
-Its docstring said the dataset surfaces had yet to make the distinction
-ADR-0005 drew for stations. This is the surface that makes it: a centre with
-no address of its own and a centre whose address never answers are the same
-absence here, and both are named in the bound.
+**The dataset surfaces make ADR-0005's distinction, and do not need the
+property to.** What that ADR insisted on is that a centre nobody asked is not
+a centre that declares nothing, and this is the first dataset surface to say
+so. But it draws the line at whether anything has ever had an answer rather
+than at whether there is anywhere to ask, because the two ways of being
+unasked are one absence here: a centre with no address and a centre whose
+address never answers have both told this report nothing, and both belong in
+the bound. So `advertises_discovery_metadata` still has no reader outside the
+sync. The report that will need it is the one about unreadable dataset
+endpoints — the not-answering report's twin, where the two absences are
+different findings and only one of them is the centre's fault.
 
 **A centre that starts answering moves its rows in, not out.** The digest
 reads new findings as news, so the first run against a centre nothing had read

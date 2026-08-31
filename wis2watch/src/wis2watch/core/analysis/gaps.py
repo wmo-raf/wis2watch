@@ -402,10 +402,19 @@ class DriftingDatasetRow:
     that column removed would be a list of identifiers somebody has to go and
     check one at a time.
 
-    ``last_declared_at`` is when whichever source does declare it last said
-    so. A catalogue-only record last confirmed this morning is a live
-    disagreement; one last confirmed in March is a record nothing has touched
-    since, and the two are different conversations.
+    ``last_declared_at`` is when the source that does declare it last said so,
+    and is read from the two registries alone. A catalogue-only record last
+    confirmed this morning is a live disagreement; one last confirmed in March
+    is a record nothing has touched since, and the two are different
+    conversations. Traffic is deliberately not in it: a dataset the catalogue
+    carries and the centre does not is out of step whether or not messages are
+    still arriving under it, and letting an arrival stamp this would date a
+    March record as confirmed today.
+
+    Which leaves the third direction with nothing here, correctly -- nothing
+    declares it -- so when it was last heard is carried beside it as
+    ``last_heard_at``. That is the only instant such a row has, and it is the
+    one that says whether the traffic nobody declared is still arriving.
     """
 
     dataset_id: int
@@ -416,6 +425,7 @@ class DriftingDatasetRow:
     topic: str
     drift: str
     last_declared_at: datetime | None
+    last_heard_at: datetime | None
 
     @property
     def drift_label(self):
@@ -1713,10 +1723,15 @@ def _nodes_answering_for_what_they_publish():
     been refusing ever since still has declarations, and they are still what
     it said.
 
-    A centre with no address of its own is not in here, for the reason it is
-    in no sync log: nothing ever went and looked. That is the fact
-    ``advertises_discovery_metadata`` names, and this is the surface its
-    docstring said would one day read it.
+    A centre with no address of its own is not in here either, for the reason
+    it is in no sync log: nothing ever went and looked. It is not asked about
+    separately, because this report has nothing to say about the difference --
+    a centre nothing could ask and a centre that would not answer have both
+    told it nothing, and both are named in the bound. Where the two do have to
+    be told apart the fact is ``advertises_discovery_metadata`` rather than an
+    absence inferred from sync logs, as ADR-0005 settled for stations; the
+    report that comes to need it is the one about unreadable endpoints, not
+    this one.
 
     A partial run answered. It reached the centre and read its records, and
     the ones it could not store are the stepped-over report's finding rather
@@ -1747,11 +1762,18 @@ def _nodes_never_answering_for_what_they_publish():
 def _datasets_out_of_step():
     """The datasets whose sources do not agree that they exist.
 
-    Counted rather than tested for existence, because three counts and the
-    newest declaration come off one pass over the declarations of each
+    Counted rather than tested for existence, because the three counts and the
+    two instants beside them come off one pass over the declarations of each
     dataset. What comes back is the three directions and nothing else: a
     dataset both registries declare is agreement, and one nothing declares and
     nothing has been heard from is a row no source stands behind at all.
+
+    The two instants are kept apart rather than maxed together, because they
+    answer different questions and one of them would swallow the other. When a
+    registry last confirmed a record is what dates the disagreement; when
+    traffic was last heard is what says the data is still coming. A single
+    newest-of-everything would date a record the catalogue has not carried
+    since March as confirmed this morning, on the strength of a message.
     """
     return (
         Dataset.objects.filter(
@@ -1767,7 +1789,16 @@ def _datasets_out_of_step():
             heard=Count(
                 "sources", filter=Q(sources__source_type=DatasetSource.OBSERVED)
             ),
-            last_declared_at=Max("sources__last_seen"),
+            last_declared_at=Max(
+                "sources__last_seen",
+                filter=Q(
+                    sources__source_type__in=(DatasetSource.GDC, DatasetSource.NODE)
+                ),
+            ),
+            last_heard_at=Max(
+                "sources__last_seen",
+                filter=Q(sources__source_type=DatasetSource.OBSERVED),
+            ),
         )
         .filter(
             Q(in_catalogue__gt=0, at_node=0)
@@ -1792,6 +1823,7 @@ def _drifting_dataset_row(dataset):
             in_catalogue=bool(dataset.in_catalogue), at_node=bool(dataset.at_node)
         ),
         last_declared_at=dataset.last_declared_at,
+        last_heard_at=dataset.last_heard_at,
     )
 
 
