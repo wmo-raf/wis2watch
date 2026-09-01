@@ -148,6 +148,11 @@ class SyncRunRow:
     is the records it read and could not store, which is what a page opened to
     ask "where did this dataset go" is actually being asked about -- and a row
     that gave only the count would answer it with a number.
+
+    ``retired`` answers the same question from the other end. A dataset that
+    has moved from this page's live list to its retired one did so on one of
+    these runs, and where its history went with it is on the run rather than
+    anywhere else.
     """
 
     run_id: int
@@ -162,9 +167,11 @@ class SyncRunRow:
     items_created: int
     items_updated: int
     items_errored: int
+    items_retired: int
     error_message: str
     stepped_over: list[dict]
     reasons_withheld: int
+    retired: list[dict]
 
     @property
     def scope_label(self):
@@ -444,9 +451,11 @@ def _sync_run_row(run, scope):
         items_created=run.items_created,
         items_updated=run.items_updated,
         items_errored=run.items_errored,
+        items_retired=run.items_retired,
         error_message=run.error_message,
         stepped_over=run.stepped_over,
         reasons_withheld=run.reasons_withheld,
+        retired=run.retired,
     )
 
 

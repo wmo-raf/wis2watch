@@ -1952,6 +1952,13 @@ class SyncLog(models.Model):
     the region or a fault in how this tool reads it, and is the difference
     between a run that says it errored on nine records and one that says which
     nine and what refused them.
+
+    ``retired`` is neither: it is what the run concluded from the source's own
+    answer -- the records it has stopped declaring -- and where the history
+    filed under each of them went. A retirement moves a centre's largest
+    observation feed from one row to another, and a count of how many rows
+    moved with no record of which datasets they moved between would be a
+    number nobody could check afterwards.
     """
 
     CATALOGUE = "catalogue"
@@ -2007,6 +2014,14 @@ class SyncLog(models.Model):
         default=0,
         help_text=_("Items the run could not store, having stepped over them"),
     )
+    items_retired = models.IntegerField(
+        default=0,
+        help_text=_("Records the source has stopped declaring, retired by this run"),
+    )
+    rollups_repointed = models.IntegerField(
+        default=0,
+        help_text=_("Hourly counts moved onto the record that really earned them"),
+    )
 
     error_message = models.TextField(
         blank=True,
@@ -2017,6 +2032,12 @@ class SyncLog(models.Model):
         default=list,
         blank=True,
         help_text=_("Which items the run could not store, and what refused each one"),
+    )
+
+    retired = models.JSONField(
+        default=list,
+        blank=True,
+        help_text=_("Which records the run retired, and where their history went"),
     )
 
     started_at = models.DateTimeField(default=dj_timezone.now)

@@ -240,8 +240,7 @@ class OperatorExpectationTests(CatalogueSyncTestCase):
 
         dataset = Dataset.objects.get(identifier=KE_DATASET)
         dataset.expected_interval_override_hours = 72
-        dataset.status = Dataset.INACTIVE
-        dataset.save()
+        dataset.save(update_fields=["expected_interval_override_hours", "modified"])
 
         changed = copy.deepcopy(self.payload)
 
@@ -253,8 +252,36 @@ class OperatorExpectationTests(CatalogueSyncTestCase):
 
         dataset.refresh_from_db()
         self.assertEqual(dataset.title, "Renamed by the catalogue")
-        self.assertEqual(dataset.status, Dataset.ACTIVE)
         self.assertEqual(dataset.expected_interval_override_hours, 72)
+
+
+class RetiredDatasetTests(CatalogueSyncTestCase):
+    """Whether a dataset still exists is the centre's to say (ADR-0014).
+
+    A retired dataset is one the catalogue carries and the centre has stopped
+    declaring, so it is exactly the record this sync reads again six hours
+    later. A run that stamped it active would undo every retirement the node
+    sync ever made, and re-attribute the traffic with it.
+    """
+
+    def test_a_retired_dataset_is_not_reinstated_by_the_catalogue(self):
+        self.sync()
+
+        dataset = Dataset.objects.get(identifier=KE_DATASET)
+        dataset.status = Dataset.INACTIVE
+        dataset.save(update_fields=["status", "modified"])
+
+        self.sync()
+
+        dataset.refresh_from_db()
+        self.assertEqual(dataset.status, Dataset.INACTIVE)
+
+    def test_a_dataset_the_catalogue_has_just_registered_is_active(self):
+        self.sync()
+
+        self.assertEqual(
+            Dataset.objects.get(identifier=KE_DATASET).status, Dataset.ACTIVE
+        )
 
 
 class NodeAddressTests(CatalogueSyncTestCase):

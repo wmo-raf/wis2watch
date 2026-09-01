@@ -623,6 +623,29 @@
                                     {% include "wis2watchcore/includes/stepped_over_records.html" with records=run.stepped_over withheld=run.reasons_withheld %}
                                 </div>
                             {% endif %}
+                            {% comment %}
+                                Where a dataset went. It leaves the live list
+                                above on one of these runs, and this is the
+                                only place that says which run, and what
+                                became of the history filed under it.
+                            {% endcomment %}
+                            {% if run.items_retired %}
+                                <div class="row-stepped-over">
+                                    {% trans "Retired:" %}
+                                    {% for record in run.retired %}
+                                        <div class="row-detail">
+                                            <code>{{ record.item }}</code> —
+                                            {% if record.moved_to %}
+                                                {% blocktrans with successor=record.moved_to count counter=record.rollups_moved %}history moved to {{ successor }} ({{ counter }} row){% plural %}history moved to {{ successor }} ({{ counter }} rows){% endblocktrans %}
+                                            {% elif record.claimed_by %}
+                                                {% blocktrans with claimants=record.claimed_by|join:", " %}history left in place; {{ claimants }} claim the topic{% endblocktrans %}
+                                            {% else %}
+                                                {% trans "history left in place" %}
+                                            {% endif %}
+                                        </div>
+                                    {% endfor %}
+                                </div>
+                            {% endif %}
                         </td>
                         <td class="numeric">{{ run.items_found }}</td>
                         <td class="numeric">{{ run.items_created }}</td>

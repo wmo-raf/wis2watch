@@ -881,6 +881,29 @@ class NodeDetailViewTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "0-404-0-KE001")
 
+    def test_a_run_that_retired_a_dataset_says_so_on_the_page(self):
+        """The dataset has left the live list, and the run says where it went."""
+        SyncLog.objects.create(
+            node=self.node,
+            sync_type=SyncLog.DISCOVERY_METADATA,
+            status=SyncLog.SUCCESS,
+            items_retired=1,
+            rollups_repointed=995,
+            retired=[
+                {
+                    "item": "urn:wmo:md:ke-kmd:kedehn",
+                    "moved_to": "urn:wmo:md:ke-kmd:aws810",
+                    "rollups_moved": 995,
+                    "claimed_by": [],
+                }
+            ],
+        )
+
+        response = self.page()
+
+        self.assertContains(response, "urn:wmo:md:ke-kmd:kedehn")
+        self.assertContains(response, "history moved to urn:wmo:md:ke-kmd:aws810")
+
     def test_a_declared_station_that_has_never_transmitted_says_so(self):
         """The declaration is confirmed hourly; only the observation is news."""
         self.assertContains(self.page(), "Declared, never heard from")
