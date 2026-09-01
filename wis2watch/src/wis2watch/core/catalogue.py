@@ -347,12 +347,16 @@ def _apply_dataset(node, discovered, catalogue):
     dataset, created = Dataset.objects.update_or_create(
         node=node,
         identifier=discovered.identifier,
+        # ``status`` is not among the defaults, and a new row takes the active
+        # one the model gives it. Whether a dataset still exists is the
+        # centre's to say rather than the catalogue's (ADR-0014): a record the
+        # catalogue carries and the centre has stopped declaring is exactly
+        # what the node sync retires, and it is exactly what this run reads
+        # again six hours later -- so a catalogue stamping it active would undo
+        # every retirement it ever made and re-attribute the traffic with it.
         defaults={
             **declared_dataset_fields(discovered),
             "last_synced": dj_timezone.now(),
-            # Datasets are the catalogue's to describe: one it still publishes
-            # is active, whatever an earlier run concluded about it.
-            "status": Dataset.ACTIVE,
         },
     )
 

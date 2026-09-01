@@ -506,6 +506,32 @@ class SyncRunTests(NodeDetailTestCase):
         (run,) = self.detail().sync_runs
 
         self.assertEqual(run.stepped_over, [])
+        self.assertEqual(run.retired, [])
+
+    def test_a_run_that_retired_a_dataset_says_where_its_history_went(self):
+        """The dataset has left the live list above, and this is the only row
+        that says which run moved it and what became of its counts."""
+        run = SyncLog.objects.create(
+            node=self.kenya,
+            sync_type=SyncLog.DISCOVERY_METADATA,
+            status=SyncLog.SUCCESS,
+            started_at=NOW - timedelta(hours=1),
+            items_retired=1,
+            rollups_repointed=995,
+            retired=[
+                {
+                    "item": "urn:wmo:md:ke-meteo:kedehn",
+                    "moved_to": "urn:wmo:md:ke-meteo:aws810",
+                    "rollups_moved": 995,
+                    "claimed_by": [],
+                }
+            ],
+        )
+
+        (row,) = [r for r in self.detail().sync_runs if r.run_id == run.pk]
+
+        self.assertEqual(row.items_retired, 1)
+        self.assertEqual(row.retired[0]["moved_to"], "urn:wmo:md:ke-meteo:aws810")
 
     def test_the_most_recent_runs_come_first_with_what_they_said(self):
         self.sync_run(hours_ago=5)

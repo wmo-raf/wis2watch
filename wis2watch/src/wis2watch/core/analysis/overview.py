@@ -457,9 +457,13 @@ def _annotated_nodes(*, since):
     )
     cached_messages = volume(source__source_type=MessageSource.GLOBAL_CACHE)
 
+    # What the centre publishes now, which is the only count the rest of the
+    # row is about: a dataset the catalogue withdrew, or one the centre has
+    # stopped declaring and this tool has retired, is not something anybody is
+    # waiting to hear from -- and counting it here would have the column
+    # disagree with the silence beside it, which judges the live ones.
     datasets = (
-        Dataset.objects.filter(node=OuterRef("pk"))
-        .exclude(status=Dataset.DELETED)
+        Dataset.objects.filter(node=OuterRef("pk"), status=Dataset.ACTIVE)
         .values("node")
         .annotate(total=Count("pk"))
         .values("total")

@@ -299,6 +299,14 @@ class CountTests(OverviewTestCase):
 
         self.assertEqual(self.by_centre()["ke-meteo"].dataset_count, 1)
 
+    def test_a_retired_dataset_is_not_something_the_centre_still_claims(self):
+        """The centre has said the record is not theirs, so the count it is
+        judged by is not theirs either."""
+        self.dataset("synop")
+        self.dataset("kedehn", status=Dataset.INACTIVE)
+
+        self.assertEqual(self.by_centre()["ke-meteo"].dataset_count, 1)
+
     def test_the_stations_a_centre_is_associated_with_are_counted(self):
         self.declare("0-20000-0-63708")
         self.declare("0-20000-0-63710")
