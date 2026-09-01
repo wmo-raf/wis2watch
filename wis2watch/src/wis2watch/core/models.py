@@ -2084,6 +2084,17 @@ class SyncLog(models.Model):
         """
         return max(self.items_errored - len(self.stepped_over), 0)
 
+    @property
+    def retirements_withheld(self):
+        """How many retirements the run kept no account of.
+
+        The same rule the reasons above are kept by: the count is of
+        everything, the detail is of as much of it as a log will hold, and the
+        two numbers disagreeing is how a run says it retired more than it
+        wrote down.
+        """
+        return max(self.items_retired - len(self.retired), 0)
+
 
 class ReportedFinding(models.Model):
     """One finding the digest has already told somebody about.

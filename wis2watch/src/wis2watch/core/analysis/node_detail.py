@@ -172,6 +172,7 @@ class SyncRunRow:
     stepped_over: list[dict]
     reasons_withheld: int
     retired: list[dict]
+    retirements_withheld: int
 
     @property
     def scope_label(self):
@@ -456,6 +457,7 @@ def _sync_run_row(run, scope):
         stepped_over=run.stepped_over,
         reasons_withheld=run.reasons_withheld,
         retired=run.retired,
+        retirements_withheld=run.retirements_withheld,
     )
 
 

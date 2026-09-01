@@ -62,6 +62,7 @@ from django.utils import timezone as dj_timezone
 from .models import (
     CadenceBaseline,
     DailyStationRollup,
+    Dataset,
     HourlyRollup,
     StationActivityBaseline,
 )
@@ -98,11 +99,19 @@ DEFAULT_MIN_OBSERVATIONS = 3
 #: split by station and by vantage point, so an hour in which thirty stations
 #: reported to a centre whose own broker is also being watched is sixty rows
 #: and one publication.
+#:
+#: Only a live dataset is learned from. A retired one is judged by nothing --
+#: silence reads the active ones -- so a rhythm for it is an answer to a
+#: question nobody asks; and where its history could not be moved, learning
+#: one would put back the very baseline its retirement deleted, inferred from
+#: traffic the centre says was never its own.
 LEARN_INTERVALS = """
 WITH active AS (
     SELECT DISTINCT rollup.dataset_id AS dataset_id, rollup.hour AS hour
     FROM {rollups} rollup
+    JOIN {datasets} dataset ON dataset.id = rollup.dataset_id
     WHERE rollup.dataset_id IS NOT NULL
+      AND dataset.status = '{active}'
       AND rollup.message_count > 0
       AND rollup.hour >= %s
       AND rollup.hour < %s
@@ -256,6 +265,11 @@ def learn_cadence_baselines(
     the bar keeps it: falling below the bar is what a dataset does when it
     stops publishing, and forgetting its rhythm then would silence the tool
     about a centre at the moment the centre went silent. Nothing here deletes.
+
+    A retired dataset is not learned from at all. Its rhythm is deleted where
+    it is retired, by the one thing that knows the history was somebody
+    else's, and a run that learned it back from the rollups left behind would
+    undo that every night.
     """
     now = now or dj_timezone.now()
     since = cadence_window_start(now, window_days)
@@ -298,7 +312,11 @@ def _learned_intervals(*, since, until, percentile, required):
     """One ``(dataset, interval, observations)`` per dataset with a rhythm."""
     with connection.cursor() as cursor:
         cursor.execute(
-            LEARN_INTERVALS.format(rollups=HourlyRollup._meta.db_table),
+            LEARN_INTERVALS.format(
+                rollups=HourlyRollup._meta.db_table,
+                datasets=Dataset._meta.db_table,
+                active=Dataset.ACTIVE,
+            ),
             [since, until, percentile / 100, required],
         )
 

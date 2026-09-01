@@ -62,6 +62,20 @@ guessed between them would write a wrong history indistinguishable from a right
 one. There the counts stay where they are, and which datasets the choice lay
 between is recorded on the run.
 
+**What the centre declares is the answer in hand, not the declarations on
+file.** A `NODE` declaration is refreshed when the centre says the same thing
+again and is never expired otherwise, so a rule that read one would retire only
+datasets the centre has *never* declared -- which is the ghost the region has
+today, and not the one it will have tomorrow, when a centre drops a dataset it
+used to serve. It would also make a reinstatement a one-way door, because the
+run that reinstates writes the declaration that would stop the dataset ever
+being retired again. So the ghost set, and the successor, are both read from
+the records the run just read, and the stale `NODE` declaration is deleted with
+the retirement: the centre has just been found not to declare it, and a row
+saying otherwise would have the divergence report reading agreement between two
+sources that have this minute been found to disagree. What the catalogue said
+is untouched, which is what keeps the finding a finding.
+
 **Retirement is a conclusion from an answer, never from silence.** Nothing is
 retired for a centre that could not be reached, for a centre that answered with
 nothing at all -- an empty answer and an endpoint returning an empty page
@@ -77,7 +91,18 @@ special handling.
 
 **The ghost's cadence baseline is deleted rather than moved.** It was learned
 from traffic the ghost never earned, and the scheduled run relearns the rhythm
-against the corrected rollups, for the dataset that now holds them.
+against the corrected rollups, for the dataset that now holds them. That run
+now learns from live datasets only: a retired dataset is judged by nothing, and
+where its history could not be moved, the next night would otherwise learn back
+the very baseline the retirement deleted.
+
+**The raw notifications move with the counts.** The rollups are derived from
+them and a scheduled run recomputes the last forty-eight hours of buckets from
+scratch, so messages left pointing at the ghost would rebuild its buckets
+within the day and write the successor's merged hours back down -- the
+correction undone at exactly the end somebody is looking at. They are also
+where the wrong attribution was made, so this is the same correction rather
+than a second one.
 
 **What was retired is counted on the run, not only logged.** A retirement moves
 a centre's largest observation feed from one row to another. `items_retired`
@@ -105,12 +130,13 @@ this tool last concluded it belonged -- which is on the successor, not back on
 the reinstated row. That is deliberate: the counts were the successor's, and a
 reinstatement does not make the old attribution true again.
 
-## Not addressed here
+**A dataset marked deleted by hand is no longer reactivated by a catalogue
+run either.** Nothing in this tool writes `deleted` today, so the state can
+only have been set by somebody who meant it; that it now stands until the
+centre declares the record again is a consequence of the same rule rather than
+a decision taken about it.
 
-**Raw notifications keep their original attribution.** They are expired within
-a fortnight and the rollups are what survives, so the correction is made where
-the history lives. A forensic window that disagrees with the rollups for two
-weeks after a retirement is the price.
+## Not addressed here
 
 **An ambiguous ghost's history is never resolved.** Where several datasets
 claim the topic the counts stay on the retired row, visible on the node page

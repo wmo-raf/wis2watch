@@ -46,7 +46,7 @@ import logging
 
 from django.db import transaction
 
-from .dataset_retirement import retire_undeclared_datasets
+from .dataset_retirement import reinstate, retire_undeclared_datasets
 from .dataset_sources import record_declaration
 from .interpretation import extract_discovery_records
 from .models import Dataset, DatasetSource, SyncLog
@@ -125,26 +125,6 @@ def _fill_canonical_record(dataset, declared):
     dataset.save(update_fields=[*filled, "modified"])
 
 
-def _reinstate(dataset):
-    """A dataset the centre declares again is not retired any more.
-
-    The one field a centre's own record is allowed to write over rather than
-    fill in, and it is not really an exception to the rule: retirement is this
-    tool's conclusion from the centre's own answer, and the centre answering
-    differently is the conclusion being withdrawn by the only source entitled
-    to withdraw it.
-
-    Only a retired dataset is reinstated. ``DELETED`` is a withdrawal nothing
-    here performed, and a centre serving a record again is not obviously the
-    same thing as whoever marked it deleted having been wrong.
-    """
-    if dataset.status != Dataset.INACTIVE:
-        return
-
-    dataset.status = Dataset.ACTIVE
-    dataset.save(update_fields=["status", "modified"])
-
-
 def apply_declared_dataset(node, declared):
     """Record that this centre declares a dataset, reporting what happened.
 
@@ -166,7 +146,7 @@ def apply_declared_dataset(node, declared):
 
             if not created:
                 _fill_canonical_record(dataset, declared)
-                _reinstate(dataset)
+                reinstate(dataset)
 
             _, declaration_created = record_declaration(
                 dataset,

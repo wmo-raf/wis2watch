@@ -172,10 +172,12 @@
             font-size: 0.8em;
         }
 
-        /* What a run stepped over, under the outcome that counted it. Narrow
-           enough that a database quoting the row it refused wraps inside its
-           cell instead of pushing the counts off the table. */
-        .row-stepped-over {
+        /* What a run stepped over or retired, under the outcome that counted
+           it. Narrow enough that a database quoting the row it refused, or a
+           pair of dataset URNs, wraps inside its cell instead of pushing the
+           counts off the table. */
+        .row-stepped-over,
+        .row-retired {
             margin-top: 6px;
             color: #555;
             font-size: 0.8em;
@@ -630,7 +632,7 @@
                                 became of the history filed under it.
                             {% endcomment %}
                             {% if run.items_retired %}
-                                <div class="row-stepped-over">
+                                <div class="row-retired">
                                     {% trans "Retired:" %}
                                     {% for record in run.retired %}
                                         <div class="row-detail">
@@ -644,6 +646,11 @@
                                             {% endif %}
                                         </div>
                                     {% endfor %}
+                                    {% if run.retirements_withheld %}
+                                        <div class="row-detail">
+                                            {% blocktrans count counter=run.retirements_withheld %}and one more, which was not written down{% plural %}and {{ counter }} more, which were not written down{% endblocktrans %}
+                                        </div>
+                                    {% endif %}
                                 </div>
                             {% endif %}
                         </td>
