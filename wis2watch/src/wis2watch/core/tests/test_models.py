@@ -385,6 +385,83 @@ class DatasetIdentityTests(TestCase):
             )
 
 
+class ObservationDatasetTests(TestCase):
+    """Which of a centre's datasets carry observations.
+
+    Read off the topic the dataset already stores, so it is retroactive over
+    every record ever synced and needs nothing filled in per dataset. A centre
+    that files its observations under the wrong category is a catalogue error
+    for this tool to report rather than one for an operator to override here.
+    """
+
+    def setUp(self):
+        self.node = make_node()
+
+    def dataset(self, name, topic):
+        return Dataset.objects.create(
+            node=self.node,
+            identifier=f"urn:wmo:md:ke-kmd:{name}",
+            title=name,
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy=topic,
+            raw_json={},
+        )
+
+    def test_a_dataset_on_a_surface_observations_topic_is_an_observation(self):
+        synop = self.dataset(
+            "synop",
+            "origin/a/wis2/ke-kmd/data/core/weather/surface-based-observations/synop",
+        )
+
+        self.assertTrue(synop.is_observation)
+
+    def test_a_dataset_on_a_space_observations_topic_is_an_observation(self):
+        radiance = self.dataset(
+            "radiance",
+            "origin/a/wis2/ke-kmd/data/core/weather/space-based-observations/radiance",
+        )
+
+        self.assertTrue(radiance.is_observation)
+
+    def test_a_discipline_other_than_weather_still_counts(self):
+        """Four centres in the region publish their observations under climate."""
+        climat = self.dataset(
+            "climat",
+            "origin/a/wis2/ke-kmd/data/core/climate/surface-based-observations/climat",
+        )
+
+        self.assertTrue(climat.is_observation)
+
+    def test_a_dataset_on_another_category_is_not_an_observation(self):
+        metar = self.dataset(
+            "metar", "origin/a/wis2/ke-kmd/data/core/weather/aviation/metar"
+        )
+
+        self.assertFalse(metar.is_observation)
+
+    def test_a_dataset_whose_topic_cannot_be_read_is_not_an_observation(self):
+        """A dataset learned from traffic may carry no readable topic at all."""
+        for name, topic in (
+            ("empty", ""),
+            ("mangled", "surface-based-observations"),
+            ("truncated", "origin/a/wis2/ke-kmd/data/core/weather"),
+        ):
+            with self.subTest(topic=topic):
+                self.assertFalse(self.dataset(name, topic).is_observation)
+
+    def test_a_dataset_says_which_kind_it_is_in_words(self):
+        synop = self.dataset(
+            "synop",
+            "origin/a/wis2/ke-kmd/data/core/weather/surface-based-observations/synop",
+        )
+        metar = self.dataset(
+            "metar", "origin/a/wis2/ke-kmd/data/core/weather/aviation/metar"
+        )
+
+        self.assertEqual(str(synop.kind_label), "Observation")
+        self.assertEqual(str(metar.kind_label), "Not an observation")
+
+
 class NotificationMessageTests(TestCase):
     def setUp(self):
         self.source = make_source()

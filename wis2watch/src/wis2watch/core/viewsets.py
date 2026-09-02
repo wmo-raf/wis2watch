@@ -147,7 +147,19 @@ class DatasetViewSet(SnippetViewSet):
     # this tool learned about from traffic carries no title, and the first
     # column is the one that opens the record -- so a blank there would be a
     # row nobody could edit the one editable thing on.
-    list_display = ["display_title", "node", "status", "expected_interval_override_hours"]
+    #
+    # The kind is on the listing rather than only on the edit form because it
+    # is not a person's to set: it is read off the topic, and the listing is
+    # where somebody asks which of a centre's datasets this installation is
+    # actually watching. Unsortable on purpose -- it is derived rather than
+    # stored, and a column that sorted by something else would lie.
+    list_display = [
+        "display_title",
+        "node",
+        Column("kind_label", label=_("Kind"), accessor="kind_label"),
+        "status",
+        "expected_interval_override_hours",
+    ]
     list_filter = ["status", "node"]
     search_fields = ["title", "identifier", "wmo_topic_hierarchy"]
 

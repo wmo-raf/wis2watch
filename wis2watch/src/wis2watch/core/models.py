@@ -12,7 +12,7 @@ from wagtail.admin.panels import FieldPanel, MultiFieldPanel
 from wagtail.snippets.models import register_snippet
 
 from .countries import monitored_country_code_for_centre_id
-from .interpretation import OPERATIONAL
+from .interpretation import OPERATIONAL, is_observation_topic
 
 
 class GlobalDiscoveryCatalogue(TimeStampedModel):
@@ -734,6 +734,31 @@ class Dataset(TimeStampedModel):
             models.Index(fields=["wmo_topic_hierarchy"]),
             models.Index(fields=["status"]),
         ]
+
+    @property
+    def is_observation(self):
+        """Whether this dataset carries observations.
+
+        Read off the topic the centre publishes on, so it is settled by where
+        the centre filed the dataset in the WMO topic hierarchy rather than by
+        anybody's judgement of it -- and so it is true of every dataset ever
+        synced without a field to fill in or a record to re-read.
+
+        There is deliberately no override. A dataset filed under the wrong
+        category is a catalogue error at the centre, which this tool exists to
+        report rather than to paper over.
+        """
+        return is_observation_topic(self.wmo_topic_hierarchy)
+
+    @property
+    def kind_label(self):
+        """What to call this dataset's kind in a listing.
+
+        Spelled out rather than left blank for the datasets that are not
+        observations: an empty cell reads as missing data, and this is an
+        answer.
+        """
+        return _("Observation") if self.is_observation else _("Not an observation")
 
     @property
     def display_title(self):

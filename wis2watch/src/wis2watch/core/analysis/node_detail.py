@@ -118,6 +118,11 @@ class NodeDatasetRow:
     under a record no catalogue holds is one this tool learns about from the
     traffic -- so the page says which source knows it rather than letting a
     row look the same either way.
+
+    Whether it carries observations is said here too. This installation is
+    stood up to watch observation transmission, so a table in which a synop
+    feed and an aerodrome report look alike is one a reader has to decode
+    from the topic themselves.
     """
 
     dataset_id: int
@@ -126,6 +131,8 @@ class NodeDatasetRow:
     identifier: str
     policy: str
     policy_label: str
+    kind_label: str
+    is_observation: bool
     status: str
     status_label: str
     last_synced: datetime | None
@@ -387,6 +394,10 @@ def _dataset_row(dataset, quiet, declarations):
     and a blank cell there would read as core -- which is a claim about what a
     centre is obliged to publish freely, and not one to make on a centre's
     behalf.
+
+    The kind comes off the dataset's own topic rather than being decided
+    here, so that this row and every count of observation traffic answer
+    the same question the same way.
     """
     return NodeDatasetRow(
         dataset_id=dataset.pk,
@@ -395,6 +406,8 @@ def _dataset_row(dataset, quiet, declarations):
         identifier=dataset.identifier,
         policy=dataset.wmo_data_policy or UNDECLARED,
         policy_label=dataset.get_wmo_data_policy_display() or _("Not declared"),
+        kind_label=dataset.kind_label,
+        is_observation=dataset.is_observation,
         status=dataset.status,
         status_label=dataset.get_status_display(),
         last_synced=dataset.last_synced,

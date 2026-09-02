@@ -71,7 +71,15 @@ class NodeDetailTestCase(TestCase):
             is_writer=is_writer,
         )
 
-    def dataset(self, name="synop", *, node=None, expects=None, status=Dataset.ACTIVE):
+    def dataset(
+        self,
+        name="synop",
+        *,
+        node=None,
+        expects=None,
+        status=Dataset.ACTIVE,
+        topic=None,
+    ):
         node = node or self.kenya
 
         return Dataset.objects.create(
@@ -79,7 +87,9 @@ class NodeDetailTestCase(TestCase):
             identifier=f"urn:wmo:md:{node.centre_id}:{name}",
             title=name,
             wmo_data_policy=Dataset.CORE,
-            wmo_topic_hierarchy=f"origin/a/wis2/{node.centre_id}/data/core/{name}",
+            wmo_topic_hierarchy=(
+                topic or f"origin/a/wis2/{node.centre_id}/data/core/{name}"
+            ),
             raw_json={},
             status=status,
             expected_interval_override_hours=expects,
@@ -199,6 +209,32 @@ class DatasetTests(NodeDetailTestCase):
 
         self.assertIsNone(row.quiet.expected_interval_hours)
         self.assertEqual(row.quiet.silence, Silence.UNKNOWN)
+
+    def test_a_dataset_says_whether_it_carries_observations(self):
+        """The page separates what this installation watches from the rest."""
+        self.dataset(
+            "synop",
+            topic="origin/a/wis2/ke-meteo/data/core/weather/"
+            "surface-based-observations/synop",
+        )
+        self.dataset(
+            "metar", topic="origin/a/wis2/ke-meteo/data/core/weather/aviation/metar"
+        )
+
+        rows = self.by_title()
+
+        self.assertTrue(rows["synop"].is_observation)
+        self.assertFalse(rows["metar"].is_observation)
+
+    def test_a_retired_dataset_says_which_kind_it_was(self):
+        self.dataset(
+            "climat",
+            status=Dataset.DELETED,
+            topic="origin/a/wis2/ke-meteo/data/core/climate/"
+            "surface-based-observations/climat",
+        )
+
+        self.assertTrue(self.detail().retired_datasets[0].is_observation)
 
     def test_another_centres_datasets_are_not_this_centres(self):
         djibouti = self.node("dj-anm")

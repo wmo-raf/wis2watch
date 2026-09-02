@@ -12,6 +12,11 @@ catalogue record, which is not one::
 
     origin/a/wis2/ke-meteo/metadata
 
+Below ``data`` the hierarchy is the data policy, then the earth-system
+discipline, then the data category -- and the category is what says whether a
+publication is an observation, in whichever discipline the centre filed it
+under.
+
 Everything downstream -- which centre a message belongs to, whether a Global
 Cache picked it up, whether the centre is one we monitor -- is read off that
 structure, so it is parsed once, here.
@@ -28,6 +33,26 @@ CACHE = "cache"
 #: The level below the centre on which it announces its WCMP2 discovery
 #: metadata record. Every other level below a centre carries data.
 METADATA = "metadata"
+
+#: The level below the centre carrying a publication, under which the data
+#: policy, the earth-system discipline and the data category follow in order.
+DATA = "data"
+
+#: Where the discipline and the category sit below ``data``, counted from the
+#: top of the hierarchy: ``data/{policy}/{discipline}/{category}/...``.
+DISCIPLINE_LEVEL = 2
+CATEGORY_LEVEL = 3
+
+#: The data categories that carry observations. Which discipline they sit
+#: under is deliberately not part of it: a centre may file surface
+#: observations under ``weather``, ``climate``, ``hydrology`` or any other
+#: discipline, and four centres in the region file theirs under ``climate`` --
+#: a rule pinned to ``weather`` would delete them from every count.
+SURFACE_BASED_OBSERVATIONS = "surface-based-observations"
+SPACE_BASED_OBSERVATIONS = "space-based-observations"
+OBSERVATION_CATEGORIES = frozenset(
+    {SURFACE_BASED_OBSERVATIONS, SPACE_BASED_OBSERVATIONS}
+)
 
 #: The MQTT wildcard matching a centre's whole hierarchy, however deep.
 MULTI_LEVEL_WILDCARD = "#"
@@ -59,6 +84,46 @@ class ParsedTopic:
     def announces_catalogue_record(self):
         """Whether this topic carries a catalogue record rather than data."""
         return self.hierarchy[:1] == (METADATA,)
+
+    @property
+    def carries_data(self):
+        """Whether this topic carries a publication rather than an announcement."""
+        return self.hierarchy[:1] == (DATA,)
+
+    @property
+    def discipline(self):
+        """The earth-system discipline this topic files its data under, or "".
+
+        Empty for anything that is not a data topic, and for a data topic that
+        stops above the discipline -- neither is a discipline this tool may
+        name on a centre's behalf.
+        """
+        return self._data_level(DISCIPLINE_LEVEL)
+
+    @property
+    def data_category(self):
+        """The data category this topic files its data under, or ""."""
+        return self._data_level(CATEGORY_LEVEL)
+
+    @property
+    def is_observation(self):
+        """Whether this topic carries observations, in any discipline."""
+        return self.data_category in OBSERVATION_CATEGORIES
+
+    def _data_level(self, level):
+        """One named level of a data topic's hierarchy, or "" if it has none.
+
+        The level is what gives a token its meaning, so a topic that stops
+        short answers with nothing rather than with whatever token happens to
+        sit last. That is what keeps a centre publishing on
+        ``data/core/surface-based-observations`` -- a category where a
+        discipline belongs -- from reading as an observation on the strength
+        of the word alone.
+        """
+        if not self.carries_data or len(self.hierarchy) <= level:
+            return ""
+
+        return self.hierarchy[level]
 
     def as_origin(self):
         """The same topic as published at origin.
@@ -169,3 +234,16 @@ def announces_catalogue_record(topic, data_id=""):
         return parsed is not None and parsed.announces_catalogue_record
 
     return (data_id or "").split("/")[1:2] == [METADATA]
+
+
+def is_observation_topic(topic):
+    """Whether a topic carries observations, in any earth-system discipline.
+
+    The whole classification, and the only place it is decided. A topic this
+    tool cannot read is not an observation rather than an error: an
+    unparseable topic is a catalogue mistake at the centre, and this tool
+    exists to report those rather than to stop on them.
+    """
+    parsed = parse_topic(topic)
+
+    return parsed is not None and parsed.is_observation

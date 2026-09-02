@@ -7,6 +7,7 @@ from wis2watch.core.interpretation import (
     announces_catalogue_record,
     centre_id_prefix,
     is_monitored_centre_id,
+    is_observation_topic,
     monitored_country_code_for_centre_id,
     parse_topic,
     subscription_topic,
@@ -69,6 +70,103 @@ class ParseTopicTests(NoNetworkTestCase):
         self.assertIsNone(parse_topic("some/other/thing"))
         self.assertIsNone(parse_topic(""))
         self.assertIsNone(parse_topic(None))
+
+
+class ObservationTopicTests(NoNetworkTestCase):
+    """Which topics carry observations, read off the hierarchy the centre chose.
+
+    The question this installation is standing up to answer is whether
+    observations are coming out of the region, and the only thing that says
+    whether a dataset is one is where its publisher put it in the WMO topic
+    hierarchy. So it is read there, for every discipline, rather than asked of
+    an operator per dataset.
+    """
+
+    def topic(self, discipline, category, prefix="origin"):
+        return f"{prefix}/a/wis2/ke-meteo/data/core/{discipline}/{category}/synop"
+
+    def test_surface_based_observations_are_observations(self):
+        self.assertTrue(
+            is_observation_topic(self.topic("weather", "surface-based-observations"))
+        )
+
+    def test_space_based_observations_are_observations(self):
+        self.assertTrue(
+            is_observation_topic(self.topic("weather", "space-based-observations"))
+        )
+
+    def test_every_discipline_counts_and_not_only_weather(self):
+        """Four centres in the region publish observations under `climate`."""
+        for discipline in (
+            "climate",
+            "hydrology",
+            "atmospheric-composition",
+            "ocean",
+            "cryosphere",
+            "space-weather",
+        ):
+            with self.subTest(discipline=discipline):
+                self.assertTrue(
+                    is_observation_topic(
+                        self.topic(discipline, "surface-based-observations")
+                    )
+                )
+
+    def test_another_data_category_is_not_an_observation(self):
+        for category in ("aviation", "prediction", "advisories-warnings", "hazard"):
+            with self.subTest(category=category):
+                self.assertFalse(is_observation_topic(self.topic("weather", category)))
+
+    def test_a_cached_observation_topic_is_still_an_observation(self):
+        """A Global Cache mirrors the hierarchy, so it carries the same answer."""
+        self.assertTrue(
+            is_observation_topic(
+                self.topic("weather", "surface-based-observations", prefix=CACHE)
+            )
+        )
+
+    def test_a_topic_that_is_not_a_wis2_topic_is_not_an_observation(self):
+        """An unreadable topic is answered, not raised on."""
+        for topic in (None, "", "   ", "some/other/thing", "origin/a/wis1/ke-meteo"):
+            with self.subTest(topic=topic):
+                self.assertFalse(is_observation_topic(topic))
+
+    def test_a_topic_stopping_above_the_category_is_not_an_observation(self):
+        for topic in (
+            "origin/a/wis2/ke-meteo",
+            "origin/a/wis2/ke-meteo/data",
+            "origin/a/wis2/ke-meteo/data/core",
+            "origin/a/wis2/ke-meteo/data/core/weather",
+        ):
+            with self.subTest(topic=topic):
+                self.assertFalse(is_observation_topic(topic))
+
+    def test_a_centres_own_catalogue_announcement_is_not_an_observation(self):
+        self.assertFalse(is_observation_topic("origin/a/wis2/ke-meteo/metadata"))
+
+    def test_a_category_named_above_the_discipline_does_not_count(self):
+        """The level is what makes it a category, not the word appearing."""
+        self.assertFalse(
+            is_observation_topic(
+                "origin/a/wis2/ke-meteo/data/core/surface-based-observations"
+            )
+        )
+
+    def test_a_parsed_topic_carries_the_discipline_and_the_category_it_names(self):
+        parsed = parse_topic(self.topic("climate", "surface-based-observations"))
+
+        self.assertEqual(parsed.discipline, "climate")
+        self.assertEqual(parsed.data_category, "surface-based-observations")
+        self.assertTrue(parsed.is_observation)
+
+    def test_a_topic_below_a_category_still_reads_as_that_category(self):
+        """wis2box publishes several levels below the category; all of them count."""
+        self.assertTrue(
+            is_observation_topic(
+                "origin/a/wis2/rw-rma/data/core/weather/"
+                "surface-based-observations/synop/landfixed"
+            )
+        )
 
 
 class SubscriptionTopicTests(NoNetworkTestCase):
