@@ -5,6 +5,14 @@ own broker lives -- is built from a Global Discovery Catalogue rather than
 entered by hand, so that all 54 monitored countries are covered without anyone
 typing them in.
 
+What it writes is bounded by what a centre structurally cannot tell us about
+itself (ADR-0015). That a centre exists at all, and the address you need in
+order to ask it anything, are the catalogue's outright: a node reachable at the
+wrong address is a contradiction. Everything downstream of a centre answering
+-- what it publishes, and which broker it runs -- is the centre's own word
+about itself, and this sync writes it only for the centres that have not
+answered.
+
 Two rules keep the registry stable:
 
 - **One writer.** Exactly one catalogue is designated the writer. The others
@@ -14,8 +22,10 @@ Two rules keep the registry stable:
   *which* records they disagree on is the gap reports' job, not this module's.
 - **Manual corrections win.** A node flagged as manually managed keeps its own
   fields and its own broker; the catalogue is expected to be wrong about
-  centres whose metadata registration is incomplete. Its datasets still sync,
-  since those are the catalogue's to describe.
+  centres whose metadata registration is incomplete. Its datasets are still
+  described, under the same field-by-field ownership test every other node's
+  are: the flag holds the node's own record apart, not the records it
+  publishes.
 
 Reading a record is not this module's job: :mod:`wis2watch.core.interpretation`
 turns a catalogue payload into nodes, datasets and broker connections. What is
@@ -28,8 +38,11 @@ import logging
 from django.db import transaction
 from django.utils import timezone as dj_timezone
 
-from .analysis import registries_not_answering_centre_ids
-from .dataset_sources import record_declaration
+from .analysis import (
+    centres_answering_for_what_they_publish,
+    registries_not_answering_centre_ids,
+)
+from .dataset_sources import fields_the_catalogue_may_write, record_declaration
 from .interpretation import extract_discovery_records
 from .models import (
     DERIVED_ENDPOINTS,
@@ -45,6 +58,7 @@ from .sync import (
     UPDATED,
     SteppedOver,
     SyncCounts,
+    apply_origin_broker,
     declared_dataset_fields,
     fetch_pages,
 )
@@ -256,31 +270,6 @@ def _apply_node(discovered, *, registries_not_answering=frozenset()):
     return node
 
 
-def _apply_origin_broker(node, broker):
-    """The node's own broker, as the record advertises it.
-
-    A record that advertises no broker of its own leaves any existing one
-    alone: absence in one record is not evidence the broker is gone, and other
-    records for the same centre may well declare it.
-    """
-    if not broker:
-        return
-
-    MessageSource.objects.update_or_create(
-        node=node,
-        source_type=MessageSource.ORIGIN_BROKER,
-        defaults={
-            "name": f"{node.centre_id} origin broker",
-            "centre_id": node.centre_id,
-            "host": broker.host,
-            "port": broker.port,
-            "use_tls": broker.use_tls,
-            "username": broker.username,
-            "password": broker.password,
-        },
-    )
-
-
 def message_archive_url(base_url):
     """Where a node is expected to serve its own notification archive."""
     return f"{base_url.rstrip('/')}{MESSAGE_ARCHIVE_PATH}"
@@ -343,22 +332,38 @@ def _apply_dataset(node, discovered, catalogue):
     What is counted is still the dataset. A declaration a run refreshed is not
     news the way a station's is: a station is shared between centres and a
     dataset belongs to one, so the two counts would never differ.
+
+    **A row that already exists is refreshed rather than rewritten**, and how
+    much of it this catalogue may touch is
+    :func:`~wis2watch.core.dataset_sources.fields_the_catalogue_may_write`'s to
+    say: nothing at all once the centre has spoken for itself, and otherwise
+    what is empty or what this catalogue itself last put there. A creation
+    writes the record whole, because there is nobody else's value to displace
+    and a row with no title is one nothing can name on a page.
+
+    ``status`` is written by neither, and a new row takes the active one the
+    model gives it. Whether a dataset still exists is the centre's to say
+    rather than the catalogue's (ADR-0014): a record the catalogue carries and
+    the centre has stopped declaring is exactly what the node sync retires, and
+    it is exactly what this run reads again six hours later -- so a catalogue
+    stamping it active would undo every retirement it ever made and
+    re-attribute the traffic with it.
+
+    ``last_synced`` is written on every run whatever else is. It is when this
+    catalogue last confirmed the record rather than anything the record says,
+    and a staleness nobody stamped is one no report can read.
     """
-    dataset, created = Dataset.objects.update_or_create(
+    dataset, created = Dataset.objects.get_or_create(
         node=node,
         identifier=discovered.identifier,
-        # ``status`` is not among the defaults, and a new row takes the active
-        # one the model gives it. Whether a dataset still exists is the
-        # centre's to say rather than the catalogue's (ADR-0014): a record the
-        # catalogue carries and the centre has stopped declaring is exactly
-        # what the node sync retires, and it is exactly what this run reads
-        # again six hours later -- so a catalogue stamping it active would undo
-        # every retirement it ever made and re-attribute the traffic with it.
         defaults={
             **declared_dataset_fields(discovered),
             "last_synced": dj_timezone.now(),
         },
     )
+
+    if not created:
+        _refresh_dataset(dataset, discovered, catalogue)
 
     record_declaration(
         dataset,
@@ -370,12 +375,44 @@ def _apply_dataset(node, discovered, catalogue):
     return CREATED if created else UPDATED
 
 
-def apply_discovery_record(record, catalogue, *, registries_not_answering=frozenset()):
+def _refresh_dataset(dataset, discovered, catalogue):
+    """Bring the record up to date with what this catalogue now says of it.
+
+    Read before the declaration below it is refreshed, and it has to be: what
+    this catalogue last said is the whole of how a value it wrote is told from
+    a value somebody typed, and recording the new one first would leave the
+    test comparing this run with itself.
+    """
+    fields = fields_the_catalogue_may_write(dataset, discovered, catalogue)
+
+    for field, value in fields.items():
+        setattr(dataset, field, value)
+
+    dataset.last_synced = dj_timezone.now()
+    dataset.save(update_fields=[*fields, "last_synced", "modified"])
+
+
+def apply_discovery_record(
+    record,
+    catalogue,
+    *,
+    registries_not_answering=frozenset(),
+    centres_answering_for_themselves=frozenset(),
+):
     """Write one discovery record to the registry, reporting what happened.
 
     ``catalogue`` is the one the record was read from, which the dataset's
     declaration is recorded against: "a catalogue declares this" is not a
     finding, and "this catalogue declares it and that one does not" is.
+
+    ``centres_answering_for_themselves`` is the centres whose own metadata
+    something has read. A catalogue's copy of a centre's broker is a
+    third-party record of which host that centre runs, and the centre
+    advertises the same link on its own records; where it has answered, its
+    own word stands and this run leaves the broker alone (ADR-0015). Passed
+    in rather than asked for here, for the reason the dead registries are: it
+    is one query for the run, and asking it per record would be one per
+    dataset in the region.
 
     Each record is applied in its own savepoint, so a record the database
     refuses -- one carrying a title longer than the column, say -- is counted
@@ -387,8 +424,11 @@ def apply_discovery_record(record, catalogue, *, registries_not_answering=frozen
                 record.node, registries_not_answering=registries_not_answering
             )
 
-            if not node.is_manually_managed:
-                _apply_origin_broker(node, record.origin_broker)
+            if (
+                not node.is_manually_managed
+                and node.centre_id not in centres_answering_for_themselves
+            ):
+                apply_origin_broker(node, record.origin_broker)
 
             _apply_origin_api(node)
 
@@ -418,11 +458,17 @@ def sync_catalogue(catalogue, fetch=None):
 
     counts = SyncCounts()
 
-    # Read once, before anything is written. Which registries are dead is a
-    # question about the runs behind them rather than about this catalogue, and
-    # asking it per record would be a query per dataset in the region.
+    # Read once, before anything is written. Which registries are dead, and
+    # which centres have answered for themselves, are questions about the runs
+    # behind them rather than about this catalogue, and asking either of them
+    # per record would be a query per dataset in the region.
     not_answering = (
         registries_not_answering_centre_ids() if catalogue.is_writer else frozenset()
+    )
+    answering_for_themselves = (
+        centres_answering_for_what_they_publish()
+        if catalogue.is_writer
+        else frozenset()
     )
 
     try:
@@ -439,6 +485,7 @@ def sync_catalogue(catalogue, fetch=None):
                             record,
                             catalogue,
                             registries_not_answering=not_answering,
+                            centres_answering_for_themselves=answering_for_themselves,
                         )
                     )
     except Exception as exc:

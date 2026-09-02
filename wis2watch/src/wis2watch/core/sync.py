@@ -2,7 +2,7 @@
 
 Every sync WIS2Watch runs -- the registry from a Global Discovery Catalogue,
 the datasets and stations a centre's own endpoints declare -- reads an OGC API
-Features collection page by page and writes what it can. Four things are
+Features collection page by page and writes what it can. Five things are
 therefore said once, here, rather than once per sync:
 
 - **How a collection is read.** Page after page, following the server's own
@@ -22,6 +22,10 @@ therefore said once, here, rather than once per sync:
   own are the same WCMP2 feature, so what either of them contributes to the
   canonical dataset is one mapping rather than one per sync -- two copies of
   it would drift, and the drift would read as the two sources disagreeing.
+- **How a centre's own broker is written down.** The same feature advertises
+  it, and both syncs that read one now write it (ADR-0015), so how an
+  advertised broker becomes a vantage point is said once. Which of them is
+  entitled to write it is the syncs' own business and stays with them.
 
 What differs between the syncs -- which URL, which credentials, how long to
 wait -- stays with the sync that knows it.
@@ -42,7 +46,7 @@ from .interpretation import (
     records_matched,
     records_returned,
 )
-from .models import SyncLog, one_line
+from .models import MessageSource, SyncLog, one_line
 
 logger = logging.getLogger(__name__)
 
@@ -354,6 +358,38 @@ def declared_dataset_fields(declared):
         "metadata_created": declared.metadata_created,
         "metadata_updated": declared.metadata_updated,
     }
+
+
+def apply_origin_broker(node, broker):
+    """The centre's own broker, as a record advertises it.
+
+    Written by whichever sync read the record: a centre's own metadata carries
+    the broker as an ``items`` link with a channel exactly as a catalogue's
+    copy does, and a centre is better placed than a third-party catalogue to
+    say which host it runs (ADR-0015). What the two syncs do not share is when
+    they may write it, which is theirs to decide and stated where they decide
+    it.
+
+    A record that advertises no broker of its own leaves any existing one
+    alone: absence in one record is not evidence the broker is gone, and other
+    records for the same centre may well declare it.
+    """
+    if not broker:
+        return
+
+    MessageSource.objects.update_or_create(
+        node=node,
+        source_type=MessageSource.ORIGIN_BROKER,
+        defaults={
+            "name": f"{node.centre_id} origin broker",
+            "centre_id": node.centre_id,
+            "host": broker.host,
+            "port": broker.port,
+            "use_tls": broker.use_tls,
+            "username": broker.username,
+            "password": broker.password,
+        },
+    )
 
 
 @dataclass(frozen=True)

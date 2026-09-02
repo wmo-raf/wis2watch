@@ -32,6 +32,7 @@ from wis2watch.core.models import (
     SyncLog,
     WIS2Node,
 )
+from wis2watch.core.node_datasets import sync_node_datasets
 
 from .support import failing_fetch, load_json_fixture, pages
 
@@ -43,6 +44,25 @@ KE_DATASET = "urn:wmo:md:ke-meteo:synop-dataset-surface-observations"
 CG_DATASET = "urn:wmo:md:cg-met:core.climate.surface-based-observations.climat"
 SZ_DATASET = "urn:wmo:md:sz-swazimet:surface-based-observations.synop"
 SZ_SIBLING_DATASET = "urn:wmo:md:sz-swazimet:surface-based-observations.synop.aws"
+
+
+def records_sharing_a_topic():
+    """The fixture, with a second ``sz-swazimet`` record on the one topic.
+
+    A wis2box creates one dataset per station group and every one of them
+    lands on the centre's single surface-based-observations topic, so this is
+    the ordinary shape rather than a contrived one -- and it is what makes a
+    retirement have somewhere to move a history to.
+    """
+    payload = load_json_fixture(CATALOGUE)
+    original = next(f for f in payload["features"] if f["id"] == SZ_DATASET)
+    sibling = copy.deepcopy(original)
+    sibling["id"] = SZ_SIBLING_DATASET
+    sibling["properties"]["identifier"] = SZ_SIBLING_DATASET
+    sibling["properties"]["title"] = "Automatic stations (sz-swazimet)"
+    payload["features"].append(sibling)
+
+    return payload
 
 
 class CatalogueSyncTestCase(TestCase):
@@ -284,6 +304,118 @@ class RetiredDatasetTests(CatalogueSyncTestCase):
         )
 
 
+class CentreOwnedFieldTests(CatalogueSyncTestCase):
+    """What a centre publishes is the centre's to describe (ADR-0015).
+
+    The catalogue holds a copy of what a centre registered at some point, and
+    keeps the record current for as long as nobody has asked the centre
+    itself. Once the centre has answered, this sync stops writing what the
+    answer covers -- otherwise a six-hourly run and an hourly one would take
+    turns on one row, and the row would read as whichever ran last.
+    """
+
+    def dataset(self):
+        return Dataset.objects.get(identifier=KE_DATASET)
+
+    def renamed(self, title="Renamed by the catalogue"):
+        payload = copy.deepcopy(self.payload)
+
+        for feature in payload["features"]:
+            if feature.get("id") == KE_DATASET:
+                feature["properties"]["title"] = title
+
+        return payload
+
+    def declared_by_the_centre(self, title):
+        """The centre's own record of the dataset, and the row it carries."""
+        dataset = self.dataset()
+
+        record = copy.deepcopy(dataset.raw_json)
+        record["properties"]["title"] = title
+
+        DatasetSource.objects.create(
+            dataset=dataset,
+            source_type=DatasetSource.NODE,
+            raw_json=record,
+            last_seen=dj_timezone.now(),
+        )
+
+        dataset.title = title
+        dataset.save(update_fields=["title", "modified"])
+
+        return dataset
+
+    def test_a_centre_nobody_has_asked_is_kept_current_by_the_catalogue(self):
+        self.sync()
+        self.sync(self.renamed())
+
+        self.assertEqual(self.dataset().title, "Renamed by the catalogue")
+
+    def test_a_field_the_centre_has_declared_is_not_rewritten(self):
+        self.sync()
+        self.declared_by_the_centre("What the centre calls it")
+
+        self.sync(self.renamed())
+
+        self.assertEqual(self.dataset().title, "What the centre calls it")
+
+    def test_nothing_the_centre_has_declared_is_rewritten(self):
+        """Not the title alone: everything the answer covers."""
+        self.sync()
+        self.declared_by_the_centre("What the centre calls it")
+
+        changed = self.renamed()
+
+        for feature in changed["features"]:
+            if feature.get("id") == KE_DATASET:
+                feature["properties"]["wmo:dataPolicy"] = "recommended"
+
+        self.sync(changed)
+
+        self.assertEqual(self.dataset().wmo_data_policy, Dataset.CORE)
+
+    def test_what_this_run_read_is_still_recorded_as_a_declaration(self):
+        """Standing back from the row is not standing back from the finding."""
+        self.sync()
+        self.declared_by_the_centre("What the centre calls it")
+
+        self.sync(self.renamed())
+
+        catalogued = DatasetSource.objects.get(
+            dataset__identifier=KE_DATASET, source_type=DatasetSource.GDC
+        )
+
+        self.assertEqual(
+            catalogued.raw_json["properties"]["title"], "Renamed by the catalogue"
+        )
+
+    def test_a_record_the_centre_has_declared_is_still_stamped_as_confirmed(self):
+        """When the catalogue last carried the record is the catalogue's own."""
+        self.sync()
+        dataset = self.declared_by_the_centre("What the centre calls it")
+        Dataset.objects.filter(pk=dataset.pk).update(
+            last_synced=dj_timezone.now() - timedelta(days=30)
+        )
+
+        self.sync()
+
+        self.assertGreater(
+            self.dataset().last_synced, dj_timezone.now() - timedelta(minutes=5)
+        )
+
+    def test_a_value_no_source_ever_declared_is_left_where_it_was_found(self):
+        """A correction somebody typed is not a six-hourly job's to undo."""
+        self.sync()
+
+        dataset = self.dataset()
+        dataset.title = "A title somebody typed"
+        dataset.save(update_fields=["title", "modified"])
+
+        self.sync(self.renamed())
+
+        self.assertEqual(self.dataset().title, "A title somebody typed")
+
+
 class NodeAddressTests(CatalogueSyncTestCase):
     """A node's own address, without which nothing can ask it anything.
 
@@ -375,7 +507,68 @@ class NodeAddressTests(CatalogueSyncTestCase):
 
 
 class OriginBrokerTests(CatalogueSyncTestCase):
-    """Origin broker details come from the catalogue, never from a human."""
+    """Origin broker details come from the catalogue, never from a human.
+
+    Nor from the catalogue once the centre has answered for itself: the
+    centre advertises the same link on its own records, and is better placed
+    than a third-party catalogue to say which host it runs (ADR-0015).
+    """
+
+    def answered_centre(self, status=SyncLog.SUCCESS):
+        """A ``cg-met`` whose own discovery metadata a run has read."""
+        node = WIS2Node.objects.create(
+            centre_id="cg-met", name="cg-met", country="CG"
+        )
+
+        SyncLog.objects.create(
+            node=node,
+            sync_type=SyncLog.DISCOVERY_METADATA,
+            status=status,
+        )
+
+        MessageSource.objects.create(
+            name="cg-met origin broker",
+            source_type=MessageSource.ORIGIN_BROKER,
+            node=node,
+            centre_id="cg-met",
+            host="broker.the-centre-itself.cg",
+            port=8883,
+            use_tls=True,
+        )
+
+        return node
+
+    def broker_host(self):
+        return MessageSource.objects.get(
+            node__centre_id="cg-met", source_type=MessageSource.ORIGIN_BROKER
+        ).host
+
+    def test_a_centre_that_has_answered_for_itself_keeps_its_own_broker(self):
+        self.answered_centre()
+
+        self.sync()
+
+        self.assertEqual(self.broker_host(), "broker.the-centre-itself.cg")
+
+    def test_a_centre_whose_every_run_failed_still_takes_the_catalogues(self):
+        """A failed run is a failure, not the centre having said anything."""
+        self.answered_centre(status=SyncLog.FAILED)
+
+        self.sync()
+
+        self.assertEqual(self.broker_host(), "wis.dirmet.cg")
+
+    def test_a_centres_datasets_are_still_declared_by_the_catalogue(self):
+        """Standing back from the broker is not standing back from the record."""
+        self.answered_centre()
+
+        self.sync()
+
+        self.assertTrue(
+            DatasetSource.objects.filter(
+                dataset__identifier=CG_DATASET, source_type=DatasetSource.GDC
+            ).exists()
+        )
 
     def test_an_advertised_origin_broker_becomes_a_message_source(self):
         self.sync()
@@ -841,26 +1034,15 @@ class SharedTopicTests(CatalogueSyncTestCase):
     them -- on every run.
     """
 
-    def records_sharing_a_topic(self):
-        payload = load_json_fixture(CATALOGUE)
-        original = next(f for f in payload["features"] if f["id"] == SZ_DATASET)
-        sibling = copy.deepcopy(original)
-        sibling["id"] = SZ_SIBLING_DATASET
-        sibling["properties"]["identifier"] = SZ_SIBLING_DATASET
-        sibling["properties"]["title"] = "Automatic stations (sz-swazimet)"
-        payload["features"].append(sibling)
-
-        return payload
-
     def test_both_records_are_applied(self):
-        log = self.sync(self.records_sharing_a_topic())
+        log = self.sync(records_sharing_a_topic())
 
         self.assertEqual(log.status, SyncLog.SUCCESS)
         self.assertEqual(log.items_errored, 0)
         self.assertEqual(log.items_created, len(MONITORED_CENTRE_IDS) + 1)
 
     def test_both_datasets_persist_under_the_one_topic(self):
-        self.sync(self.records_sharing_a_topic())
+        self.sync(records_sharing_a_topic())
 
         shared = Dataset.objects.filter(
             wmo_topic_hierarchy=(
@@ -875,13 +1057,117 @@ class SharedTopicTests(CatalogueSyncTestCase):
         )
 
     def test_a_re_run_updates_both_rather_than_creating_more(self):
-        payload = self.records_sharing_a_topic()
+        payload = records_sharing_a_topic()
 
         self.sync(payload)
         log = self.sync(payload)
 
         self.assertEqual(log.items_created, 0)
         self.assertEqual(log.items_updated, len(MONITORED_CENTRE_IDS) + 1)
+
+
+class CatalogueThenNodeCycleTests(CatalogueSyncTestCase):
+    """The two syncs on their real schedules, one after the other.
+
+    Every rule here holds inside one sync when it is read on its own; what
+    they are for is the pair of them running against the same rows, six-hourly
+    and hourly. A retirement the catalogue undid would flap four times a day,
+    and every surface reading ``status`` -- silence, volume, the resolver that
+    attributes arriving traffic -- would move with it.
+
+    ``sz-swazimet`` publishes two datasets on its single synop topic, which is
+    the ordinary wis2box shape. Its own metadata declares only the second, so
+    the first is exactly the ghost ADR-0014 retires.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.registered = records_sharing_a_topic()
+
+    def declares_only_the_sibling(self, title="What the centre calls it"):
+        """The centre's own answer: one of the two records the catalogue holds."""
+        sibling = copy.deepcopy(
+            next(
+                feature
+                for feature in self.registered["features"]
+                if feature["id"] == SZ_SIBLING_DATASET
+            )
+        )
+        sibling["properties"]["title"] = title
+
+        return {"features": [sibling]}
+
+    def ask_the_centre(self, payload=None):
+        node = WIS2Node.objects.get(centre_id="sz-swazimet")
+        node.base_url = "https://wis.swazimet.sz"
+        node.save()
+
+        return sync_node_datasets(
+            node, fetch=pages(payload or self.declares_only_the_sibling())
+        )
+
+    def status_of(self, identifier):
+        return Dataset.objects.get(identifier=identifier).status
+
+    def test_the_centres_answer_retires_what_it_no_longer_declares(self):
+        self.sync(self.registered)
+
+        self.ask_the_centre()
+
+        self.assertEqual(self.status_of(SZ_DATASET), Dataset.INACTIVE)
+        self.assertEqual(self.status_of(SZ_SIBLING_DATASET), Dataset.ACTIVE)
+
+    def test_the_next_catalogue_run_does_not_bring_it_back(self):
+        self.sync(self.registered)
+        self.ask_the_centre()
+
+        self.sync(self.registered)
+
+        self.assertEqual(self.status_of(SZ_DATASET), Dataset.INACTIVE)
+
+    def test_it_stays_retired_however_many_times_round(self):
+        """Six-hourly against hourly: the flap would be four times a day."""
+        self.sync(self.registered)
+        self.ask_the_centre()
+
+        for _ in range(3):
+            self.sync(self.registered)
+            self.ask_the_centre()
+
+        self.assertEqual(self.status_of(SZ_DATASET), Dataset.INACTIVE)
+
+    def test_the_catalogue_goes_on_reporting_what_it_still_carries(self):
+        """Retiring the row settles what this tool counts, not what is registered."""
+        self.sync(self.registered)
+        self.ask_the_centre()
+
+        self.sync(self.registered)
+
+        retired = Dataset.objects.get(identifier=SZ_DATASET)
+
+        self.assertEqual(
+            set(retired.sources.values_list("source_type", flat=True)),
+            {DatasetSource.GDC},
+        )
+
+    def test_the_catalogue_does_not_rename_what_the_centre_declared(self):
+        self.sync(self.registered)
+        self.ask_the_centre()
+
+        self.sync(self.registered)
+
+        self.assertEqual(
+            Dataset.objects.get(identifier=SZ_SIBLING_DATASET).title,
+            "What the centre calls it",
+        )
+
+    def test_the_centre_takes_it_back_by_declaring_it_again(self):
+        self.sync(self.registered)
+        self.ask_the_centre()
+
+        self.ask_the_centre(self.registered)
+
+        self.assertEqual(self.status_of(SZ_DATASET), Dataset.ACTIVE)
 
 
 class IdempotenceTests(CatalogueSyncTestCase):

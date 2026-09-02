@@ -1745,6 +1745,34 @@ def _nodes_answering_for_what_they_publish():
     ).filter(last_answered_at__isnull=False)
 
 
+def centres_answering_for_what_they_publish():
+    """Which centres have answered for themselves, by centre ID.
+
+    Returns:
+        set[str]: their centre IDs, empty where none has ever answered.
+
+    The finding without the prose around it, for the callers that act on it
+    rather than show it. The catalogue sync asks this before it writes a
+    centre's own broker: a centre that has answered has advertised its broker
+    on its own records, and the catalogue's copy of what it once registered is
+    not a second opinion worth writing over that (ADR-0015).
+
+    Asked here rather than worked out again there, so that the centres a sync
+    stands back from and the centres a report treats as having spoken can
+    never be a different set -- which would be a tool deferring to an answer
+    it was not showing anybody.
+
+    One run that answered is enough, and what makes a run an answer is
+    :func:`_nodes_answering_for_what_they_publish`'s to say: a centre that
+    answered a fortnight ago and has been refusing ever since has still told
+    us what it publishes, and a failed run is a failure rather than a
+    withdrawal.
+    """
+    return set(
+        _nodes_answering_for_what_they_publish().values_list("centre_id", flat=True)
+    )
+
+
 def _nodes_never_answering_for_what_they_publish():
     """The centres whose own discovery metadata nothing has ever read.
 
