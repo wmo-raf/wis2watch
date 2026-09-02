@@ -28,8 +28,10 @@ for stations:
 The centre's **own broker** is written here, because a centre is better placed
 than a third-party catalogue to say which host it runs -- it advertises it on
 these records as an ``items`` link with a channel, exactly as a catalogue's
-copy does. The catalogue goes on writing it for the centres that have not
-answered, and stands back for the centres that have.
+copy does. Once for the run rather than once per record, since a centre has
+one broker however many datasets it declares. The catalogue goes on writing it
+for the centres that have not answered, and stands back for the centres that
+have.
 
 The centre's **own address** is deliberately not written here. It is the
 catalogue sync's to apply: which address a centre is asked at has rules of its
@@ -137,25 +139,17 @@ def _write_canonical_record(dataset, declared):
     dataset.save(update_fields=[*written, "modified"])
 
 
-def apply_declared_record(node, record):
+def apply_declared_dataset(node, declared):
     """Record that this centre declares a dataset, reporting what happened.
 
     Each record is applied in its own savepoint, so one the database refuses --
     an identifier longer than the column, say -- is counted and stepped over
     rather than losing the rest of the run.
 
-    The centre's own broker rides along with it, because it is advertised on
-    this record and not separately from it. A manually managed node is passed
-    over, as it is by every other sync: the flag says an operator has taken
-    the node's own connection details on themselves, whoever is advertising
-    what.
-
     What is counted is the declaration rather than the dataset: a dataset the
     catalogue already created is still news about this centre, and it is the
     centre this run is a report on.
     """
-    declared = record.dataset
-
     try:
         with transaction.atomic():
             dataset, created = Dataset.objects.get_or_create(
@@ -167,9 +161,6 @@ def apply_declared_record(node, record):
             if not created:
                 _write_canonical_record(dataset, declared)
                 reinstate(dataset)
-
-            if not node.is_manually_managed:
-                apply_origin_broker(node, record.origin_broker)
 
             _, declaration_created = record_declaration(
                 dataset,
@@ -226,6 +217,13 @@ def sync_node_datasets(node, fetch=None):
     # from its own failure that a centre had disowned something.
     declared = set()
 
+    # A centre has one broker, advertised on every record it serves rather
+    # than once for the centre, so the last record to name one carries the
+    # run. Written after the read rather than inside it: a row updated once
+    # per dataset would be the same row written a dozen times an hour, and
+    # every one of them the same value.
+    advertised_broker = None
+
     try:
         for payload in fetch(node):
             for record in extract_discovery_records(payload):
@@ -240,11 +238,18 @@ def sync_node_datasets(node, fetch=None):
 
                 counts.found += 1
                 declared.add(record.dataset.identifier)
-                counts.record(apply_declared_record(node, record))
+                advertised_broker = record.origin_broker or advertised_broker
+                counts.record(apply_declared_dataset(node, record.dataset))
     except Exception as exc:
         logger.error("Discovery metadata sync failed for %s: %s", node.centre_id, exc)
 
         return counts.close(sync_log, SyncLog.FAILED, str(exc))
+
+    # A manually managed node is passed over, as it is by the catalogue: the
+    # flag says an operator has taken the node's own connection details on
+    # themselves, whoever is advertising what.
+    if not node.is_manually_managed:
+        apply_origin_broker(node, advertised_broker)
 
     # After the read rather than during it, and only having got to the end of
     # one: what a centre no longer declares is a statement about the answer as

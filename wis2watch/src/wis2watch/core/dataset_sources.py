@@ -93,15 +93,15 @@ def fields_the_centre_may_write(dataset, declared):
     record that omits a title is a record that omits a title, and blanking the
     canonical one would let a thin record erase a fuller one.
     """
-    return _writable(dataset, declared, takeable=_everything_declared(dataset))
+    return _writable(dataset, declared, may_take_back=_everything_declared(dataset))
 
 
-def fields_the_catalogue_may_write(dataset, discovered, catalogue):
+def fields_the_catalogue_may_write(dataset, declared, catalogue):
     """What a catalogue's record may put on the canonical dataset row.
 
     Args:
         dataset: the canonical record as it stands.
-        discovered: what the catalogue has just said about it.
+        declared: what the catalogue has just said about it.
         catalogue: the catalogue the record was read from.
 
     Returns:
@@ -128,40 +128,35 @@ def fields_the_catalogue_may_write(dataset, discovered, catalogue):
     if dataset.sources.filter(source_type=DatasetSource.NODE).exists():
         return {}
 
-    return _writable(
-        dataset,
-        discovered,
-        takeable=[_what_it_said(_declaration(dataset, DatasetSource.GDC, catalogue))],
-    )
+    its_own = dataset.sources.filter(
+        source_type=DatasetSource.GDC, catalogue=catalogue
+    ).first()
+
+    return _writable(dataset, declared, may_take_back=[_what_it_said(its_own)])
 
 
-def _writable(dataset, declared, *, takeable):
+def _writable(dataset, declared, *, may_take_back):
     """The fields of a record whose source is entitled to write them.
 
-    ``takeable`` is what each declaration this source may withdraw says about
-    the dataset. A field is written where the canonical row holds nothing, and
-    where what it holds is one of those values; anything else is a value no
-    source is on record as having supplied, which is the whole of how a
-    hand-correction is recognised.
+    ``may_take_back`` is what each declaration this source may withdraw says
+    about the dataset, one mapping apiece. A field is written where the
+    canonical row holds nothing, and where what it holds is one of those
+    values; anything else is a value no source is on record as having
+    supplied, which is the whole of how a hand-correction is recognised.
     """
     return {
         field: value
         for field, value in declared_dataset_fields(declared).items()
-        if value and _may_be_taken_back(getattr(dataset, field), field, takeable)
+        if value and _written_by_a_source(getattr(dataset, field), field, may_take_back)
     }
 
 
-def _may_be_taken_back(current, field, takeable):
+def _written_by_a_source(current, field, may_take_back):
     """Whether what the row holds for a field is a source's rather than a person's."""
     if not current:
         return True
 
-    return any(current == said.get(field) for said in takeable)
-
-
-def _declaration(dataset, source_type, catalogue=None):
-    """The declaration one source has on file for a dataset, or None."""
-    return dataset.sources.filter(source_type=source_type, catalogue=catalogue).first()
+    return any(current == said.get(field) for said in may_take_back)
 
 
 def _everything_declared(dataset):

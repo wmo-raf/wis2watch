@@ -343,10 +343,14 @@ def declared_dataset_fields(declared):
     because two copies of it would drift and the drift would show up as the
     two sources disagreeing about a dataset neither had read differently.
 
-    What each sync does with these is its own: the catalogue writes them over
-    the record it owns, and a centre fills in only what nothing else has. The
-    fields no source supplies -- ``last_synced``, ``status`` -- are named by
-    the sync that has something to say about them, and are deliberately not
+    What each sync may do with these is not here either, because it is not the
+    same for both: which of them a given field belongs to is decided from the
+    declarations on file (ADR-0015), by
+    :mod:`wis2watch.core.dataset_sources`. This says only what a record
+    contains, which is the half the two sources really do share.
+
+    The fields no source supplies -- ``last_synced``, ``status`` -- are named
+    by the sync that has something to say about them, and are deliberately not
     here.
     """
     return {

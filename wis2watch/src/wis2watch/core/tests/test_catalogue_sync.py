@@ -516,9 +516,7 @@ class OriginBrokerTests(CatalogueSyncTestCase):
 
     def answered_centre(self, status=SyncLog.SUCCESS):
         """A ``cg-met`` whose own discovery metadata a run has read."""
-        node = WIS2Node.objects.create(
-            centre_id="cg-met", name="cg-met", country="CG"
-        )
+        node = WIS2Node.objects.create(centre_id="cg-met", name="cg-met", country="CG")
 
         SyncLog.objects.create(
             node=node,
@@ -557,6 +555,30 @@ class OriginBrokerTests(CatalogueSyncTestCase):
         self.sync()
 
         self.assertEqual(self.broker_host(), "wis.dirmet.cg")
+
+    def test_a_centre_that_answered_without_a_broker_is_given_none(self):
+        """The gap this rule leaves, pinned rather than left to be discovered.
+
+        Standing back is keyed on the centre having answered, not on its
+        having advertised a broker in the answer -- so a centre that serves
+        records with no ``items`` link of its own is described by neither
+        source, and keeps whatever it had. It is a staleness rather than a
+        wrong value, and ADR-0015 says so under what it does not address.
+        """
+        node = WIS2Node.objects.create(centre_id="cg-met", name="cg-met", country="CG")
+        SyncLog.objects.create(
+            node=node,
+            sync_type=SyncLog.DISCOVERY_METADATA,
+            status=SyncLog.SUCCESS,
+        )
+
+        self.sync()
+
+        self.assertFalse(
+            MessageSource.objects.filter(
+                node=node, source_type=MessageSource.ORIGIN_BROKER
+            ).exists()
+        )
 
     def test_a_centres_datasets_are_still_declared_by_the_catalogue(self):
         """Standing back from the broker is not standing back from the record."""

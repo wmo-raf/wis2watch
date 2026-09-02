@@ -368,6 +368,13 @@ class OriginBrokerTests(NodeDatasetsTestCase):
         self.assertEqual(MessageSource.objects.count(), 1)
         self.assertEqual(self.broker().host, "wis.weathersa.co.za")
 
+    def test_the_broker_is_written_once_however_many_records_advertise_it(self):
+        """A centre has one broker, not one per dataset it declares."""
+        with mock.patch("wis2watch.core.node_datasets.apply_origin_broker") as written:
+            self.sync()
+
+        self.assertEqual(written.call_count, 1)
+
     def test_a_record_advertising_no_broker_leaves_the_existing_one_alone(self):
         """Absence in one record is not evidence the broker is gone."""
         origin_broker(self.node, port=1883)

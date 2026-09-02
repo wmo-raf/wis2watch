@@ -118,7 +118,9 @@ hours.
 same centre, because the catalogue's arm is conditioned on the centre not
 having answered -- but the rule lives in two modules, and the shared write is
 in one place so that at least what an advertised broker becomes cannot drift
-between them.
+between them. The node sync writes it once for the run rather than once per
+record: a centre has one broker however many datasets advertise it, and a row
+updated per dataset would be the same value written a dozen times an hour.
 
 ## Not addressed here
 
@@ -128,6 +130,14 @@ address is the one field a centre's own record cannot settle by being served
 from it -- a node answering at all is not evidence that the address this tool
 holds is the one it should be asked at. It belongs in a report rather than in
 a write, and ADR-0013's is where it would go.
+
+**A centre that answers and advertises no broker.** The catalogue stands back
+on the strength of the centre having answered, not of the answer having named
+a broker, so such a centre is described by neither source and keeps whatever
+it already had. That is a staleness rather than a wrong value -- the row the
+catalogue last wrote stands -- and every centre in the region advertises the
+link, so the alternative was machinery for a case nothing is in. It is pinned
+by a test rather than left to be discovered.
 
 **Provenance for a value the source itself withdrew.** A source that stops
 declaring a field leaves the last value it declared standing, because a record
