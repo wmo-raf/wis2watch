@@ -131,14 +131,19 @@ class NodeDatasetRow:
     identifier: str
     policy: str
     policy_label: str
+    kind: str
     kind_label: str
-    is_observation: bool
     status: str
     status_label: str
     last_synced: datetime | None
     last_active_hour: datetime | None
     quiet: DatasetSilenceRow | None
     sources: list[DatasetSourceRow]
+
+    @property
+    def is_observation(self):
+        """Whether this dataset carries observations."""
+        return self.kind == Dataset.OBSERVATION
 
     @property
     def is_silent(self):
@@ -406,8 +411,8 @@ def _dataset_row(dataset, quiet, declarations):
         identifier=dataset.identifier,
         policy=dataset.wmo_data_policy or UNDECLARED,
         policy_label=dataset.get_wmo_data_policy_display() or _("Not declared"),
+        kind=dataset.kind,
         kind_label=dataset.kind_label,
-        is_observation=dataset.is_observation,
         status=dataset.status,
         status_label=dataset.get_status_display(),
         last_synced=dataset.last_synced,

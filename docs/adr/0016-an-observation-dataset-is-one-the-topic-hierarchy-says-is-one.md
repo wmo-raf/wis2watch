@@ -99,6 +99,13 @@ now silently a non-observation, which is the safe answer but not a visible one.
 Nothing in the region is in that state, and where it would be reported is the
 drift report of ADR-0013 rather than here.
 
+**The per-station traffic breakdown on the node statistics page.** That table
+lists the centre's datasets, but the question it answers is where one station's
+messages landed rather than what the centre publishes, and a kind badge there
+would answer a question nobody asked it. The two places datasets are listed as
+datasets -- the node detail page and the admin listing -- carry the
+classification.
+
 **Anything below the category.** `synop`, `metar`, `temp` and the levels under
 them are not read, and the finer question -- which kind of observation stopped
 -- is one the dataset rows already answer by name.

@@ -136,7 +136,7 @@
 
         .badge-not_attempted,
         .badge-not_advertised,
-        .badge-not-observation,
+        .badge-not_observation,
         .badge-unknown {
             background: #eee;
             color: #555;
@@ -379,7 +379,7 @@
                             {% endif %}
                         </td>
                         <td>
-                            <span class="badge {% if row.is_observation %}badge-observation{% else %}badge-not-observation{% endif %}">{{ row.kind_label }}</span>
+                            <span class="badge badge-{{ row.kind }}">{{ row.kind_label }}</span>
                         </td>
                         <td>
                             {% for source in row.sources %}
@@ -471,7 +471,7 @@
                             <div class="row-detail"><code>{{ row.topic }}</code></div>
                         </td>
                         <td>
-                            <span class="badge {% if row.is_observation %}badge-observation{% else %}badge-not-observation{% endif %}">{{ row.kind_label }}</span>
+                            <span class="badge badge-{{ row.kind }}">{{ row.kind_label }}</span>
                         </td>
                         <td>
                             <span class="badge badge-{{ row.status }}">{{ row.status_label }}</span>

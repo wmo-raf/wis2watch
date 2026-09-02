@@ -152,10 +152,9 @@ class ObservationTopicTests(NoNetworkTestCase):
             )
         )
 
-    def test_a_parsed_topic_carries_the_discipline_and_the_category_it_names(self):
+    def test_a_parsed_topic_carries_the_data_category_it_names(self):
         parsed = parse_topic(self.topic("climate", "surface-based-observations"))
 
-        self.assertEqual(parsed.discipline, "climate")
         self.assertEqual(parsed.data_category, "surface-based-observations")
         self.assertTrue(parsed.is_observation)
 

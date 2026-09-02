@@ -38,9 +38,10 @@ METADATA = "metadata"
 #: policy, the earth-system discipline and the data category follow in order.
 DATA = "data"
 
-#: Where the discipline and the category sit below ``data``, counted from the
-#: top of the hierarchy: ``data/{policy}/{discipline}/{category}/...``.
-DISCIPLINE_LEVEL = 2
+#: Where the data category sits below ``data``, counted from the top of the
+#: hierarchy: ``data/{policy}/{discipline}/{category}/...``. The discipline
+#: above it is deliberately not read: every discipline counts the same, so
+#: nothing here has any reason to name one.
 CATEGORY_LEVEL = 3
 
 #: The data categories that carry observations. Which discipline they sit
@@ -91,39 +92,26 @@ class ParsedTopic:
         return self.hierarchy[:1] == (DATA,)
 
     @property
-    def discipline(self):
-        """The earth-system discipline this topic files its data under, or "".
+    def data_category(self):
+        """The data category this topic files its data under, or "".
 
         Empty for anything that is not a data topic, and for a data topic that
-        stops above the discipline -- neither is a discipline this tool may
-        name on a centre's behalf.
+        stops above the category. The level is what gives a token its meaning,
+        so a topic that stops short answers with nothing rather than with
+        whatever token happens to sit last -- which is what keeps a centre
+        publishing on ``data/core/surface-based-observations``, a category
+        where a discipline belongs, from reading as an observation on the
+        strength of the word alone.
         """
-        return self._data_level(DISCIPLINE_LEVEL)
+        if not self.carries_data or len(self.hierarchy) <= CATEGORY_LEVEL:
+            return ""
 
-    @property
-    def data_category(self):
-        """The data category this topic files its data under, or ""."""
-        return self._data_level(CATEGORY_LEVEL)
+        return self.hierarchy[CATEGORY_LEVEL]
 
     @property
     def is_observation(self):
         """Whether this topic carries observations, in any discipline."""
         return self.data_category in OBSERVATION_CATEGORIES
-
-    def _data_level(self, level):
-        """One named level of a data topic's hierarchy, or "" if it has none.
-
-        The level is what gives a token its meaning, so a topic that stops
-        short answers with nothing rather than with whatever token happens to
-        sit last. That is what keeps a centre publishing on
-        ``data/core/surface-based-observations`` -- a category where a
-        discipline belongs -- from reading as an observation on the strength
-        of the word alone.
-        """
-        if not self.carries_data or len(self.hierarchy) <= level:
-            return ""
-
-        return self.hierarchy[level]
 
     def as_origin(self):
         """The same topic as published at origin.

@@ -51,12 +51,8 @@ from .oscar import (
 from .timestamps import parse_timestamp
 from .topics import (
     CACHE,
-    DATA,
     METADATA,
-    OBSERVATION_CATEGORIES,
     ORIGIN,
-    SPACE_BASED_OBSERVATIONS,
-    SURFACE_BASED_OBSERVATIONS,
     ParsedTopic,
     announces_catalogue_record,
     is_observation_topic,
@@ -68,14 +64,10 @@ from .topics import (
 __all__ = [
     "BrokerConnection",
     "CACHE",
-    "DATA",
     "DEFAULT_PORTS",
     "METADATA",
-    "OBSERVATION_CATEGORIES",
     "OFFSET",
     "OPERATIONAL",
-    "SPACE_BASED_OBSERVATIONS",
-    "SURFACE_BASED_OBSERVATIONS",
     "DiscoveredDataset",
     "DiscoveredNode",
     "DiscoveryRecord",
