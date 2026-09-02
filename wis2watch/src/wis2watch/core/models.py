@@ -649,8 +649,8 @@ class Dataset(TimeStampedModel):
 
     Registered for the admin by ``DatasetViewSet`` rather than here, because
     what a person may do to a sync-managed record is part of what the record
-    is: its expectation is theirs to set, and everything else is the
-    catalogue's.
+    is: its expectation is theirs to set, and everything else is a registry's
+    account of the dataset rather than anybody's opinion of it.
     """
 
     CORE = "core"
@@ -702,8 +702,10 @@ class Dataset(TimeStampedModel):
 
     # A dataset is sync-managed, so the edit form offers the one field a person
     # is meant to set -- what this tool should expect of it -- and shows the
-    # rest for identification only. Everything else is the catalogue's to say,
-    # and a hand-edit would be overwritten by the next sync anyway.
+    # rest for identification only. Everything else is what a source declared,
+    # and is worth reading beside the declarations rather than typed over here.
+    # A value typed over anyway would now stand rather than be overwritten
+    # (ADR-0015), which is the more reason for the form not to invite one.
     panels = [
         FieldPanel("title", read_only=True),
         FieldPanel("identifier", read_only=True),

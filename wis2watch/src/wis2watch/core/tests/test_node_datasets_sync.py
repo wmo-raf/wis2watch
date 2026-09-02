@@ -21,10 +21,12 @@ import requests
 from django.test import TestCase
 from django.utils import timezone as dj_timezone
 
+from wis2watch.core.interpretation import extract_discovery_record
 from wis2watch.core.models import (
     Dataset,
     DatasetSource,
     GlobalDiscoveryCatalogue,
+    MessageSource,
     SyncLog,
     WIS2Node,
 )
@@ -37,9 +39,10 @@ from wis2watch.core.sync import (
     MAX_REASON_CHARS,
     MAX_STEPPED_OVER_RECORDED,
     ReadKeptFailing,
+    declared_dataset_fields,
 )
 
-from .support import at, failing_fetch, load_json_fixture, pages
+from .support import at, failing_fetch, load_json_fixture, origin_broker, pages
 
 RECORDS = "node_discovery_metadata_za_weathersa.json"
 
@@ -58,18 +61,32 @@ SYNOP_TOPIC = (
 )
 
 
-def one_record(identifier=UNCATALOGUED, **properties):
-    """A discovery response declaring a single record."""
+def one_record(
+    identifier=UNCATALOGUED,
+    *,
+    title="Hourly synoptic observations (za-weathersa)",
+    data_policy="core",
+    topic=SYNOP_TOPIC,
+    links=(),
+    **properties,
+):
+    """A discovery response declaring a single record.
+
+    The three properties a test is ever likely to vary are named, so that a
+    record differing from another in its title reads as differing in its title
+    rather than as a dictionary of WCMP2 spellings.
+    """
     return {
         "features": [
             {
                 "properties": {
                     "identifier": identifier,
-                    "title": "Hourly synoptic observations (za-weathersa)",
-                    "wmo:dataPolicy": "core",
-                    "wmo:topicHierarchy": SYNOP_TOPIC,
+                    "title": title,
+                    "wmo:dataPolicy": data_policy,
+                    "wmo:topicHierarchy": topic,
                     **properties,
-                }
+                },
+                "links": list(links),
             }
         ]
     }
@@ -96,8 +113,15 @@ class NodeDatasetsTestCase(TestCase):
             source_type=DatasetSource.NODE,
         )
 
-    def catalogued(self, identifier, **fields):
-        """A dataset as the writing catalogue left it, declared by it."""
+    def catalogued(self, identifier, *, last_synced=None, **described):
+        """A dataset as the writing catalogue left it, declared by it.
+
+        Seeded from a record rather than from bare field values, because the
+        record is what a later sync reads to tell the catalogue's own writing
+        from somebody's correction. A row whose declaration carries no record
+        is one no source can be shown to have written, and it would make every
+        assertion below pass for the wrong reason.
+        """
         catalogue, _ = GlobalDiscoveryCatalogue.objects.get_or_create(
             centre_id="ca-eccc-msc-global-discovery",
             defaults={
@@ -107,17 +131,21 @@ class NodeDatasetsTestCase(TestCase):
             },
         )
 
+        feature = one_record(identifier, **described)["features"][0]
+        declared = extract_discovery_record(feature).dataset
+
         dataset = Dataset.objects.create(
             node=self.node,
             identifier=identifier,
-            raw_json={"identifier": identifier},
-            **fields,
+            last_synced=last_synced,
+            **declared_dataset_fields(declared),
         )
 
         DatasetSource.objects.create(
             dataset=dataset,
             source_type=DatasetSource.GDC,
             catalogue=catalogue,
+            raw_json=feature,
             last_seen=at("2026-08-01T00:00:00"),
         )
 
@@ -201,27 +229,67 @@ class DeclaredDatasetTests(NodeDatasetsTestCase):
         )
         self.assertEqual(dataset.metadata_created, at("2025-03-13T15:59:07"))
 
-    def test_a_dataset_the_catalogue_already_describes_is_left_to_it(self):
-        """Declaring is not owning: the centre's own words go on its row."""
+    def test_a_dataset_the_catalogue_describes_differently_is_corrected(self):
+        """The centre was asked directly; the catalogue holds an older copy."""
         self.catalogued(
             UNCATALOGUED,
             title="A title the catalogue holds",
-            wmo_data_policy=Dataset.RECOMMENDED,
-            wmo_topic_hierarchy="origin/a/wis2/za-weathersa/data/core/other",
+            data_policy="recommended",
+            topic="origin/a/wis2/za-weathersa/data/core/other",
         )
 
         self.sync()
 
         dataset = Dataset.objects.get(identifier=UNCATALOGUED)
 
-        self.assertEqual(dataset.title, "A title the catalogue holds")
-        self.assertEqual(dataset.wmo_data_policy, Dataset.RECOMMENDED)
         self.assertEqual(
-            dataset.wmo_topic_hierarchy, "origin/a/wis2/za-weathersa/data/core/other"
+            dataset.title,
+            "Hourly synoptic observations from fixed-land stations (SYNOP) "
+            "(za-weathersa)",
+        )
+        self.assertEqual(dataset.wmo_data_policy, Dataset.CORE)
+        self.assertEqual(dataset.wmo_topic_hierarchy, SYNOP_TOPIC)
+
+    def test_what_the_catalogue_said_survives_on_its_own_declaration(self):
+        """Correcting the row is not erasing the disagreement that found it."""
+        self.catalogued(UNCATALOGUED, title="A title the catalogue holds")
+
+        self.sync()
+
+        catalogued = DatasetSource.objects.get(
+            dataset__identifier=UNCATALOGUED, source_type=DatasetSource.GDC
+        )
+
+        self.assertEqual(
+            catalogued.raw_json["properties"]["title"], "A title the catalogue holds"
         )
         self.assertEqual(
             self.declaration().raw_json["properties"]["wmo:topicHierarchy"],
             SYNOP_TOPIC,
+        )
+
+    def test_a_value_no_source_ever_declared_is_left_where_it_was_found(self):
+        """A correction somebody typed is not an hourly job's to undo."""
+        dataset = self.catalogued(UNCATALOGUED, title="A title the catalogue holds")
+        dataset.title = "A title somebody typed"
+        dataset.save(update_fields=["title", "modified"])
+
+        self.sync()
+
+        dataset.refresh_from_db()
+
+        self.assertEqual(dataset.title, "A title somebody typed")
+        self.assertEqual(dataset.wmo_topic_hierarchy, SYNOP_TOPIC)
+
+    def test_a_field_the_record_says_nothing_about_is_not_blanked(self):
+        """A thin record is a thin record, not a retraction."""
+        self.catalogued(UNCATALOGUED)
+
+        self.sync(one_record(UNCATALOGUED, title=""))
+
+        self.assertEqual(
+            Dataset.objects.get(identifier=UNCATALOGUED).title,
+            "Hourly synoptic observations (za-weathersa)",
         )
 
     def test_what_no_other_source_recorded_is_filled_in(self):
@@ -266,6 +334,80 @@ class DeclaredDatasetTests(NodeDatasetsTestCase):
 
         self.assertEqual(theirs.raw_json, {})
         self.assertEqual(Dataset.objects.filter(identifier=UNCATALOGUED).count(), 2)
+
+
+class OriginBrokerTests(NodeDatasetsTestCase):
+    """A centre is better placed than a catalogue to say which host it runs.
+
+    The capture is the argument: South Africa advertises its own broker on
+    every one of its records, as an ``items`` link with a channel, in exactly
+    the shape a catalogue's copy carries.
+    """
+
+    def broker(self):
+        return MessageSource.objects.get(
+            node=self.node, source_type=MessageSource.ORIGIN_BROKER
+        )
+
+    def test_the_centres_own_broker_becomes_a_message_source(self):
+        self.sync()
+
+        broker = self.broker()
+
+        self.assertEqual(broker.host, "wis.weathersa.co.za")
+        self.assertEqual(broker.port, 8883)
+        self.assertTrue(broker.use_tls)
+        self.assertEqual(broker.username, "everyone")
+        self.assertEqual(broker.centre_id, "za-weathersa")
+
+    def test_a_broker_that_has_moved_is_updated_in_place(self):
+        origin_broker(self.node, port=1883)
+
+        self.sync()
+
+        self.assertEqual(MessageSource.objects.count(), 1)
+        self.assertEqual(self.broker().host, "wis.weathersa.co.za")
+
+    def test_the_broker_is_written_once_however_many_records_advertise_it(self):
+        """A centre has one broker, not one per dataset it declares."""
+        with mock.patch("wis2watch.core.node_datasets.apply_origin_broker") as written:
+            self.sync()
+
+        self.assertEqual(written.call_count, 1)
+
+    def test_a_record_advertising_no_broker_leaves_the_existing_one_alone(self):
+        """Absence in one record is not evidence the broker is gone."""
+        origin_broker(self.node, port=1883)
+
+        self.sync(one_record())
+
+        self.assertEqual(self.broker().host, "wis.za-weathersa.example.int")
+
+    def test_a_manually_managed_node_keeps_the_broker_somebody_gave_it(self):
+        self.node.is_manually_managed = True
+        self.node.save(update_fields=["is_manually_managed", "modified"])
+        MessageSource.objects.create(
+            name="za-weathersa corrected broker",
+            source_type=MessageSource.ORIGIN_BROKER,
+            node=self.node,
+            host="broker.weathersa.co.za",
+            port=1883,
+        )
+
+        self.sync()
+
+        self.assertEqual(self.broker().host, "broker.weathersa.co.za")
+
+    def test_its_datasets_still_sync(self):
+        """The manual flag holds the node's own record apart, not its records."""
+        self.node.is_manually_managed = True
+        self.node.save(update_fields=["is_manually_managed", "modified"])
+
+        self.sync()
+
+        self.assertEqual(
+            set(Dataset.objects.values_list("identifier", flat=True)), DECLARED
+        )
 
 
 class SyncLogTests(NodeDatasetsTestCase):

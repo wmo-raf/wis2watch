@@ -11,8 +11,13 @@ one row.
 The rules are :mod:`wis2watch.core.node_stations`', which holds the same shape
 for stations: declaring is not owning, and a source fills in rather than writes
 over. What is here is the declaration -- writing down that a source said
-something, and what it said -- rather than any judgement about which of them is
-right, which is a report's job and not a sync's.
+something, and what it said.
+
+Which of them the canonical row should read is also here, because the
+declarations are what answers it (ADR-0015). Not which of them is *right*,
+which is a report's job and not a sync's -- only whose value each field is
+currently holding, so that a source can take back what it wrote without
+touching what somebody typed.
 
 Recording an observation is not here. It belongs to the ingest, where the
 traffic is (:mod:`wis2watch.ingest.store`), for the same reason a station's
@@ -23,7 +28,9 @@ import logging
 
 from django.utils import timezone as dj_timezone
 
+from .interpretation import extract_discovery_record
 from .models import Dataset, DatasetSource, GlobalDiscoveryCatalogue
+from .sync import declared_dataset_fields
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +62,132 @@ def record_declaration(dataset, source_type, *, catalogue=None, raw=None, seen_a
             "last_seen": seen_at or dj_timezone.now(),
         },
     )
+
+
+def fields_the_centre_may_write(dataset, declared):
+    """What a centre's own record may put on the canonical dataset row.
+
+    Args:
+        dataset: the canonical record as it stands.
+        declared: what the centre has just said about it.
+
+    Returns:
+        dict: the canonical fields to write, under their own names.
+
+    The centre wins, because it is the one that was asked directly. A
+    catalogue holds a copy of what a centre registered at some point; the
+    centre's own metadata is what it publishes today, and where the two
+    disagree the copy is the one that is out of date. What the catalogue said
+    is not lost by that -- it stays whole on its own declaration, which is
+    what the divergence report reads.
+
+    It wins over the registries and not over a person. A value that matches
+    no declaration on file is one somebody typed, and an hourly job that
+    overwrote it would erase the correction made this morning by teatime. So
+    what may be written over is exactly what some source is on record as
+    having said, which is provenance rather than a guess about intent -- the
+    test ADR-0007 settled for a node's address, applied field by field to
+    what a registry says about a dataset.
+
+    A field the centre says nothing about is left alone, whatever is in it. A
+    record that omits a title is a record that omits a title, and blanking the
+    canonical one would let a thin record erase a fuller one.
+    """
+    return _writable(dataset, declared, may_take_back=_everything_declared(dataset))
+
+
+def fields_the_catalogue_may_write(dataset, declared, catalogue):
+    """What a catalogue's record may put on the canonical dataset row.
+
+    Args:
+        dataset: the canonical record as it stands.
+        declared: what the catalogue has just said about it.
+        catalogue: the catalogue the record was read from.
+
+    Returns:
+        dict: the canonical fields to write, under their own names.
+
+    **Nothing, once the centre has spoken for itself.** A dataset carrying a
+    ``NODE`` declaration is one whose centre has answered, and what a centre
+    publishes is the centre's to say (ADR-0015). A six-hourly job re-asserting
+    a title an hourly one had just corrected would be the two sources taking
+    turns on one row, and the row would read as whichever ran last.
+
+    Until then the catalogue is the only thing describing the dataset, and it
+    keeps the row current: it fills what is empty and takes back what it
+    itself last said, so a centre nobody can reach is still described by the
+    most recent thing anybody has said about it. Anything else in the field is
+    somebody's correction and is left exactly where it was found.
+
+    A retired dataset comes back here, since retiring one deletes the centre's
+    declaration of it (ADR-0014). That is right rather than an oversight: the
+    row is one the catalogue still carries and the centre does not, so what it
+    is described as is the catalogue's own account of it. Its ``status`` is
+    written by neither, which is what keeps a retirement a retirement.
+    """
+    if dataset.sources.filter(source_type=DatasetSource.NODE).exists():
+        return {}
+
+    its_own = dataset.sources.filter(
+        source_type=DatasetSource.GDC, catalogue=catalogue
+    ).first()
+
+    return _writable(dataset, declared, may_take_back=[_what_it_said(its_own)])
+
+
+def _writable(dataset, declared, *, may_take_back):
+    """The fields of a record whose source is entitled to write them.
+
+    ``may_take_back`` is what each declaration this source may withdraw says
+    about the dataset, one mapping apiece. A field is written where the
+    canonical row holds nothing, and where what it holds is one of those
+    values; anything else is a value no source is on record as having
+    supplied, which is the whole of how a hand-correction is recognised.
+    """
+    return {
+        field: value
+        for field, value in declared_dataset_fields(declared).items()
+        if value and _written_by_a_source(getattr(dataset, field), field, may_take_back)
+    }
+
+
+def _written_by_a_source(current, field, may_take_back):
+    """Whether what the row holds for a field is a source's rather than a person's."""
+    if not current:
+        return True
+
+    return any(current == said.get(field) for said in may_take_back)
+
+
+def _everything_declared(dataset):
+    """What every source on file says about the dataset, one mapping apiece."""
+    return [_what_it_said(declaration) for declaration in dataset.sources.all()]
+
+
+def _what_it_said(declaration):
+    """One declaration as canonical fields, or nothing where it cannot be read.
+
+    A declaration keeps the record as its source published it, so what it
+    contributed to the canonical row is worked out again here by the same
+    mapping the sync used to write it -- rather than stored a second time
+    beside it, where the copy could disagree with the record it was copied
+    from.
+
+    A declaration with no record, or one that no longer reads as a record at
+    all, says nothing. That is the conservative half of the test and it errs
+    the safe way: a value this cannot account for is left standing, which for
+    a value some source really did write costs a sync one stale field, and for
+    a value somebody typed is the whole point.
+    """
+    if declaration is None or not declaration.raw_json:
+        return {}
+
+    record = extract_discovery_record(declaration.raw_json)
+
+    if record is None:
+        return {}
+
+    return declared_dataset_fields(record.dataset)
 
 
 def backfill_gdc_declarations():

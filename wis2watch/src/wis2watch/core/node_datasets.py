@@ -18,16 +18,27 @@ for stations:
 - **Declaring is not owning.** The canonical dataset is keyed on the centre and
   the identifier and shared with the catalogue, so a centre's own record is
   written down as a declaration beside it rather than as the dataset itself.
-- **Fill, do not overwrite.** A centre fills in what nothing else has recorded
-  and leaves alone what another source already wrote, so an hourly run cannot
-  undo a six-hourly one. What the centre said is kept whole on its declaration,
-  which is what a divergence report reads.
+- **The centre's word carries the row.** Where the two registries describe the
+  same dataset differently, what the centre says goes on the canonical record
+  and the catalogue's copy stays whole on its own declaration, which is what a
+  divergence report reads (ADR-0015). It carries over a registry, never over a
+  person: a value no source is on record as having said is somebody's
+  correction, and an hourly job is the last thing that should be undoing one.
 
-The centre's **own broker and address** are deliberately not written here.
-They are advertised on these records as they are on a catalogue's, and are the
+The centre's **own broker** is written here, because a centre is better placed
+than a third-party catalogue to say which host it runs -- it advertises it on
+these records as an ``items`` link with a channel, exactly as a catalogue's
+copy does. Once for the run rather than once per record, since a centre has
+one broker however many datasets it declares. The catalogue goes on writing it
+for the centres that have not answered, and stands back for the centres that
+have.
+
+The centre's **own address** is deliberately not written here. It is the
 catalogue sync's to apply: which address a centre is asked at has rules of its
-own about whose correction may be taken back (ADR-0007), and a second writer
-for them would be a second opinion on the same field.
+own about whose correction may be taken back (ADR-0007), a node reachable at
+the wrong address is a contradiction rather than a disagreement, and a second
+writer for it would be a second opinion on the one field that decides whether
+any of this can be asked at all.
 
 **What a centre has stopped declaring** is concluded here, and only here,
 because this is the one place a centre has answered for itself. What that
@@ -47,7 +58,7 @@ import logging
 from django.db import transaction
 
 from .dataset_retirement import reinstate, retire_undeclared_datasets
-from .dataset_sources import record_declaration
+from .dataset_sources import fields_the_centre_may_write, record_declaration
 from .interpretation import extract_discovery_records
 from .models import Dataset, DatasetSource, SyncLog
 from .sync import (
@@ -55,6 +66,7 @@ from .sync import (
     UPDATED,
     SteppedOver,
     SyncCounts,
+    apply_origin_broker,
     declared_dataset_fields,
     fetch_pages,
 )
@@ -93,36 +105,38 @@ def fetch_node_discovery_pages(node):
     )
 
 
-def _fill_canonical_record(dataset, declared):
-    """Fill in what nothing else has recorded about the dataset.
+def _write_canonical_record(dataset, declared):
+    """Put what this centre says of the dataset on the canonical record.
 
-    A centre is the better authority on what it publishes, and this still
-    fills rather than overwrites. The two sources are compared by a report
-    that reads both declarations whole, and a canonical record rewritten
-    hourly would leave that report comparing the centre with itself -- the
-    disagreement erased by the very sync that found it.
+    The centre carries the row where the registries disagree, because it is the
+    one that was asked directly and a catalogue holds a copy of what it
+    registered at some point. Which fields that comes to is
+    :func:`~wis2watch.core.dataset_sources.fields_the_centre_may_write`'s to
+    decide, and what it will not touch is a value no source is on record as
+    having said -- somebody's correction, which an hourly run has no business
+    undoing.
 
-    What is filled is what a centre's record says. ``last_synced`` is not
-    among it and is never written here: it is when the *catalogue* last
-    confirmed the record, which is what a backfilled catalogue declaration is
-    dated from, and a centre stamping it would have this sync reporting the
-    catalogue as current every hour on records the catalogue may not have
-    carried for months. When the centre itself last said so is on the centre's
-    own declaration, which is where a reader compares the two.
+    Nothing is erased by a thin record. A field the centre says nothing about
+    is left exactly as it was found, so a record that omits a title cannot
+    blank a fuller one.
+
+    ``last_synced`` is not among what is written here and never is: it is when
+    the *catalogue* last confirmed the record, which is what a backfilled
+    catalogue declaration is dated from, and a centre stamping it would have
+    this sync reporting the catalogue as current every hour on records the
+    catalogue may not have carried for months. When the centre itself last
+    said so is on the centre's own declaration, which is where a reader
+    compares the two.
     """
-    filled = {
-        field: value
-        for field, value in declared_dataset_fields(declared).items()
-        if value and not getattr(dataset, field)
-    }
+    written = fields_the_centre_may_write(dataset, declared)
 
-    if not filled:
+    if not written:
         return
 
-    for field, value in filled.items():
+    for field, value in written.items():
         setattr(dataset, field, value)
 
-    dataset.save(update_fields=[*filled, "modified"])
+    dataset.save(update_fields=[*written, "modified"])
 
 
 def apply_declared_dataset(node, declared):
@@ -145,7 +159,7 @@ def apply_declared_dataset(node, declared):
             )
 
             if not created:
-                _fill_canonical_record(dataset, declared)
+                _write_canonical_record(dataset, declared)
                 reinstate(dataset)
 
             _, declaration_created = record_declaration(
@@ -203,6 +217,13 @@ def sync_node_datasets(node, fetch=None):
     # from its own failure that a centre had disowned something.
     declared = set()
 
+    # A centre has one broker, advertised on every record it serves rather
+    # than once for the centre, so the last record to name one carries the
+    # run. Written after the read rather than inside it: a row updated once
+    # per dataset would be the same row written a dozen times an hour, and
+    # every one of them the same value.
+    advertised_broker = None
+
     try:
         for payload in fetch(node):
             for record in extract_discovery_records(payload):
@@ -217,11 +238,18 @@ def sync_node_datasets(node, fetch=None):
 
                 counts.found += 1
                 declared.add(record.dataset.identifier)
+                advertised_broker = record.origin_broker or advertised_broker
                 counts.record(apply_declared_dataset(node, record.dataset))
     except Exception as exc:
         logger.error("Discovery metadata sync failed for %s: %s", node.centre_id, exc)
 
         return counts.close(sync_log, SyncLog.FAILED, str(exc))
+
+    # A manually managed node is passed over, as it is by the catalogue: the
+    # flag says an operator has taken the node's own connection details on
+    # themselves, whoever is advertising what.
+    if not node.is_manually_managed:
+        apply_origin_broker(node, advertised_broker)
 
     # After the read rather than during it, and only having got to the end of
     # one: what a centre no longer declares is a statement about the answer as
