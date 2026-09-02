@@ -40,6 +40,20 @@ from wis2watch.core.viewsets import (
 from .support import at
 
 
+def row_for(title, html):
+    """The one table row carrying a title, so a cell is read against its row.
+
+    A page-wide assertion would still pass with every badge attached to the
+    wrong row, which is the one thing a rendering test is there to catch.
+    """
+    rows = [row for row in re.findall(r"<tr\b.*?</tr>", html, re.S) if title in row]
+
+    if len(rows) != 1:
+        raise AssertionError(f"expected one row for {title!r}, found {len(rows)}")
+
+    return rows[0]
+
+
 class AdminSmokeTests(TestCase):
     """The admin is where nodes, brokers and catalogues are configured by hand."""
 
@@ -808,6 +822,29 @@ class DatasetAdminTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Surface observations")
 
+    def test_the_listing_says_which_datasets_carry_observations(self):
+        """What this installation is watching, told apart in the one listing."""
+        Dataset.objects.create(
+            node=self.node,
+            identifier="urn:wmo:md:ke-kmd:metar",
+            title="Aerodrome reports",
+            wmo_data_policy="core",
+            wmo_topic_hierarchy="origin/a/wis2/ke-kmd/data/core/weather/aviation/metar",
+            raw_json={},
+        )
+        self.dataset.wmo_topic_hierarchy = (
+            "origin/a/wis2/ke-kmd/data/core/weather/surface-based-observations/synop"
+        )
+        self.dataset.save(update_fields=["wmo_topic_hierarchy"])
+
+        html = self.client.get(self.url("list")).content.decode()
+
+        observation = row_for("Surface observations", html)
+
+        self.assertIn("Observation", observation)
+        self.assertNotIn("Not an observation", observation)
+        self.assertIn("Not an observation", row_for("Aerodrome reports", html))
+
     def test_the_expected_interval_can_be_set_by_hand(self):
         response = self.client.post(
             self.url("edit", self.dataset.pk),
@@ -963,6 +1000,36 @@ class NodeDetailViewTests(TestCase):
         self.assertContains(response, "2026-08-01 00:00")
         self.assertContains(response, "Set by hand")
         self.assertContains(response, "Silent")
+
+    def test_the_page_says_which_datasets_carry_observations(self):
+        """Which of the centre's rows this installation is actually watching."""
+        Dataset.objects.create(
+            node=self.node,
+            identifier="urn:wmo:md:ke-kmd:synop",
+            title="Surface observations",
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy=(
+                "origin/a/wis2/ke-kmd/data/core/weather/"
+                "surface-based-observations/synop"
+            ),
+            raw_json={},
+        )
+        Dataset.objects.create(
+            node=self.node,
+            identifier="urn:wmo:md:ke-kmd:metar",
+            title="Aerodrome reports",
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy="origin/a/wis2/ke-kmd/data/core/weather/aviation/metar",
+            raw_json={},
+        )
+
+        html = self.page().content.decode()
+
+        observation = row_for("Surface observations", html)
+
+        self.assertIn("Observation", observation)
+        self.assertNotIn("Not an observation", observation)
+        self.assertIn("Not an observation", row_for("Aerodrome reports", html))
 
     def test_where_a_dataset_came_from_is_on_the_page(self):
         """Two sources describing one dataset, and the page says which is which."""

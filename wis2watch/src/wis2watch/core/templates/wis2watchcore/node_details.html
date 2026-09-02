@@ -136,9 +136,19 @@
 
         .badge-not_attempted,
         .badge-not_advertised,
+        .badge-not_observation,
         .badge-unknown {
             background: #eee;
             color: #555;
+        }
+
+        /* Whether a dataset carries observations -- the thing this
+           installation is stood up to watch. Deliberately not the health
+           palette either: an aerodrome report is not a fault, it is simply
+           not what the headline word is about. */
+        .badge-observation {
+            background: #dce7ea;
+            color: #1f4a55;
         }
 
         /* Where a dataset came from. Deliberately not the health palette:
@@ -339,7 +349,7 @@
             {% endif %}
         </div>
         <p class="section-note">
-            {% trans "Each dataset judged against its own cadence, learned from its history or stated by hand, so that which part of this centre's output stopped is readable rather than that something did. Beside each one, where this tool learned of it: a catalogue, the centre's own metadata, or the centre's traffic naming a record nothing had declared." %}
+            {% trans "Each dataset judged against its own cadence, learned from its history or stated by hand, so that which part of this centre's output stopped is readable rather than that something did. Beside each one, whether it carries observations -- read off the topic the centre publishes it on -- and where this tool learned of it: a catalogue, the centre's own metadata, or the centre's traffic naming a record nothing had declared." %}
         </p>
 
         {% if detail.datasets %}
@@ -347,6 +357,7 @@
                 <thead>
                 <tr>
                     <th>{% trans "Dataset" %}</th>
+                    <th>{% trans "Kind" %}</th>
                     <th>{% trans "Declared by" %}</th>
                     <th>{% trans "Policy" %}</th>
                     <th>{% trans "Last published" %}</th>
@@ -366,6 +377,9 @@
                                     {% blocktrans with synced=row.last_synced|date:"Y-m-d H:i" %}catalogue read {{ synced }}{% endblocktrans %}
                                 </div>
                             {% endif %}
+                        </td>
+                        <td>
+                            <span class="badge badge-{{ row.kind }}">{{ row.kind_label }}</span>
                         </td>
                         <td>
                             {% for source in row.sources %}
@@ -443,6 +457,7 @@
                 <thead>
                 <tr>
                     <th>{% trans "Dataset" %}</th>
+                    <th>{% trans "Kind" %}</th>
                     <th>{% trans "Status" %}</th>
                     <th>{% trans "Last published" %}</th>
                     <th>{% trans "Last synced" %}</th>
@@ -454,6 +469,9 @@
                         <td>
                             <span title="{{ row.identifier }}">{{ row.title }}</span>
                             <div class="row-detail"><code>{{ row.topic }}</code></div>
+                        </td>
+                        <td>
+                            <span class="badge badge-{{ row.kind }}">{{ row.kind_label }}</span>
                         </td>
                         <td>
                             <span class="badge badge-{{ row.status }}">{{ row.status_label }}</span>
