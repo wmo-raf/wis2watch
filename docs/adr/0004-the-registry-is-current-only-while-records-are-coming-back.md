@@ -4,6 +4,13 @@ Date: 2026-08-25
 
 Status: Accepted
 
+Narrowed by [ADR-0018](0018-the-registry-has-two-writers-and-each-writes-what-only-it-can-know.md),
+which reverses one clause of the context below: the designated writer is no
+longer the only writer. A centre's own discovery metadata now writes its
+datasets and its origin broker, and the catalogue keeps what only it can know
+— that a centre exists, and its address. Every decision this record takes
+stands, because a dead catalogue still means new centres never appear.
+
 ## Context
 
 Exactly one Global Discovery Catalogue creates registry records. Nodes,
