@@ -76,6 +76,21 @@ def floor_to_hour(moment):
     return moment.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
 
 
+def end_of_hour(hour):
+    """The latest instant an hourly bucket admits a message at.
+
+    Where anything measuring how long a bucket's owner has been quiet counts
+    from. The moment inside the bucket is unknown -- that is what bucketing
+    costs -- so taking its end is the reading that cannot overstate the quiet,
+    and overstating is what manufactures findings.
+
+    Beside ``floor_to_hour`` because it is the same arithmetic from the other
+    end, and because two modules judge quiet by it: whether a dataset has
+    slipped its cadence, and whether a centre's observations have stopped.
+    """
+    return hour + timedelta(hours=1)
+
+
 def window_start(now, hours):
     """The first hourly bucket a window of that many hours covers.
 

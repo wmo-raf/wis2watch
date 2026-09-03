@@ -183,10 +183,13 @@ class TransmissionStatusPanel(Component):
     and because the question it answers is the one the reader already has in
     their head when the page paints.
 
-    **One question, and only one.** Whether a centre's own broker answers, and
-    whether the Global Caches carried what it published, are both true and
-    neither is what this panel is for: the first is how the tool is watching
-    the centre, the second is what happened downstream after it published.
+    **One question, and only one** -- and on this installation that question
+    is whether *observations* are coming out of the region, which is what the
+    verdict is measured over (ADR-0017). Whether a centre's own broker
+    answers, and whether the Global Caches carried what it published, are both
+    true and neither is what this panel is for: the first is how the tool is
+    watching the centre, the second is what happened downstream after it
+    published.
     Folding them in put twenty-one of thirty-two centres under "Archive only"
     and left exactly one row reading healthy -- on a panel whose job is to say
     whether data is flowing. It draws ``TransmissionStanding`` instead, and the

@@ -14,11 +14,26 @@ but the centre itself -- which is a different failure from either of the other
 two, and invisible in both of their columns.
 
 Two different quiets are reported side by side, because they answer different
-questions. Staleness is how long it is since the centre published anything at
-all, against one flat threshold, and is what the table sorts by. Silence is
-each dataset judged against its own learned or stated cadence -- so a centre
-whose hourly synops are flowing while its daily bulletin has not appeared for
-a week is not stale, and is missing something.
+questions. Staleness is how long it is since the centre's observations
+arrived, against one flat threshold, and is what the table sorts by. Silence is
+each observation dataset judged against its own learned or stated cadence -- so
+a centre whose hourly synops are flowing while its daily climate summary has
+not appeared for a week is not stale, and is missing something.
+
+**Both of them are observation-scoped, and the columns beside them are not**
+(ADR-0017). This installation is opened to find out whether observations are
+still coming out of the region, so the verdict is anchored on observation
+traffic: a centre whose synops died three days ago while its aviation
+advisories flow reads as gone quiet, which is what it is. Volume, the dataset
+count and cache pickup keep counting everything the centre publishes -- they
+report how big a centre is and where its data went, which are not questions
+about observations -- and the node detail page judges every dataset it has.
+
+A centre publishing no observations at all is therefore a *fourth* staleness
+state rather than a quiet one, for the reason ``CachePickup`` already carries
+three: there is nothing it was expected to publish, and reporting it as never
+heard from or gone quiet would put a fault on a centre that has committed
+none.
 
 Every monitored centre appears, whatever has been heard from it -- a centre
 nothing has ever arrived from is the most concerning row in the table, not an
@@ -28,12 +43,15 @@ off it.
 ``NodeStanding`` folds those four judgements into one word, for the surfaces
 that want a column to sort by rather than four badges to read across. It lives
 here rather than beside the table that draws it because it reads nothing but
-the fields already on a row of this one -- which is also what lets it keep the
-promise below.
+the fields already on a row of this one.
 
-Nothing here reads the time series. Last-seen is maintained on ingest and
-recent volume comes from the rollups, so the table costs a handful of indexed
-lookups rather than a scan that grows with the region's traffic.
+The time series is read once, for the whole region. Anchoring on observations
+cost the denormalised last-seen row that used to answer the staleness column,
+because that row advances on any message at all; what replaces it is the
+observation fold in ``wis2watch.core.analysis.observations``, which is the
+silence walk this table already paid for, folded per centre rather than asked
+for a second time. Volume still comes from the rollups, so the rest of the
+table is the handful of indexed lookups it always was.
 """
 
 from dataclasses import dataclass
@@ -49,13 +67,13 @@ from ..models import (
     Dataset,
     HourlyRollup,
     MessageSource,
-    NodeLastSeen,
     StationSource,
     WIS2Node,
 )
-from ..rollups import window_start
+from ..rollups import end_of_hour, window_start
+from .observations import NodeObservations, observations_by_node
 from .reachability import OriginReachability, OriginWatch
-from .silence import BEFORE_ANYTHING, NodeSilence, Silence, hours_between, silence_by_node
+from .silence import BEFORE_ANYTHING, Silence, hours_quiet_since
 from .staleness import Staleness, default_stale_after_hours
 
 #: How much recent traffic the table reports on, in hours. Volume comes from
@@ -142,25 +160,40 @@ class NodeStanding:
     ``HEALTHY`` therefore means all four judgements are clear, which is a
     higher bar than any one column reads: a centre publishing perfectly well
     over a broker nobody can dial does not reach it.
+
+    ``NO_OBSERVATIONS`` sits with the transmission judgements rather than
+    below the plumbing ones, above ``NOT_CACHED``, because that is what it is:
+    the answer to "are observations coming out of this centre" when the centre
+    declares none. It is also what keeps the two verdicts one order --
+    ``TransmissionStanding`` is a coarsening of this scale, and the all-centres
+    table sorts both of them by this one, which it can only do while the ranks
+    they share come in the same sequence.
+
+    The consequence is accepted rather than overlooked: a centre declaring no
+    observations *and* failing to reach the caches reads as the first of the
+    two. It is the same rule the ranks above it follow -- the first fault in
+    reading order wins -- and the cache column beside it still says so.
     """
 
     NEVER_SEEN = "never_seen"
     STALE = "stale"
     SILENT = "silent"
+    NO_OBSERVATIONS = "no_observations"
     NOT_CACHED = "not_cached"
     NO_BROKER = "no_broker"
     ARCHIVE_ONLY = "archive_only"
     HEALTHY = "healthy"
 
-    #: In reading order: what has stopped, then what has slipped, then what is
-    #: not reaching the world, then what nothing is watching, then what is
-    #: answering only where it is not obliged to, then what is fine. A filter
-    #: control offers them in this order for the same reason the rows arrive
-    #: in it.
+    #: In reading order: what has stopped, then what has slipped, then what
+    #: cannot be judged at all, then what is not reaching the world, then what
+    #: nothing is watching, then what is answering only where it is not
+    #: obliged to, then what is fine. A filter control offers them in this
+    #: order for the same reason the rows arrive in it.
     CHOICES = [
         (NEVER_SEEN, _("Never heard from")),
         (STALE, _("Gone quiet")),
         (SILENT, _("Behind schedule")),
+        (NO_OBSERVATIONS, _("No observations declared")),
         (NOT_CACHED, _("Not reaching the caches")),
         (NO_BROKER, _("Not watched")),
         (ARCHIVE_ONLY, _("Archive only")),
@@ -185,6 +218,10 @@ class NodeStanding:
         the earlier ones, and reporting a consequence in place of its cause is
         how a reader ends up chasing the wrong thing.
 
+        ``NO_OBSERVATIONS`` is read off the staleness rather than a judgement
+        of its own, because that is where the state lives: it is what the
+        staleness column says about a centre with nothing to be quiet about.
+
         Args:
             row (NodeOverviewRow): the centre's row, already judged four ways.
 
@@ -199,6 +236,9 @@ class NodeStanding:
 
         if row.silence == Silence.SILENT:
             return cls.SILENT
+
+        if row.staleness == Staleness.NO_OBSERVATIONS:
+            return cls.NO_OBSERVATIONS
 
         if row.cache_pickup == CachePickup.NOT_PICKED_UP:
             return cls.NOT_CACHED
@@ -234,22 +274,31 @@ class TransmissionStanding:
     carries ``NodeStanding`` and all four badges, and that is the page somebody
     opens to ask what is wrong rather than whether anything is.
 
-    Three of the four labels are ``NodeStanding``'s own, word for word, so a
+    Four of the five labels are ``NodeStanding``'s own, word for word, so a
     reader moving between the two tables is learning one vocabulary and not
     two. ``TRANSMITTING`` is ``StationStanding``'s word for the same idea one
     level down.
+
+    ``NO_OBSERVATIONS`` is the fourth of them, and is here for the reason the
+    whole verdict is observation-scoped (ADR-0017): a centre that declares no
+    observation datasets has nothing flowing that this panel is watching for,
+    and reading it as ``TRANSMITTING`` on the strength of its warnings would
+    be the panel answering a question nobody asked it.
     """
 
     NEVER_SEEN = "never_seen"
     STALE = "stale"
     SILENT = "silent"
+    NO_OBSERVATIONS = "no_observations"
     TRANSMITTING = "transmitting"
 
-    #: What has stopped, then what has slipped, then what is flowing.
+    #: What has stopped, then what has slipped, then what cannot be judged at
+    #: all, then what is flowing.
     CHOICES = [
         (NEVER_SEEN, _("Never heard from")),
         (STALE, _("Gone quiet")),
         (SILENT, _("Behind schedule")),
+        (NO_OBSERVATIONS, _("No observations declared")),
         (TRANSMITTING, _("Transmitting")),
     ]
 
@@ -292,30 +341,53 @@ class TransmissionStanding:
         if row.silence == Silence.SILENT:
             return cls.SILENT
 
+        if row.staleness == Staleness.NO_OBSERVATIONS:
+            return cls.NO_OBSERVATIONS
+
         return cls.TRANSMITTING
 
 
 @dataclass(frozen=True)
 class NodeOverviewRow:
-    """One centre's line in the overview."""
+    """One centre's line in the overview.
+
+    Two scopes on one row, named apart so nothing can read one for the other.
+    The observation fields are what the verdict is made of; the counts are
+    everything the centre publishes.
+    """
 
     node_id: int
     centre_id: str
     name: str
     country_code: str
     country_name: str
-    last_seen_at: datetime | None
-    hours_since_last_seen: float | None
+    #: The hour the centre's observations were last seen publishing in, or
+    #: None -- either because they never have or because the centre declares
+    #: none, which the staleness beside it tells apart. An hour and not an
+    #: instant: the history is hourly buckets, so this is as fine an answer as
+    #: there is.
+    last_observation_at: datetime | None
+    #: How long since then, counted from the *end* of that bucket, which is
+    #: the smallest quiet the evidence supports -- the reading
+    #: ``wis2watch.core.analysis.silence`` already judges every dataset by.
+    hours_since_observation: float | None
     staleness: str
+    #: Everything the centre published in the window, observations and not.
+    #: How big a centre is rather than how well it is, which is why the
+    #: verdict does not read it.
     recent_message_count: int
     core_message_count: int
     cache_message_count: int
     cache_pickup: str
+    #: Every live dataset the centre declares, of whatever kind. The counts
+    #: under ``silence`` below are the observations among them.
     dataset_count: int
     station_count: int
     origin_watch: str
     origin_broker_reachability: str
     origin_last_error: str
+    #: The centre's observation datasets judged against their own cadences,
+    #: and how many of them there were to judge.
     silence: str
     silent_dataset_count: int
     judged_dataset_count: int
@@ -384,7 +456,8 @@ def node_overview(
         now: the instant to judge staleness and the volume window against.
         volume_hours: how many hourly buckets of traffic to count, ending
             with the hour in progress.
-        stale_after_hours: how long a centre may be quiet before it is stale.
+        stale_after_hours: how long a centre's observations may be quiet
+            before it is stale.
         staleness: keep only rows of this ``Staleness``, or all of them.
         order: ``"staleness"`` puts the centres worth looking at first --
             never heard from, then longest quiet; ``"centre"`` sorts by
@@ -400,12 +473,12 @@ def node_overview(
     hours = default_volume_hours() if volume_hours is None else volume_hours
 
     # Asked once for the whole region rather than per row: the datasets of
-    # every centre are judged in the same two queries, and a row that has none
-    # is one the mapping simply does not mention.
-    silence = silence_by_node(now=now)
+    # every centre are judged in the same two queries, and a centre that
+    # declares no observations is one the mapping simply does not mention.
+    observations = observations_by_node(now=now)
 
     rows = [
-        _row(node, now=now, stale_after=stale_after, silence=silence)
+        _row(node, now=now, stale_after=stale_after, observations=observations)
         for node in _annotated_nodes(since=window_start(now, hours))
     ]
 
@@ -476,10 +549,6 @@ def _annotated_nodes(*, since):
         .values("total")
     )
 
-    last_seen = NodeLastSeen.objects.filter(node=OuterRef("pk")).values(
-        "last_message_at"
-    )
-
     # A node has at most one broker of its own, so this reads one row. It is
     # asked for separately from whether that row exists at all, because a
     # reachability of null means "not attempted" only when there is a broker
@@ -502,7 +571,6 @@ def _annotated_nodes(*, since):
         )
 
     return WIS2Node.objects.annotate(
-        last_seen_at=Subquery(last_seen[:1]),
         recent_message_count=Coalesce(Subquery(recent_messages), 0),
         core_message_count=Coalesce(Subquery(core_messages), 0),
         cache_message_count=Coalesce(Subquery(cached_messages), 0),
@@ -516,10 +584,16 @@ def _annotated_nodes(*, since):
     )
 
 
-def _row(node, *, now, stale_after, silence):
-    """One annotated node as a finding."""
-    quiet_for = hours_between(node.last_seen_at, now)
-    node_silence = silence.get(node.pk) or NodeSilence.nothing_known()
+def _row(node, *, now, stale_after, observations):
+    """One annotated node as a finding.
+
+    A centre absent from the fold declares no observations, which is a state
+    of its own rather than a missing row: the stand-in carries the same shape
+    as a centre that has some, so nothing below has to ask which it is
+    holding.
+    """
+    seen = observations.get(node.pk) or NodeObservations.none_declared()
+    quiet_for = _hours_quiet(seen.last_active_hour, now)
 
     return NodeOverviewRow(
         node_id=node.pk,
@@ -527,9 +601,9 @@ def _row(node, *, now, stale_after, silence):
         name=node.name,
         country_code=node.country.code if node.country else "",
         country_name=node.country.name if node.country else "",
-        last_seen_at=node.last_seen_at,
-        hours_since_last_seen=quiet_for,
-        staleness=_staleness(quiet_for, stale_after),
+        last_observation_at=seen.last_active_hour,
+        hours_since_observation=quiet_for,
+        staleness=_staleness(seen, quiet_for, stale_after),
         recent_message_count=node.recent_message_count,
         core_message_count=node.core_message_count,
         cache_message_count=node.cache_message_count,
@@ -541,9 +615,9 @@ def _row(node, *, now, stale_after, silence):
         ),
         origin_broker_reachability=_origin_reachability(node),
         origin_last_error=node.origin_error or "",
-        silence=node_silence.silence,
-        silent_dataset_count=node_silence.silent_dataset_count,
-        judged_dataset_count=node_silence.judged_dataset_count,
+        silence=seen.silence,
+        silent_dataset_count=seen.silent_dataset_count,
+        judged_dataset_count=seen.judged_dataset_count,
     )
 
 
@@ -571,7 +645,34 @@ def _origin_reachability(node):
     )
 
 
-def _staleness(quiet_for, stale_after):
+def _hours_quiet(last_active_hour, now):
+    """How long since the centre's observations, or None if there were none.
+
+    Counted from the end of the bucket the last one landed in, through the
+    same two functions ``wis2watch.core.analysis.silence`` judges every
+    dataset by, so the staleness column and the silence column beside it are
+    measuring from one place rather than from two spellings of it. It does
+    mean a centre must be a bucket past the threshold before it is called
+    stale, which is the price of not reporting one late for having published
+    at the wrong end of an hour.
+    """
+    if last_active_hour is None:
+        return None
+
+    return hours_quiet_since(end_of_hour(last_active_hour), now)
+
+
+def _staleness(observations, quiet_for, stale_after):
+    """What a centre's observation quiet amounts to.
+
+    Read before the quiet rather than from it, because the two absences look
+    alike and are not alike: a centre whose observations have never arrived is
+    the most concerning row in the table, and a centre that declares none has
+    nothing to be concerning about.
+    """
+    if not observations.declares_observations:
+        return Staleness.NO_OBSERVATIONS
+
     if quiet_for is None:
         return Staleness.NEVER_SEEN
 
@@ -581,9 +682,23 @@ def _staleness(quiet_for, stale_after):
 def _ordered(rows, order):
     """The table in the order asked for.
 
-    Staleness order puts the centres nothing has ever been heard from first,
-    then the longest quiet, because that is the order someone reads the table
-    in when they are looking for what has broken.
+    Staleness order puts the centres whose observations have never arrived
+    first, then the longest quiet, because that is the order someone reads the
+    table in when they are looking for what has broken.
+
+    The state leads and the last hour tie-breaks within it, rather than the
+    last hour deciding on its own. A centre that declares no observations
+    carries no last hour exactly as one that has never published carries none,
+    and sorting on the hour alone would put the two together -- the fourth
+    state heading a table read worst-first on the strength of an absence that
+    is not a fault.
+
+    Which state sorts where is ``Staleness.RANK`` and not a rule of this
+    function's, because ``NodeStanding`` ranks the same states and the
+    all-centres table sorts by that. Two orderings of one region that disagree
+    about which centre to look at first are one of them being wrong, and a
+    reading order nothing on screen honours is worse than none: it is a
+    promise this module makes and every surface breaks.
     """
     if order == "centre":
         return sorted(rows, key=lambda row: row.centre_id)
@@ -591,8 +706,9 @@ def _ordered(rows, order):
     return sorted(
         rows,
         key=lambda row: (
-            row.last_seen_at is not None,
-            row.last_seen_at or BEFORE_ANYTHING,
+            Staleness.RANK.get(row.staleness, len(Staleness.RANK)),
+            row.last_observation_at is not None,
+            row.last_observation_at or BEFORE_ANYTHING,
             row.centre_id,
         ),
     )

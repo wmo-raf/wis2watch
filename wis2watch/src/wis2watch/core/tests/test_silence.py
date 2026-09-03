@@ -21,7 +21,6 @@ from wis2watch.core.analysis import (
     Expectation,
     Silence,
     dataset_silence,
-    silence_by_node,
 )
 from wis2watch.core.models import (
     CadenceBaseline,
@@ -413,49 +412,32 @@ class OrderingTests(SilenceTestCase):
         self.assertEqual(titles[-1], "unjudgeable")
 
 
-class NodeSilenceTests(SilenceTestCase):
-    """What the overview says about a centre as a whole."""
+class KindTests(SilenceTestCase):
+    """Each row says whether its dataset's topic files it as an observation.
 
-    def by_node(self, **kwargs):
-        kwargs.setdefault("now", NOW)
+    Carried here so that whoever folds these rows into a centre's verdict
+    reads the topic once, through the dataset, rather than parsing it a second
+    time and being free to disagree with the badge on the node detail page.
+    """
 
-        return silence_by_node(**kwargs)
+    def topic(self, dataset, topic):
+        dataset.wmo_topic_hierarchy = topic
+        dataset.save(update_fields=["wmo_topic_hierarchy"])
 
-    def test_a_centre_with_a_dataset_past_its_expectation_is_silent(self):
-        self.learned(self.quiet_for(self.dataset("synop"), 8), 6)
-        self.learned(self.quiet_for(self.dataset("temp"), 1), 6)
+        return dataset
 
-        node = self.by_node()[self.kenya.pk]
+    def test_a_dataset_filed_under_an_observation_category_is_one(self):
+        self.topic(
+            self.quiet_for(self.dataset("synop"), 1),
+            "origin/a/wis2/ke-meteo/data/core/weather/surface-based-observations/synop",
+        )
 
-        self.assertEqual(node.silence, Silence.SILENT)
-        self.assertEqual(node.silent_dataset_count, 1)
-        self.assertEqual(node.judged_dataset_count, 2)
+        self.assertTrue(self.row("synop").is_observation)
 
-    def test_a_centre_whose_datasets_are_all_within_their_expectations_is_not(self):
-        self.learned(self.quiet_for(self.dataset("synop"), 1), 6)
+    def test_a_dataset_filed_under_any_other_category_is_not(self):
+        self.topic(
+            self.quiet_for(self.dataset("metar"), 1),
+            "origin/a/wis2/ke-meteo/data/core/weather/advisories-warnings/metar",
+        )
 
-        node = self.by_node()[self.kenya.pk]
-
-        self.assertEqual(node.silence, Silence.ON_SCHEDULE)
-        self.assertEqual(node.silent_dataset_count, 0)
-
-    def test_a_centre_with_nothing_that_can_be_judged_says_so(self):
-        self.quiet_for(self.dataset("synop"), 500)
-
-        node = self.by_node()[self.kenya.pk]
-
-        self.assertEqual(node.silence, Silence.UNKNOWN)
-        self.assertEqual(node.judged_dataset_count, 0)
-
-    def test_a_centre_with_no_datasets_at_all_is_not_reported_on(self):
-        self.assertEqual(self.by_node(), {})
-
-    def test_each_centre_carries_its_own_datasets_verdict(self):
-        djibouti = self.node("dj-anm")
-        self.learned(self.quiet_for(self.dataset("synop"), 8), 6)
-        self.learned(self.quiet_for(self.dataset("temp", node=djibouti), 1), 6)
-
-        by_node = self.by_node()
-
-        self.assertEqual(by_node[self.kenya.pk].silence, Silence.SILENT)
-        self.assertEqual(by_node[djibouti.pk].silence, Silence.ON_SCHEDULE)
+        self.assertFalse(self.row("metar").is_observation)

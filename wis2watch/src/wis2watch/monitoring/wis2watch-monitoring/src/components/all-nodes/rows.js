@@ -90,13 +90,19 @@ export const COLUMNS = [
         value: (row, ranks) => rankOf(ranks, 'standing', row.standing),
     },
     {
-        key: 'last_seen_at',
-        label: 'Last seen',
+        key: 'last_observation_at',
+        // "Last observation" and not "Last seen" -- key and label both --
+        // because that is what the server measures: the verdict beside it is
+        // anchored on observation traffic, and a column headed with the wider
+        // word would have a centre read as heard-from six minutes ago and
+        // gone quiet at once.
+        label: 'Last observation',
         width: '11rem',
         // Never seen sorts before anything, exactly as the server's own
         // reading order does it: "nothing has ever arrived" is the extreme of
         // "a long time ago", not a missing value to be swept to the end.
-        value: (row) => (row.last_seen_at ? Date.parse(row.last_seen_at) : -Infinity),
+        value: (row) =>
+            row.last_observation_at ? Date.parse(row.last_observation_at) : -Infinity,
     },
     {
         key: 'hours_quiet',
@@ -124,6 +130,10 @@ export const COLUMNS = [
     },
     {
         key: 'dataset_count',
+        // Every dataset the centre declares, of whatever kind. How big a
+        // centre is rather than how well it is, which is why the verdict
+        // does not read it and why it is not the count in the sentence under
+        // the status.
         label: 'Datasets',
         width: '6rem',
         align: 'number',
@@ -185,7 +195,7 @@ export const VIEWS = {
         'centre_id',
         'country_name',
         'transmission',
-        'last_seen_at',
+        'last_observation_at',
         'hours_quiet',
         'messages_in_window',
         'sparkline',
@@ -194,7 +204,7 @@ export const VIEWS = {
         'centre_id',
         'country_name',
         'standing',
-        'last_seen_at',
+        'last_observation_at',
         'hours_quiet',
         'messages_in_window',
         'sparkline',
@@ -418,6 +428,12 @@ export function nextSort({sort, direction} = {}, key) {
  * thing this centre has twelve of, which is as much as anybody needs to read
  * the row.
  *
+ * "Observation datasets" and not "datasets", because the counts are the
+ * centre's observation datasets alone -- the verdict is measured over those
+ * (ADR-0017), and the Datasets column two along counts every kind. A reader
+ * comparing "3 of 5 overdue" against a count of twelve is owed the word that
+ * explains the difference.
+ *
  * Empty where the centre has nothing that can be judged, which no `silent`
  * row is -- being silent requires a dataset with an expectation -- so this is
  * a guard rather than a case.
@@ -430,7 +446,7 @@ export function overdueSentence(row) {
         return ''
     }
 
-    return `${row.silent_dataset_count} of ${row.judged_dataset_count} datasets overdue`
+    return `${row.silent_dataset_count} of ${row.judged_dataset_count} observation datasets overdue`
 }
 
 /**
@@ -490,13 +506,13 @@ export function badgeTitle(row, field, labels) {
  * Only on the rows with a fault, and only on the glance table.
  *
  * Only `silent`, because it is the one verdict here that is about *part* of a
- * centre -- the others are whole-centre facts the `Last seen` and `Quiet`
- * columns already carry. That also keeps the cost where it belongs: the seven
- * rows in thirty-two that are the reason the page was opened grow a line and
- * the other twenty-five do not, which makes a worst-first scan easier rather
- * than flatter. It is the shape ADR-0009 rejected at twelve columns and every
- * badge, and the reason it rejected it does not survive at one line under one
- * badge on a minority of rows.
+ * centre -- the others are whole-centre facts the `Last observation` and
+ * `Quiet` columns already carry. That also keeps the cost where it belongs:
+ * the seven rows in thirty-two that are the reason the page was opened grow a
+ * line and the other twenty-five do not, which makes a worst-first scan
+ * easier rather than flatter. It is the shape ADR-0009 rejected at twelve
+ * columns and every badge, and the reason it rejected it does not survive at
+ * one line under one badge on a minority of rows.
  *
  * Only the glance table, because the detailed one already draws the Silence
  * badge, the dataset count, and this very sentence as that badge's tooltip.

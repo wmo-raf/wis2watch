@@ -63,6 +63,7 @@ from .node_detail import (
     SyncScope,
     node_detail,
 )
+from .observations import NodeObservations, observations_by_node
 from .overview import (
     CachePickup,
     NodeOverviewRow,
@@ -75,10 +76,8 @@ from .reachability import OriginReachability, OriginTransport, OriginWatch
 from .silence import (
     DatasetSilenceRow,
     Expectation,
-    NodeSilence,
     Silence,
     dataset_silence,
-    silence_by_node,
 )
 from .staleness import Staleness
 from .statistics import (
@@ -130,8 +129,8 @@ __all__ = [
     "HourlyActivity",
     "NodeDatasetRow",
     "NodeDetail",
+    "NodeObservations",
     "NodeOverviewRow",
-    "NodeSilence",
     "NodeStanding",
     "NodeStationDetail",
     "NodeStationRow",
@@ -192,13 +191,13 @@ __all__ = [
     "node_station_statistics",
     "node_stations",
     "node_statistics_summary",
+    "observations_by_node",
     "propagation_gaps",
     "propagation_gaps_left_out",
     "propagation_gaps_unsettled",
     "registries_not_answering",
     "registries_not_answering_caveat",
     "registries_not_answering_centre_ids",
-    "silence_by_node",
     "DeclaringCentre",
     "stations_declared_but_silent",
     "stations_declared_but_silent_unasked_centres",

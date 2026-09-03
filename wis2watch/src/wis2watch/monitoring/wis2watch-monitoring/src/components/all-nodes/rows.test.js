@@ -55,7 +55,7 @@ function centre(overrides) {
         centre_id: 'zz-test',
         country_name: 'Testland',
         standing: 'healthy',
-        last_seen_at: '2026-08-26T10:00:00Z',
+        last_observation_at: '2026-08-26T10:00:00Z',
         hours_quiet: 1,
         messages_in_window: 10,
         sparkline: [],
@@ -69,7 +69,7 @@ function centre(overrides) {
 const NEVER = centre({
     centre_id: 'bj-meteobenin',
     standing: 'never_seen',
-    last_seen_at: null,
+    last_observation_at: null,
     hours_quiet: null,
     messages_in_window: 0,
 })
@@ -87,12 +87,12 @@ const WELL = centre({centre_id: 'cg-met', standing: 'healthy', hours_quiet: 1})
  * put it at the top, and nothing anywhere throws.
  */
 describe('a centre nothing has ever been heard from', () => {
-    const LAST_SEEN = COLUMN_BY_KEY.last_seen_at.value
+    const LAST_OBSERVATION = COLUMN_BY_KEY.last_observation_at.value
     const QUIET_FOR = COLUMN_BY_KEY.hours_quiet.value
 
-    it('sorts before every timestamp on Last seen', () => {
-        expect(LAST_SEEN(NEVER)).toBe(-Infinity)
-        expect(LAST_SEEN(NEVER)).toBeLessThan(LAST_SEEN(WELL))
+    it('sorts before every timestamp on Last observation', () => {
+        expect(LAST_OBSERVATION(NEVER)).toBe(-Infinity)
+        expect(LAST_OBSERVATION(NEVER)).toBeLessThan(LAST_OBSERVATION(WELL))
     })
 
     it('sorts after every span on Quiet, having been quiet for ever', () => {
@@ -100,11 +100,11 @@ describe('a centre nothing has ever been heard from', () => {
         expect(QUIET_FOR(NEVER)).toBeGreaterThan(QUIET_FOR(QUIET))
     })
 
-    it('is first ascending by Last seen and first descending by Quiet', () => {
+    it('is first ascending by Last observation and first descending by Quiet', () => {
         const rows = [WELL, QUIET, NEVER]
 
         expect(
-            sortRows(rows, {sort: 'last_seen_at', direction: 'asc', ranks: RANKS})[0]
+            sortRows(rows, {sort: 'last_observation_at', direction: 'asc', ranks: RANKS})[0]
         ).toBe(NEVER)
         expect(
             sortRows(rows, {sort: 'hours_quiet', direction: 'desc', ranks: RANKS})[0]
@@ -355,7 +355,7 @@ describe('what a badge says under itself', () => {
     it('counts the overdue datasets on the silence badge', () => {
         const row = centre({silent_dataset_count: 3, judged_dataset_count: 12})
 
-        expect(badgeTitle(row, 'silence', LABELS)).toBe('3 of 12 datasets overdue')
+        expect(badgeTitle(row, 'silence', LABELS)).toBe('3 of 12 observation datasets overdue')
     })
 
     it('says nothing where a centre has no dataset that could be judged', () => {
@@ -378,7 +378,7 @@ describe('the second line under a status', () => {
 
     it('says how much of the centre is late, on the glance table', () => {
         expect(subline(centre(OVERDUE), 'glance', 'transmission'))
-            .toBe('3 of 12 datasets overdue')
+            .toBe('3 of 12 observation datasets overdue')
     })
 
     it('is the same sentence the detailed table hangs off its silence badge', () => {
@@ -406,7 +406,7 @@ describe('the second line under a status', () => {
     })
 
     it('draws no line for the faults that are about a whole centre', () => {
-        // `Last seen` and `Quiet` already carry these. Only `silent` is a
+        // `Last observation` and `Quiet` already carry these. Only `silent` is a
         // verdict about *part* of a centre, which is what a count answers.
         for (const verdict of ['never_seen', 'stale']) {
             expect(subline(centre({transmission: verdict}), 'glance', 'transmission'))

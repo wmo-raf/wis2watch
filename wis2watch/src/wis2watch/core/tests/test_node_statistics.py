@@ -27,7 +27,6 @@ from wis2watch.core.models import (
     Dataset,
     HourlyRollup,
     MessageSource,
-    NodeLastSeen,
     WIS2Node,
 )
 from wis2watch.core.tests.support import at, origin_api, origin_broker
@@ -40,6 +39,10 @@ NOW = at("2026-08-11T12:00:00")
 FIRST_HOUR = at("2026-08-10T12:00:00")
 LAST_HOUR = at("2026-08-11T11:00:00")
 
+#: A data category the topic hierarchy files observations under, which is what
+#: the two verdicts are measured over (ADR-0017).
+OBSERVATIONS = "surface-based-observations"
+
 
 class AllNodesTestCase(TestCase):
     def setUp(self):
@@ -49,14 +52,52 @@ class AllNodesTestCase(TestCase):
             host="globalbroker.example.int",
         )
 
-    def node(self, centre_id, last_seen=None, **kwargs):
+    def node(self, centre_id, observed=None, **kwargs):
+        """A registered centre, and where asked for, an observation it published.
+
+        Both verdicts are measured over observation traffic, so a centre meant
+        to read as heard-from needs a dataset the hierarchy calls an
+        observation and an hour it published in. One seeded without an
+        ``observed`` hour declares none, which is a verdict of its own.
+        """
         kwargs.setdefault("name", centre_id.upper())
         node = WIS2Node.objects.create(centre_id=centre_id, **kwargs)
 
-        if last_seen is not None:
-            NodeLastSeen.objects.create(node=node, last_message_at=last_seen)
+        if observed is not None:
+            self.rollup(node, observed, 1, dataset=self.observation(node))
 
         return node
+
+    def observation(self, node, name="synop", policy=Dataset.RECOMMENDED, **kwargs):
+        """A dataset of the node's that the topic hierarchy calls an observation.
+
+        Recommended rather than core, so that seeding one does not also seed
+        an expectation of the Global Caches -- a fixture that quietly
+        published core data would make every centre here read as uncached,
+        which is a judgement these tests break on purpose one at a time.
+        """
+        return Dataset.objects.create(
+            node=node,
+            identifier=f"urn:wmo:md:{node.centre_id}:{name}",
+            title=name,
+            wmo_data_policy=policy,
+            wmo_topic_hierarchy=(
+                f"origin/a/wis2/{node.centre_id}/data/core/weather/{OBSERVATIONS}/{name}"
+            ),
+            raw_json={},
+            **kwargs,
+        )
+
+    def learned(self, dataset, interval_hours=6):
+        """A dataset whose own history says how often it publishes."""
+        CadenceBaseline.objects.create(
+            dataset=dataset,
+            interval_hours=interval_hours,
+            observations=20,
+            learned_at=NOW - timedelta(days=1),
+        )
+
+        return dataset
 
     def rollup(self, node, hour, count, source=None, dataset=None):
         return HourlyRollup.objects.create(
@@ -81,8 +122,13 @@ class AllNodesTestCase(TestCase):
         the broker it is obliged to run -- which is the only combination that
         reaches ``HEALTHY``, and therefore the baseline every other test here
         breaks exactly one thing about.
+
+        Its observation lands in the hour *in progress*, which is inside what
+        staleness measures and outside the fixed window the shapes are drawn
+        over. So a centre can be seeded well without putting a message into a
+        sparkline a test is counting.
         """
-        node = self.node(centre_id, last_seen=NOW - timedelta(hours=1))
+        node = self.node(centre_id, observed=NOW)
         origin_broker(node, is_reachable=True)
 
         return node
@@ -103,52 +149,57 @@ class StandingTests(AllNodesTestCase):
 
     def test_a_centre_nothing_has_ever_been_heard_from_says_so_first(self):
         # Also uncached and unwatched, both of which are consequences of the
-        # silence rather than findings of their own.
-        self.node("bj-meteobenin")
+        # silence rather than findings of their own. It declares an
+        # observation and has never published one, which is the finding --
+        # a centre declaring none at all is a different row entirely.
+        self.observation(self.node("bj-meteobenin"))
 
         self.assertEqual(self.standing("bj-meteobenin"), NodeStanding.NEVER_SEEN)
 
     def test_a_centre_gone_quiet_is_stale_rather_than_anything_downstream(self):
-        self.node("bi-igebu", last_seen=NOW - timedelta(days=7))
+        self.node("bi-igebu", observed=NOW - timedelta(days=7))
 
         self.assertEqual(self.standing("bi-igebu"), NodeStanding.STALE)
 
     def test_a_publishing_centre_with_a_dataset_overdue_is_silent(self):
         node = self.well("gh-gmet")
-        synop = Dataset.objects.create(
-            node=node,
-            identifier="urn:wmo:md:gh-gmet:synop",
-            title="synop",
-            wmo_data_policy=Dataset.CORE,
-            wmo_topic_hierarchy="origin/a/wis2/gh-gmet/data/core/synop",
-            raw_json={},
-        )
-        CadenceBaseline.objects.create(
-            dataset=synop,
-            interval_hours=6,
-            observations=20,
-            learned_at=NOW - timedelta(days=1),
-        )
-        self.rollup(node, NOW - timedelta(days=3), 1, dataset=synop)
+        temp = self.learned(self.observation(node, "temp"))
+        self.rollup(node, NOW - timedelta(days=3), 1, dataset=temp)
 
         self.assertEqual(self.standing("gh-gmet"), NodeStanding.SILENT)
 
+    def test_an_overdue_non_observation_leaves_the_standing_alone(self):
+        """Aviation and advisories keep their own verdict on the node detail
+        page. They never decide the headline word."""
+        node = self.well("gh-gmet")
+        metar = self.observation(node, "metar")
+        metar.wmo_topic_hierarchy = (
+            "origin/a/wis2/gh-gmet/data/core/weather/advisories-warnings/metar"
+        )
+        metar.save(update_fields=["wmo_topic_hierarchy"])
+        self.learned(metar)
+        self.rollup(node, NOW - timedelta(days=3), 1, dataset=metar)
+
+        self.assertEqual(self.standing("gh-gmet"), NodeStanding.HEALTHY)
+
+    def test_a_centre_declaring_no_observations_says_that_and_not_a_fault(self):
+        """Nothing this installation watches is coming out of it, and nothing
+        it watches has stopped either. Reported as neither."""
+        self.well("td-meteotchad").datasets.all().delete()
+
+        self.assertEqual(
+            self.standing("td-meteotchad"), NodeStanding.NO_OBSERVATIONS
+        )
+
     def test_a_centre_publishing_core_data_no_cache_carried_is_not_cached(self):
         node = self.well("ke-meteo")
-        synop = Dataset.objects.create(
-            node=node,
-            identifier="urn:wmo:md:ke-meteo:synop",
-            title="synop",
-            wmo_data_policy=Dataset.CORE,
-            wmo_topic_hierarchy="origin/a/wis2/ke-meteo/data/core/synop",
-            raw_json={},
-        )
-        self.rollup(node, NOW - timedelta(hours=1), 12, dataset=synop)
+        core = self.observation(node, "temp", policy=Dataset.CORE)
+        self.rollup(node, NOW - timedelta(hours=1), 12, dataset=core)
 
         self.assertEqual(self.standing("ke-meteo"), NodeStanding.NOT_CACHED)
 
     def test_a_centre_nothing_is_watching_is_not_watched(self):
-        self.node("cd-mettelsat", last_seen=NOW - timedelta(hours=1))
+        self.node("cd-mettelsat", observed=NOW)
 
         self.assertEqual(self.standing("cd-mettelsat"), NodeStanding.NO_BROKER)
 
@@ -157,7 +208,7 @@ class StandingTests(AllNodesTestCase):
         # obligation, and one of them is publishing perfectly well through a
         # transport this tool can read -- on a region where that is most of the
         # centres, one standing over both sorts nothing.
-        node = self.node("ma-marocmeteo", last_seen=NOW - timedelta(hours=1))
+        node = self.node("ma-marocmeteo", observed=NOW)
         origin_broker(node, is_reachable=False)
         origin_api(node, is_reachable=True)
 
@@ -177,6 +228,11 @@ class StandingTests(AllNodesTestCase):
                 NodeStanding.NEVER_SEEN,
                 NodeStanding.STALE,
                 NodeStanding.SILENT,
+                # With the transmission judgements above it rather than with
+                # the plumbing below, because that is what it is -- and
+                # because the two verdicts can only share one sort order
+                # while the ranks they share come in one sequence.
+                NodeStanding.NO_OBSERVATIONS,
                 NodeStanding.NOT_CACHED,
                 NodeStanding.NO_BROKER,
                 NodeStanding.ARCHIVE_ONLY,
@@ -184,7 +240,7 @@ class StandingTests(AllNodesTestCase):
             ],
         )
         self.assertEqual(NodeStanding.RANK[NodeStanding.NEVER_SEEN], 0)
-        self.assertEqual(NodeStanding.RANK[NodeStanding.HEALTHY], 6)
+        self.assertEqual(NodeStanding.RANK[NodeStanding.HEALTHY], 7)
 
 
 class TransmissionTests(AllNodesTestCase):
@@ -201,16 +257,40 @@ class TransmissionTests(AllNodesTestCase):
         return self.by_centre()[centre_id].transmission
 
     def test_a_centre_nothing_has_ever_been_heard_from_says_so_first(self):
-        self.node("bj-meteobenin")
+        self.observation(self.node("bj-meteobenin"))
 
         self.assertEqual(
             self.transmission("bj-meteobenin"), TransmissionStanding.NEVER_SEEN
         )
 
     def test_a_centre_gone_quiet_is_stale(self):
-        self.node("bi-igebu", last_seen=NOW - timedelta(days=7))
+        self.node("bi-igebu", observed=NOW - timedelta(days=7))
 
         self.assertEqual(self.transmission("bi-igebu"), TransmissionStanding.STALE)
+
+    def test_a_centre_whose_observations_stopped_is_quiet_however_much_else_flows(self):
+        """The finding this whole slice exists for. Its aviation advisories
+        are arriving by the hundred and the thing it is watched for stopped
+        three days ago."""
+        node = self.node("ne-meteo", observed=NOW - timedelta(days=3))
+        self.rollup(node, LAST_HOUR, 400)
+
+        row = self.by_centre()["ne-meteo"]
+
+        self.assertEqual(row.transmission, TransmissionStanding.STALE)
+        self.assertEqual(row.messages_in_window, 400)
+
+    def test_a_centre_declaring_no_observations_is_not_read_as_transmitting(self):
+        """It may be publishing warnings by the hour. None of it is what this
+        panel is watching for, and saying "Transmitting" would be the panel
+        answering a question nobody asked it."""
+        node = self.node("td-meteotchad")
+        self.rollup(node, LAST_HOUR, 400)
+
+        row = self.by_centre()["td-meteotchad"]
+
+        self.assertEqual(row.transmission, TransmissionStanding.NO_OBSERVATIONS)
+        self.assertEqual(row.messages_in_window, 400)
 
     def test_a_centre_with_a_dataset_overdue_says_so_however_much_it_publishes(self):
         """The label says "Behind schedule" and never that the centre is quiet.
@@ -226,21 +306,8 @@ class TransmissionTests(AllNodesTestCase):
         badge on the glance table instead.
         """
         node = self.well("dz-meteoalgerie")
-        synop = Dataset.objects.create(
-            node=node,
-            identifier="urn:wmo:md:dz-meteoalgerie:synop",
-            title="synop",
-            wmo_data_policy=Dataset.CORE,
-            wmo_topic_hierarchy="origin/a/wis2/dz-meteoalgerie/data/core/synop",
-            raw_json={},
-        )
-        CadenceBaseline.objects.create(
-            dataset=synop,
-            interval_hours=6,
-            observations=20,
-            learned_at=NOW - timedelta(days=1),
-        )
-        self.rollup(node, NOW - timedelta(days=3), 1, dataset=synop)
+        temp = self.learned(self.observation(node, "temp"))
+        self.rollup(node, NOW - timedelta(days=3), 1, dataset=temp)
         # And publishing hard, right now.
         self.rollup(node, LAST_HOUR, 310)
 
@@ -259,7 +326,7 @@ class TransmissionTests(AllNodesTestCase):
         archives. Folding that in put twenty-one of them under "Archive only"
         on a panel whose job is to say whether data is flowing.
         """
-        node = self.node("ma-marocmeteo", last_seen=NOW - timedelta(hours=1))
+        node = self.node("ma-marocmeteo", observed=NOW)
         origin_broker(node, is_reachable=False)
         origin_api(node, is_reachable=True)
 
@@ -269,7 +336,7 @@ class TransmissionTests(AllNodesTestCase):
         self.assertEqual(row.standing, NodeStanding.ARCHIVE_ONLY)
 
     def test_a_centre_nothing_watches_is_still_transmitting(self):
-        self.node("cd-mettelsat", last_seen=NOW - timedelta(hours=1))
+        self.node("cd-mettelsat", observed=NOW)
 
         row = self.by_centre()["cd-mettelsat"]
 
@@ -278,15 +345,8 @@ class TransmissionTests(AllNodesTestCase):
 
     def test_uncached_core_data_does_not_make_a_centre_stop_transmitting(self):
         node = self.well("ke-meteo")
-        synop = Dataset.objects.create(
-            node=node,
-            identifier="urn:wmo:md:ke-meteo:synop",
-            title="synop",
-            wmo_data_policy=Dataset.CORE,
-            wmo_topic_hierarchy="origin/a/wis2/ke-meteo/data/core/synop",
-            raw_json={},
-        )
-        self.rollup(node, LAST_HOUR, 12, dataset=synop)
+        core = self.observation(node, "temp", policy=Dataset.CORE)
+        self.rollup(node, LAST_HOUR, 12, dataset=core)
 
         row = self.by_centre()["ke-meteo"]
 
@@ -294,23 +354,23 @@ class TransmissionTests(AllNodesTestCase):
         self.assertEqual(row.standing, NodeStanding.NOT_CACHED)
 
     def test_it_is_a_coarsening_of_the_full_standing_and_not_a_rival(self):
-        """Its three faults are the full standing's three worst, same names.
+        """Its four verdicts are the full standing's four worst, same names.
 
         This is what lets one server order serve both tables, and what stops
         the two surfaces disagreeing about which centre to look at first.
         """
         self.assertEqual(
-            [key for key, _label in TransmissionStanding.CHOICES][:3],
-            [key for key, _label in NodeStanding.CHOICES][:3],
+            [key for key, _label in TransmissionStanding.CHOICES][:4],
+            [key for key, _label in NodeStanding.CHOICES][:4],
         )
         self.assertEqual(
             TransmissionStanding.RANK[TransmissionStanding.TRANSMITTING],
             len(NodeStanding.CHOICES) - 4,
         )
 
-    def test_three_of_its_four_labels_are_the_full_standings_own(self):
+    def test_four_of_its_five_labels_are_the_full_standings_own(self):
         """One vocabulary across two tables, not two."""
-        for key in ("never_seen", "stale", "silent"):
+        for key in ("never_seen", "stale", "silent", "no_observations"):
             self.assertEqual(
                 TransmissionStanding.LABELS[key], NodeStanding.LABELS[key]
             )
@@ -320,7 +380,7 @@ class CoverageTests(AllNodesTestCase):
     """Every registered centre is a row, whatever has been heard from it."""
 
     def test_a_centre_nothing_has_arrived_from_is_a_row_not_an_absence(self):
-        self.node("ke-meteo", last_seen=NOW - timedelta(hours=1))
+        self.node("ke-meteo", observed=NOW)
         self.node("bj-meteobenin")
 
         self.assertEqual(
@@ -362,7 +422,7 @@ class WindowTests(AllNodesTestCase):
         self.assertEqual(row.messages_in_window, 0)
 
     def test_each_hour_lands_at_its_own_index(self):
-        node = self.node("ke-meteo", last_seen=NOW - timedelta(hours=1))
+        node = self.node("ke-meteo", observed=NOW)
         self.rollup(node, FIRST_HOUR, 5)
         self.rollup(node, LAST_HOUR, 7)
 
@@ -373,13 +433,13 @@ class WindowTests(AllNodesTestCase):
         self.assertEqual(sum(row.sparkline), 12)
 
     def test_the_hour_in_progress_is_outside_the_window(self):
-        node = self.node("ke-meteo", last_seen=NOW)
+        node = self.node("ke-meteo", observed=NOW)
         self.rollup(node, at("2026-08-11T12:00:00"), 99)
 
         self.assertEqual(self.by_centre()["ke-meteo"].messages_in_window, 0)
 
     def test_traffic_older_than_the_window_is_outside_it(self):
-        node = self.node("ke-meteo", last_seen=NOW - timedelta(hours=1))
+        node = self.node("ke-meteo", observed=NOW)
         self.rollup(node, FIRST_HOUR - timedelta(hours=1), 99)
 
         self.assertEqual(self.by_centre()["ke-meteo"].messages_in_window, 0)
@@ -396,7 +456,7 @@ class VantageTests(AllNodesTestCase):
 
     def setUp(self):
         super().setUp()
-        self.node_ = self.node("ke-meteo", last_seen=NOW - timedelta(hours=1))
+        self.node_ = self.node("ke-meteo", observed=NOW)
 
     def test_the_same_publication_seen_at_origin_too_is_counted_once(self):
         origin = origin_broker(self.node_, is_reachable=True)
@@ -445,14 +505,14 @@ class ReadingOrderTests(AllNodesTestCase):
 
     def test_the_worst_standing_comes_first(self):
         self.well("cg-met")
-        self.node("bi-igebu", last_seen=NOW - timedelta(days=7))
-        self.node("bj-meteobenin")
+        self.node("bi-igebu", observed=NOW - timedelta(days=7))
+        self.observation(self.node("bj-meteobenin"))
 
         self.assertEqual(self.centres(), ["bj-meteobenin", "bi-igebu", "cg-met"])
 
     def test_within_one_standing_the_longest_quiet_comes_first(self):
-        self.node("aa-recent", last_seen=NOW - timedelta(days=2))
-        self.node("zz-ancient", last_seen=NOW - timedelta(days=30))
+        self.node("aa-recent", observed=NOW - timedelta(days=2))
+        self.node("zz-ancient", observed=NOW - timedelta(days=30))
 
         self.assertEqual(self.centres(), ["zz-ancient", "aa-recent"])
 
@@ -462,6 +522,6 @@ class ReadingOrderTests(AllNodesTestCase):
         # final key the order is whatever the database felt like that morning,
         # and the panel reshuffles between two readers looking at one region.
         for centre_id in ("zz-last", "aa-first", "mm-middle"):
-            self.node(centre_id)
+            self.observation(self.node(centre_id))
 
         self.assertEqual(self.centres(), ["aa-first", "mm-middle", "zz-last"])
