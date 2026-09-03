@@ -41,14 +41,14 @@ than hours it was hearing the region.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from django.db.models import F, Min, OuterRef, Subquery
 from django.utils import timezone as dj_timezone
 from django.utils.translation import gettext_lazy as _
 
 from ..models import Dataset, HourlyRollup, MessageSource
-from ..rollups import floor_to_hour
+from ..rollups import end_of_hour, floor_to_hour
 
 #: Sorts before any real last-seen time, so whatever nothing has ever been
 #: heard from heads a table and still tie-breaks by name among its own kind.
@@ -61,6 +61,23 @@ def hours_between(last_seen_at, now):
         return None
 
     return (now - last_seen_at).total_seconds() / 3600
+
+
+def hours_quiet_since(quiet_since, now):
+    """How long something has been quiet, counted from a stated instant.
+
+    Never negative: something that published in the hour in progress is not
+    quiet at all, and a quiet of minus twenty minutes is a number no column
+    can render and no threshold can be compared against.
+
+    Public, and the only spelling of this arithmetic, because two surfaces
+    judge quiet by it -- whether a dataset has slipped its own cadence, and
+    whether a centre's observations have stopped -- and the two are read side
+    by side on one row. Written twice they would be free to disagree about
+    whether a centre published this morning, which is exactly the disagreement
+    both of them exist to make visible in the region rather than in the tool.
+    """
+    return max((now - quiet_since).total_seconds() / 3600, 0)
 
 
 class Expectation:
@@ -117,6 +134,11 @@ class DatasetSilenceRow:
     centre_id: str
     title: str
     topic: str
+    #: Whether the topic above files this dataset under an observation
+    #: category. Carried rather than re-derived by whoever folds these rows,
+    #: so that one reading of the topic reaches every count of observation
+    #: traffic (ADR-0016).
+    is_observation: bool
     expected_interval_hours: float | None
     expectation: str
     observations: int | None
@@ -156,29 +178,6 @@ class DatasetSilenceRow:
         return Expectation.LABELS.get(self.expectation, self.expectation)
 
 
-@dataclass(frozen=True)
-class NodeSilence:
-    """What a centre's datasets add up to, for one line of the overview."""
-
-    silence: str
-    silent_dataset_count: int
-    judged_dataset_count: int
-
-    @classmethod
-    def nothing_known(cls):
-        """A centre with nothing that can be judged."""
-        return cls(
-            silence=Silence.UNKNOWN,
-            silent_dataset_count=0,
-            judged_dataset_count=0,
-        )
-
-    @property
-    def silence_label(self):
-        """What the centre's silence is called, for a table cell."""
-        return Silence.label(self.silence)
-
-
 def dataset_silence(*, now=None, node=None):
     """Every live dataset, with how long it has been quiet and whether that is odd.
 
@@ -203,41 +202,6 @@ def dataset_silence(*, now=None, node=None):
     ]
 
     return sorted(rows, key=_reading_order)
-
-
-def silence_by_node(*, now=None):
-    """Each centre's datasets, reduced to the one line the overview shows.
-
-    Returns:
-        dict[int, NodeSilence]: keyed by node id, for every centre that has a
-        live dataset at all. A centre with none is absent rather than
-        reported quiet: there is nothing it was expected to publish.
-    """
-    counts = {}
-
-    for row in dataset_silence(now=now):
-        silent, judged = counts.get(row.node_id, (0, 0))
-        counts[row.node_id] = (
-            silent + row.is_silent,
-            judged + (row.expected_interval_hours is not None),
-        )
-
-    return {
-        node_id: NodeSilence(
-            # A centre is as concerning as its worst dataset. One dataset past
-            # its expectation is a centre worth looking at, whatever the rest
-            # of its output is doing -- which is what the counts beside it are
-            # for.
-            silence=(
-                Silence.SILENT if silent
-                else Silence.ON_SCHEDULE if judged
-                else Silence.UNKNOWN
-            ),
-            silent_dataset_count=silent,
-            judged_dataset_count=judged,
-        )
-        for node_id, (silent, judged) in counts.items()
-    }
 
 
 def _live_datasets(node, *, now):
@@ -292,7 +256,7 @@ def _last_active_hour(now):
         HourlyRollup.objects.filter(
             dataset=OuterRef("pk"),
             message_count__gt=0,
-            hour__lt=floor_to_hour(now) + timedelta(hours=1),
+            hour__lt=end_of_hour(floor_to_hour(now)),
         )
         .order_by("-hour")
         .values("hour")[:1]
@@ -368,10 +332,10 @@ def _hours_quiet(last_active_hour, *, now, records_from):
     """
     quiet_since = (
         records_from if last_active_hour is None
-        else last_active_hour + timedelta(hours=1)
+        else end_of_hour(last_active_hour)
     )
 
-    return max((now - quiet_since).total_seconds() / 3600, 0)
+    return hours_quiet_since(quiet_since, now)
 
 
 def _row(dataset, *, now, records_from):
@@ -388,6 +352,7 @@ def _row(dataset, *, now, records_from):
         centre_id=dataset.node.centre_id,
         title=dataset.display_title,
         topic=dataset.wmo_topic_hierarchy,
+        is_observation=dataset.is_observation,
         expected_interval_hours=expected,
         expectation=expectation,
         observations=observations,

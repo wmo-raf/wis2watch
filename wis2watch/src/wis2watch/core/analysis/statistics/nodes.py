@@ -7,9 +7,10 @@ figure. It exists because the question "which centre has a problem" was only
 answerable on a page somebody had to know to open.
 
 **Layered on ``analysis.overview`` rather than beside it.** Every fact about a
-centre's health here -- when it was last seen, how long it has been quiet,
-whether its datasets are overdue, whether the caches carried it, which of its
-own transports is answering -- is read from ``node_overview`` unchanged. Two
+centre's health here -- when its observations were last seen, how long they
+have been quiet, whether they are overdue, whether the caches carried what it
+published, which of its own transports is answering -- is read from
+``node_overview`` unchanged, observation scope and all (ADR-0017). Two
 derivations of one table is how the homepage and the overview page would come
 to disagree about which centre is stale, and the moment they do, neither is
 believed. What this module adds is exactly two things the overview promises
@@ -100,7 +101,18 @@ class NodeStatisticsRow:
     transmission: str
     #: Whether anything at all is wrong, for the detailed table.
     standing: str
-    last_seen_at: datetime | None
+    #: The hour this centre's observations were last seen publishing in, and
+    #: how long since. Null on a centre that declares no observation datasets
+    #: as well as on one whose observations have never arrived -- which the
+    #: verdicts above tell apart.
+    #:
+    #: Named for what it measures rather than for the column that draws it.
+    #: This was ``last_seen_at`` while the overview's own field was, and the
+    #: name outlived the meaning the moment the verdict was anchored on
+    #: observations: a field called last-seen holding the last *observation*
+    #: is the one place a reader of this row could be misled without anything
+    #: on screen looking wrong.
+    last_observation_at: datetime | None
     hours_quiet: float | None
     #: Every notification of this centre's the Global Broker carried over the
     #: window -- the sum of the vector below, rather than a count of its own.
@@ -192,11 +204,11 @@ def _row(row, *, sparkline):
         country_name=row.country_name,
         transmission=TransmissionStanding.of(row),
         standing=NodeStanding.of(row),
-        last_seen_at=row.last_seen_at,
-        # Renamed from the overview's ``hours_since_last_seen`` on the way
+        last_observation_at=row.last_observation_at,
+        # Renamed from the overview's ``hours_since_observation`` on the way
         # out, to the name the station rows already use for the same
         # measurement: the column beside it says "Quiet", on both tables.
-        hours_quiet=row.hours_since_last_seen,
+        hours_quiet=row.hours_since_observation,
         messages_in_window=sum(sparkline),
         sparkline=sparkline,
         origin_watch=row.origin_watch,
@@ -261,12 +273,16 @@ def _ordered(rows):
         key=lambda row: (
             # The *full* standing decides the order both tables arrive in, and
             # one order serves both because the transmission verdict is a
-            # coarsening of this one rather than a rival to it: ranks nought,
-            # one and two are the same three faults under the same three names,
-            # and `transmitting` is exactly the four ranks below them. Sorting
-            # by this therefore sorts by that as well, and the glance table's
-            # top rows are the same rows whichever verdict a reader is looking
-            # at.
+            # coarsening of this one rather than a rival to it: ranks nought to
+            # three are the same four states under the same four names, and
+            # `transmitting` is exactly the four ranks below them. Sorting by
+            # this therefore sorts by that as well, and the glance table's top
+            # rows are the same rows whichever verdict a reader is looking at.
+            #
+            # Which is why `no_observations` ranks where it does on the full
+            # scale, above the plumbing faults: it is a transmission judgement,
+            # and the two scales can only share an order while the ranks they
+            # share come in one sequence.
             #
             # The accepted consequence is at the *bottom* of the glance table,
             # where every row says "Transmitting" and their order is decided by
@@ -277,8 +293,8 @@ def _ordered(rows):
             # Quiet column, at the price of the detailed page losing "worst
             # first" among the rows it exists to rank.
             NodeStanding.RANK.get(row.standing, len(NodeStanding.RANK)),
-            row.last_seen_at is not None,
-            row.last_seen_at or BEFORE_ANYTHING,
+            row.last_observation_at is not None,
+            row.last_observation_at or BEFORE_ANYTHING,
             row.centre_id,
         ),
     )

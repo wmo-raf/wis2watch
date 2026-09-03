@@ -136,8 +136,8 @@
                 </span>
               </template>
 
-              <span v-else-if="column.key === 'last_seen_at'">
-                {{ formatInstant(row.last_seen_at) }}
+              <span v-else-if="column.key === 'last_observation_at'">
+                {{ formatInstant(row.last_observation_at) }}
               </span>
 
               <span v-else-if="column.key === 'hours_quiet'">
@@ -603,11 +603,12 @@ function arrow(key) {
    has already learned this vocabulary one page over.
 
    Four marks from three colours, in the order the standings rank: filled red
-   is nothing arriving, filled amber is arriving but not all of it and not on
-   time, ringed teal is well but not compliant, filled teal is well.
+   is nothing arriving, filled amber is arriving but not all of it, not on
+   time, or not the kind this installation watches, ringed teal is well but
+   not compliant, filled teal is well.
 
    The point of the third colour is that the scale now runs the same way the
-   rows do. Amber covers ranks two to four and red covers nought and one, so
+   rows do. Amber covers ranks two to five and red covers nought and one, so
    reading down a worst-first column the colour never goes backwards -- which
    it did while `silent`, `not_cached` and `no_broker` were a *ringed* red
    sitting above a filled one. Two reds separated by two pixels of inset
@@ -631,12 +632,20 @@ function arrow(key) {
   background: var(--stat-silent);
 }
 
-/* Arriving, and faulty: datasets past their cadence, data the caches never
-   picked up, a centre with no broker to watch. Filled rather than ringed --
-   the ring existed to say "arriving, but" while spending only red, and amber
-   says it on its own. A second encoding of a meaning the colour already
-   carries is one a reader has to hold in mind for nothing. */
+/* Arriving, and faulty: observations past their cadence, data the caches
+   never picked up, a centre with no broker to watch, a centre declaring no
+   observations at all for a region watched for them. Filled rather than
+   ringed -- the ring existed to say "arriving, but" while spending only red,
+   and amber says it on its own. A second encoding of a meaning the colour
+   already carries is one a reader has to hold in mind for nothing.
+
+   `no_observations` is amber and not teal for the reason the scale runs the
+   way it does: it ranks above the plumbing faults, and a teal mark sitting
+   between two amber ones would take the colour backwards down a worst-first
+   column. It is also the honest reading -- something is arriving from that
+   centre and none of it is what this installation watches for. */
 .nodes__standing--silent::before,
+.nodes__standing--no_observations::before,
 .nodes__standing--not_cached::before,
 .nodes__standing--no_broker::before {
   background: var(--stat-slipping);

@@ -226,6 +226,40 @@ class DatasetTests(NodeDetailTestCase):
         self.assertTrue(rows["synop"].is_observation)
         self.assertFalse(rows["metar"].is_observation)
 
+    def test_a_non_observation_keeps_its_row_and_its_own_silence_judgement(self):
+        """What the centre verdict being observation-scoped does *not* do.
+
+        ADR-0017 anchored the front page and the overview on observations, and
+        this page is where the rest of a centre's output still has to be
+        judged: an aviation dataset overdue against its own cadence is a real
+        finding, and the only surface that will ever report it is this one.
+        Nothing in this module reads the kind, which is exactly why the guard
+        belongs here -- a later slice scoping this page too would break no
+        test otherwise.
+        """
+        synop = self.dataset(
+            "synop",
+            topic="origin/a/wis2/ke-meteo/data/core/weather/"
+            "surface-based-observations/synop",
+        )
+        metar = self.dataset(
+            "metar", topic="origin/a/wis2/ke-meteo/data/core/weather/aviation/metar"
+        )
+        self.learned(synop, 6)
+        self.learned(metar, 6)
+        self.last_published(synop, 1)
+        self.last_published(metar, 40)
+
+        rows = self.by_title()
+
+        self.assertEqual(set(rows), {"synop", "metar"})
+        self.assertEqual(rows["metar"].quiet.silence, Silence.SILENT)
+        self.assertEqual(rows["synop"].quiet.silence, Silence.ON_SCHEDULE)
+        self.assertEqual(rows["metar"].last_active_hour, NOW - timedelta(hours=40))
+        # And it counts towards what the page says has stopped, which the
+        # overview's own count of overdue datasets no longer does.
+        self.assertEqual(self.detail().silent_dataset_count, 1)
+
     def test_a_retired_dataset_says_which_kind_it_was(self):
         self.dataset(
             "climat",

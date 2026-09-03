@@ -170,7 +170,7 @@ class AllNodesEndpointTests(StatisticsEndpointTestCase):
                 # neither table can be computed from rows the other never saw.
                 "transmission",
                 "standing",
-                "last_seen_at",
+                "last_observation_at",
                 "hours_quiet",
                 "messages_in_window",
                 "sparkline",
@@ -232,8 +232,8 @@ class AllNodesEndpointTests(StatisticsEndpointTestCase):
     def test_the_two_verdicts_agree_about_what_is_worst(self):
         """The glance verdict is a coarsening of the full one, not a rival.
 
-        Its three faults are the three worst ranks of the full standing under
-        the same three names, and `transmitting` is exactly the ranks below
+        Its four verdicts are the four worst ranks of the full standing under
+        the same four names, and `transmitting` is exactly the ranks below
         them. That is what lets one server order serve both tables -- and what
         stops the two surfaces disagreeing about which centre to look at first.
         """
@@ -247,9 +247,9 @@ class AllNodesEndpointTests(StatisticsEndpointTestCase):
             transmitting = row["transmission"] == "transmitting"
 
             if transmitting:
-                # Every plumbing fault, and the clean bill, sit below the three
+                # Every plumbing fault, and the clean bill, sit below the four
                 # the glance verdict knows about.
-                self.assertGreaterEqual(ranks["standing"][row["standing"]], 3)
+                self.assertGreaterEqual(ranks["standing"][row["standing"]], 4)
             else:
                 self.assertEqual(row["transmission"], row["standing"])
 
@@ -271,7 +271,7 @@ class AllNodesEndpointTests(StatisticsEndpointTestCase):
         )
         self.assertEqual(
             [entry["key"] for entry in vocabularies["transmission"]],
-            ["never_seen", "stale", "silent", "transmitting"],
+            ["never_seen", "stale", "silent", "no_observations", "transmitting"],
         )
         # Worst first, which is the order the rows arrive in and the order a
         # filter control offers. A client that sorted these itself would be a
@@ -282,6 +282,7 @@ class AllNodesEndpointTests(StatisticsEndpointTestCase):
                 "never_seen",
                 "stale",
                 "silent",
+                "no_observations",
                 "not_cached",
                 "no_broker",
                 "archive_only",

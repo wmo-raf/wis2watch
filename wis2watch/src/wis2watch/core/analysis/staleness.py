@@ -24,19 +24,46 @@ DEFAULT_STALE_AFTER_HOURS = 24
 
 
 class Staleness:
-    """How concerning a centre's quiet is."""
+    """How concerning a centre's quiet is.
+
+    Four states rather than three, because a centre can have nothing to be
+    quiet about. What the overview measures is observation traffic (ADR-0017),
+    and a centre that declares no observation datasets at all has published
+    nothing this installation was waiting for -- reporting it as never heard
+    from, or as gone quiet, would put a fault on a centre that has committed
+    none, and would do it on the one row nobody could act on. ``CachePickup``
+    carries a third state for exactly this reason and this is the same move.
+
+    ``NO_OBSERVATIONS`` is a statement about the centre's catalogue and not
+    about its traffic: such a centre may be publishing warnings by the hour.
+    Which is why it is a state here rather than an absence -- an empty cell
+    reads as missing data, and this is an answer.
+    """
 
     ACTIVE = "active"
     STALE = "stale"
     NEVER_SEEN = "never_seen"
+    NO_OBSERVATIONS = "no_observations"
 
     CHOICES = [
         (NEVER_SEEN, _("Never seen")),
         (STALE, _("Stale")),
+        (NO_OBSERVATIONS, _("No observations")),
         (ACTIVE, _("Active")),
     ]
 
     LABELS = dict(CHOICES)
+
+    #: Where a state sorts. Derived from ``CHOICES`` rather than written out
+    #: again, for the reason ``NodeStanding.RANK`` is: two spellings of one
+    #: order is one of them being wrong later.
+    #:
+    #: It is also the order ``NodeStanding`` puts these states in -- what has
+    #: stopped, then what there was nothing to judge, then what is fine -- and
+    #: it has to be. The overview sorts by this and the all-centres table
+    #: sorts by the standing, over one region; two orderings that disagree
+    #: about which centre to look at first are one of them being wrong.
+    RANK = {state: rank for rank, (state, _label) in enumerate(CHOICES)}
 
 
 def default_stale_after_hours():
