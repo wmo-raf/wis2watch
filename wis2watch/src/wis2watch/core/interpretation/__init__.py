@@ -27,6 +27,8 @@ from .discovery import (
     centre_id_from_identifier,
     extract_discovery_record,
     extract_discovery_records,
+    node_base_url,
+    web_host,
 )
 from .node_stations import NodeStation, extract_node_station, extract_node_stations
 from .notifications import (
@@ -91,6 +93,7 @@ __all__ = [
     "is_observation_topic",
     "monitored_country_code_for_centre_id",
     "next_page_url",
+    "node_base_url",
     "page_offset",
     "parse_broker_url",
     "parse_notification",
@@ -101,4 +104,5 @@ __all__ = [
     "station_attribution",
     "subscription_topic",
     "sweep_topic",
+    "web_host",
 ]

@@ -19,6 +19,7 @@ from django.test import TestCase, override_settings
 
 from wis2watch.core.analysis import (
     GAP_REPORTS,
+    AddressAgreement,
     CatalogueDivergence,
     DeclarationDrift,
     DeclaringCentre,
@@ -32,6 +33,8 @@ from wis2watch.core.analysis import (
     datasets_out_of_step_unasked_centres,
     gap_report,
     gap_report_summaries,
+    nodes_declaring_another_address,
+    nodes_declaring_another_address_unread,
     propagation_gaps,
     registries_not_answering,
     registries_not_answering_caveat,
@@ -938,10 +941,12 @@ class FrozenRegistryTests(GapReportTestCase):
 
         The dataset drift report is left out for the opposite reason: its
         bound is about centres whose own metadata nothing has ever read, which
-        it says whether the registry is being rebuilt or not. The catalogue
-        divergence report is left out for the same reason again, one level up:
-        it says what it could not compare -- and in a world with no catalogue
-        designated the writer, which is this one, that is everything.
+        it says whether the registry is being rebuilt or not. The declared
+        address report is left out for the same reason, reading the same
+        centres. The catalogue divergence report is left out for the reason
+        one level up: it says what it could not compare -- and in a world with
+        no catalogue designated the writer, which is this one, that is
+        everything.
         """
         self.in_oscar("0-20000-0-63741")
         self.seen("ml-meteo")
@@ -957,6 +962,7 @@ class FrozenRegistryTests(GapReportTestCase):
             not in (
                 "unregistered-centres",
                 "datasets-out-of-step",
+                "nodes-declaring-another-address",
                 "catalogue-divergence",
             )
         }
@@ -2809,3 +2815,536 @@ class CatalogueDivergenceNoticeTests(CatalogueDivergenceTestCase):
         self.the_reader_carries("urn:wmo:md:ke-meteo:synop")
 
         self.assertEqual(self.report(), [])
+
+
+class DeclaredAddressTestCase(GapReportTestCase):
+    """A centre answering at one address while its own records name another.
+
+    Three addresses take part and the seeding has to be able to move each
+    independently: the one being asked, the one the writing catalogue last
+    advertised, and the one the centre's own records point at -- which is
+    stored nowhere and is read back out of a declaration's payload every time.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.answered(self.kenya)
+
+    def answered(self, node, *, hours_ago=1, status=SyncLog.SUCCESS):
+        """A run that asked a centre what it publishes and got an answer."""
+        return SyncLog.objects.create(
+            node=node,
+            sync_type=SyncLog.DISCOVERY_METADATA,
+            status=status,
+            started_at=NOW - timedelta(hours=hours_ago),
+        )
+
+    def failed_to_answer(self, node, *, hours_ago=1):
+        return self.answered(node, hours_ago=hours_ago, status=SyncLog.FAILED)
+
+    def asked_at(self, node, url, *, advertised=None):
+        """Where this tool asks the centre, and what the catalogue last said.
+
+        ``advertised`` defaults to the same address, which is the ordinary
+        state of every centre in the region: the address in use is the one the
+        catalogue advertised, and ADR-0007 reads the two being equal as this
+        tool's own value rather than somebody's correction.
+        """
+        node.base_url = url
+        node.advertised_base_url = url if advertised is None else advertised
+        node.save()
+
+        return node
+
+    def declares(self, node, host, *, identifier=None, hours_ago=1, links=None):
+        """A dataset the centre declares, serving it from ``host``.
+
+        The host reaches the declaration the way a real one does -- as the
+        ``canonical`` link of the record the centre served -- rather than as a
+        field, because reading it back out of the payload is the whole of what
+        the report does.
+        """
+        identifier = identifier or f"urn:wmo:md:{node.centre_id}:synop"
+        dataset = Dataset.objects.create(
+            node=node,
+            identifier=identifier,
+            title=identifier.rsplit(":", 1)[-1].upper(),
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy=f"origin/a/wis2/{node.centre_id}/data/core/weather",
+            raw_json={},
+        )
+
+        if links is None:
+            links = (
+                [{"rel": "canonical", "href": f"{host}/data/metadata/{identifier}.json"}]
+                if host
+                else []
+            )
+
+        return DatasetSource.objects.create(
+            dataset=dataset,
+            source_type=DatasetSource.NODE,
+            last_seen=NOW - timedelta(hours=hours_ago),
+            raw_json={"id": identifier, "links": links},
+        )
+
+    def report(self):
+        return nodes_declaring_another_address(now=NOW)
+
+    def by_centre(self):
+        return {row.centre_id: row for row in self.report()}
+
+    def bound(self):
+        return nodes_declaring_another_address_unread(now=NOW)
+
+
+class DeclaredAddressTests(DeclaredAddressTestCase):
+    """The centres whose own records point somewhere other than where we ask."""
+
+    def test_a_centre_declaring_another_host_is_reported(self):
+        """The finding: it answers where we ask, and calls somewhere else home."""
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.centre_id, "ke-meteo")
+        self.assertEqual(row.asked_url, "http://wis.meteo.go.ke")
+        self.assertEqual(row.declared_url, "https://wis2.meteo.go.ke")
+
+    def test_a_centre_declaring_the_address_it_is_asked_at_is_not_a_row(self):
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "http://wis.meteo.go.ke")
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_path_or_a_trailing_slash_is_not_a_disagreement(self):
+        """Both addresses are read for their host, by the seam that wrote one."""
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke/")
+        self.declares(self.kenya, "http://wis.meteo.go.ke")
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_port_is_part_of_the_host(self):
+        """Four of the region's centres publish from a bare address and a port."""
+        self.asked_at(self.kenya, "http://213.154.77.59:8002")
+        self.declares(self.kenya, "http://213.154.77.59:9000")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.declared_url, "http://213.154.77.59:9000")
+
+    def test_the_catalogues_address_is_carried_beside_the_other_two(self):
+        """Three addresses, and a row that named two of them would name no errand."""
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.advertised_url, "http://wis.meteo.go.ke")
+
+    def test_an_address_the_catalogue_advertised_says_the_centre_stands_alone(self):
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.agreement, AddressAgreement.CENTRE_ALONE)
+
+    def test_a_correction_the_centre_contradicts_says_so(self):
+        """Somebody typed an address, and the centre and the catalogue agree it is not theirs."""
+        self.asked_at(
+            self.kenya, "http://typed.example.int", advertised="https://wis2.meteo.go.ke"
+        )
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.agreement, AddressAgreement.ASKED_ALONE)
+
+    def test_whose_the_address_is_reads_exactly_as_the_sync_reads_it(self):
+        """ADR-0007's ownership test is the strings, and it is one test.
+
+        The catalogue sync will move an address only where ``base_url`` equals
+        ``advertised_base_url`` exactly. A trailing slash is therefore a
+        hand-correction as far as the sync is concerned, and this report has
+        to say so too -- a tool acting on an ownership it showed somebody the
+        opposite of is worse than either reading on its own.
+        """
+        self.asked_at(
+            self.kenya,
+            "http://wis.meteo.go.ke/",
+            advertised="http://wis.meteo.go.ke",
+        )
+        self.declares(self.kenya, "https://elsewhere.example.int")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.agreement, AddressAgreement.NOTHING_AGREES)
+
+    def test_the_catalogues_address_is_still_compared_as_a_host(self):
+        """It is read out of a link and never typed: no keystroke to preserve."""
+        self.asked_at(
+            self.kenya,
+            "http://typed.example.int",
+            advertised="https://wis2.meteo.go.ke/",
+        )
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.agreement, AddressAgreement.ASKED_ALONE)
+
+    def test_three_addresses_that_all_differ_say_that_plainly(self):
+        self.asked_at(
+            self.kenya, "http://typed.example.int", advertised="http://wis.meteo.go.ke"
+        )
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.agreement, AddressAgreement.NOTHING_AGREES)
+
+    def test_a_centre_whose_correction_it_declares_is_not_a_row(self):
+        """The correction was right, and a stale catalogue is not this finding.
+
+        The report is about a node answering where its own records do not
+        point. Where they do point there, what the catalogue last advertised
+        is history, and ADR-0007 already keeps it beside the address for the
+        one question it answers: whose value the address is.
+        """
+        self.asked_at(
+            self.kenya, "https://wis2.meteo.go.ke", advertised="http://wis.meteo.go.ke"
+        )
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_centre_part_way_through_moving_is_reported(self):
+        """The state this exists to catch: some records moved, the rest not yet.
+
+        A wis2box writes its canonical links from the address it is configured
+        with, so records already published keep the old host until they are
+        republished. Waiting for every record to agree would report the move
+        only once it was over.
+        """
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "http://wis.meteo.go.ke", identifier="urn:a")
+        self.declares(self.kenya, "https://elsewhere.example.int", identifier="urn:b")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.declared_url, "https://elsewhere.example.int")
+
+    def test_the_row_says_how_far_the_move_has_got(self):
+        """One odd record and a node that has entirely left are not one errand."""
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "http://wis.meteo.go.ke", identifier="urn:a")
+        self.declares(self.kenya, "http://wis.meteo.go.ke", identifier="urn:b")
+        self.declares(self.kenya, "https://elsewhere.example.int", identifier="urn:c")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.records_declaring, 1)
+        self.assertEqual(row.records_read, 3)
+        self.assertFalse(row.declares_it_throughout)
+
+    def test_a_centre_that_has_wholly_moved_says_that_instead(self):
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "https://elsewhere.example.int", identifier="urn:a")
+        self.declares(self.kenya, "https://elsewhere.example.int", identifier="urn:b")
+
+        (row,) = self.report()
+
+        self.assertEqual((row.records_declaring, row.records_read), (2, 2))
+        self.assertTrue(row.declares_it_throughout)
+
+    def test_a_record_naming_no_host_is_not_counted_as_one_read(self):
+        """The denominator is records that named a host, not records served."""
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "", identifier="urn:a", links=[])
+        self.declares(self.kenya, "https://elsewhere.example.int", identifier="urn:b")
+
+        (row,) = self.report()
+
+        self.assertEqual((row.records_declaring, row.records_read), (1, 1))
+
+    def test_the_newest_record_naming_another_host_is_the_one_the_row_names(self):
+        """What the centre says now, among the records that point away."""
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(
+            self.kenya, "https://old.example.int", identifier="urn:a", hours_ago=40
+        )
+        self.declares(
+            self.kenya, "https://new.example.int", identifier="urn:b", hours_ago=2
+        )
+
+        (row,) = self.report()
+
+        self.assertEqual(row.declared_url, "https://new.example.int")
+        self.assertEqual(row.last_declared_at, NOW - timedelta(hours=2))
+
+    def test_a_catalogues_copy_of_a_record_declares_nothing_here(self):
+        """A catalogue's copy is the address we already hold, not a second opinion."""
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        dataset = Dataset.objects.create(
+            node=self.kenya,
+            identifier="urn:wmo:md:ke-meteo:synop",
+            title="SYNOP",
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy="origin/a/wis2/ke-meteo/data/core/weather",
+            raw_json={},
+        )
+        DatasetSource.objects.create(
+            dataset=dataset,
+            source_type=DatasetSource.GDC,
+            catalogue=GlobalDiscoveryCatalogue.objects.create(
+                centre_id="ca-eccc-msc-global-discovery-catalogue",
+                name="Meteorological Service of Canada",
+                base_url="https://wis2-gdc.example.ca",
+                is_writer=True,
+            ),
+            last_seen=NOW - timedelta(hours=1),
+            raw_json={
+                "links": [{"rel": "canonical", "href": "https://elsewhere.example.int/x.json"}]
+            },
+        )
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_centre_whose_records_carry_no_canonical_link_is_not_a_row(self):
+        """Nothing to compare rather than an address to report.
+
+        Pinned rather than left to be discovered: a centre serving records
+        that advertise no canonical link has told this tool nothing about
+        where it lives, and reading that absence as a disagreement would
+        report every such centre for a host it never named.
+        """
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "", links=[])
+
+        self.assertEqual(self.report(), [])
+        self.assertIsNone(self.bound())
+
+    def test_a_canonical_link_that_is_not_web_addressed_names_no_host(self):
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(
+            self.kenya,
+            "",
+            links=[{"rel": "canonical", "href": "mqtts://everyone@wis.meteo.go.ke:8883"}],
+        )
+
+        self.assertEqual(self.report(), [])
+
+    def test_the_report_reads_by_centre(self):
+        uganda = self.node("ug-unma")
+        self.answered(uganda)
+        self.asked_at(uganda, "https://ug.example.int")
+        self.declares(uganda, "https://elsewhere.example.int")
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "https://elsewhere.example.int")
+
+        self.assertEqual([row.centre_id for row in self.report()], ["ke-meteo", "ug-unma"])
+
+    def test_the_index_counts_what_the_report_lists(self):
+        """A count arrived at twice is a count that comes to disagree."""
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "https://elsewhere.example.int")
+
+        counts = {
+            summary.slug: summary.count for summary in gap_report_summaries(now=NOW)
+        }
+
+        self.assertEqual(counts["nodes-declaring-another-address"], 1)
+        self.assertEqual(len(self.report()), 1)
+
+    def test_the_report_writes_nothing(self):
+        """ADR-0007's rule, and the whole reason this is a report at all.
+
+        Correcting the address is exactly what this tool may not do while the
+        registry is answering, so the address it holds survives being read
+        about -- and so does everything the reading passed over.
+        """
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+        before = list(
+            WIS2Node.objects.values_list("pk", "base_url", "advertised_base_url")
+        )
+        declarations = list(DatasetSource.objects.values_list("pk", "last_seen"))
+
+        self.report()
+
+        self.assertEqual(
+            list(WIS2Node.objects.values_list("pk", "base_url", "advertised_base_url")),
+            before,
+        )
+        self.assertEqual(
+            list(DatasetSource.objects.values_list("pk", "last_seen")), declarations
+        )
+
+
+class DeclaredAddressBoundTests(DeclaredAddressTestCase):
+    """The centres that could not be asked, which the count is measured against."""
+
+    def test_a_centre_that_has_never_answered_contributes_no_rows(self):
+        """Reachable is the whole precondition: nothing has read its records."""
+        silent = self.node("bi-igebu")
+        self.failed_to_answer(silent)
+        self.asked_at(silent, "https://bi.example.int")
+        self.declares(silent, "https://elsewhere.example.int")
+
+        self.assertEqual(self.report(), [])
+
+    def test_that_centre_is_named_in_the_bound_instead(self):
+        silent = self.node("bi-igebu")
+        self.failed_to_answer(silent)
+
+        self.assertIn("bi-igebu", self.bound())
+
+    def test_a_centre_nothing_could_ask_at_all_is_named_too(self):
+        """No address of its own is the same absence as one that never answers."""
+        self.node("bf-anam", registry=False)
+
+        self.assertIn("bf-anam", self.bound())
+
+    def test_a_centre_that_answered_once_and_stopped_is_still_read(self):
+        """What it last said stands: a failed run is a failure, not a withdrawal."""
+        blinking = self.node("bi-igebu")
+        self.answered(blinking, hours_ago=26)
+        self.failed_to_answer(blinking, hours_ago=1)
+        self.asked_at(blinking, "https://bi.example.int")
+        self.declares(blinking, "https://elsewhere.example.int")
+
+        self.assertEqual([row.centre_id for row in self.report()], ["bi-igebu"])
+        self.assertIsNone(self.bound())
+
+    def test_a_run_that_stepped_over_a_record_still_answered(self):
+        partial = self.node("cg-met")
+        self.answered(partial, status=SyncLog.PARTIAL)
+        self.asked_at(partial, "https://cg.example.int")
+        self.declares(partial, "https://elsewhere.example.int")
+
+        self.assertEqual(len(self.report()), 1)
+        self.assertIsNone(self.bound())
+
+    def test_a_station_registry_answering_says_nothing_about_the_metadata(self):
+        """Two endpoints that fail independently, and only one of them is this."""
+        silent = self.node("bi-igebu")
+        SyncLog.objects.create(
+            node=silent,
+            sync_type=SyncLog.NODE_STATIONS,
+            status=SyncLog.SUCCESS,
+            started_at=NOW - timedelta(hours=1),
+        )
+
+        self.assertIn("bi-igebu", self.bound())
+
+    def test_nothing_is_said_where_every_centre_has_answered(self):
+        self.assertIsNone(self.bound())
+
+    def test_the_bound_is_said_over_a_report_that_found_nothing(self):
+        """The reading it exists to prevent: no rows read as every address agreeing."""
+        self.failed_to_answer(self.node("bi-igebu"))
+
+        self.assertEqual(self.report(), [])
+        self.assertIsNotNone(self.bound())
+
+    def test_the_bound_travels_with_the_count_on_the_index(self):
+        self.failed_to_answer(self.node("bi-igebu"))
+
+        (summary,) = [
+            summary
+            for summary in gap_report_summaries(now=NOW)
+            if summary.slug == "nodes-declaring-another-address"
+        ]
+
+        self.assertIn("bi-igebu", summary.bound)
+
+    def test_the_report_carries_the_sentence_as_its_bound(self):
+        self.failed_to_answer(self.node("bi-igebu"))
+
+        self.assertEqual(
+            gap_report("nodes-declaring-another-address").describe_bound(now=NOW),
+            self.bound(),
+        )
+
+
+class DeclaredAddressNoticeTests(DeclaredAddressTestCase):
+    """The same finding as the sentence the morning digest carries."""
+
+    def notice(self):
+        (row,) = self.report()
+
+        return gap_report("nodes-declaring-another-address").describe_row(row)
+
+    def test_the_notice_names_both_addresses_and_the_centre(self):
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        summary = self.notice().summary
+
+        self.assertIn("ke-meteo", summary)
+        self.assertIn("http://wis.meteo.go.ke", summary)
+        self.assertIn("https://wis2.meteo.go.ke", summary)
+
+    def test_the_notice_is_keyed_on_the_centre(self):
+        """One centre has one address, so the finding is one however it moves."""
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        self.assertEqual(self.notice().key, "ke-meteo")
+
+    def test_a_correction_the_centre_contradicts_reads_as_one(self):
+        self.asked_at(
+            self.kenya, "http://typed.example.int", advertised="https://wis2.meteo.go.ke"
+        )
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        summary = self.notice().summary
+
+        self.assertIn("by hand", summary)
+        self.assertIn("http://typed.example.int", summary)
+
+    def test_the_correction_sentence_quotes_the_address_as_stored(self):
+        """A tidied host is not a string anybody can go and find.
+
+        The catalogue's address is what an operator has to reconcile the
+        correction against, so it is quoted exactly as the sync wrote it --
+        trailing slash and all -- rather than as this report compared it.
+        """
+        self.asked_at(
+            self.kenya,
+            "http://typed.example.int",
+            advertised="https://wis2.meteo.go.ke/",
+        )
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        self.assertIn("https://wis2.meteo.go.ke/", self.notice().summary)
+
+    def test_three_addresses_that_all_differ_name_all_three(self):
+        """Both errands at once, so neither is mailed as the other's fault."""
+        self.asked_at(
+            self.kenya, "http://typed.example.int", advertised="http://wis.meteo.go.ke"
+        )
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        summary = self.notice().summary
+
+        self.assertIn("http://typed.example.int", summary)
+        self.assertIn("http://wis.meteo.go.ke", summary)
+        self.assertIn("https://wis2.meteo.go.ke", summary)
+        self.assertIn("no two", summary)
+
+    def test_a_part_moved_centre_says_how_far_it_has_got(self):
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "http://wis.meteo.go.ke", identifier="urn:a")
+        self.declares(self.kenya, "https://wis2.meteo.go.ke", identifier="urn:b")
+
+        self.assertIn("1 of the 2 records", self.notice().summary)
+
+    def test_a_centre_that_has_wholly_moved_counts_nothing_out(self):
+        """A count that read the same either way would send them to the page."""
+        self.asked_at(self.kenya, "http://wis.meteo.go.ke")
+        self.declares(self.kenya, "https://wis2.meteo.go.ke")
+
+        self.assertNotIn(" of the ", self.notice().summary)
