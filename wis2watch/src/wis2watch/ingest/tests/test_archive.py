@@ -14,6 +14,7 @@ from unittest import mock
 from django.test import TestCase
 from django.utils import timezone as dj_timezone
 
+from wis2watch.core.interpretation import announces_catalogue_record
 from wis2watch.core.models import (
     Dataset,
     DatasetSource,
@@ -196,6 +197,177 @@ class AttributionTests(ArchiveTestCase):
             NodeLastSeen.objects.get(node=self.node).last_message_at,
             at("2026-08-12T15:03:46"),
         )
+
+
+class NothingToResolveAgainstTests(ArchiveTestCase):
+    """A notification the archive returns that names no record either.
+
+    The archive carries no topic, so the record a message names is the only
+    key its dataset can be resolved by. A message carrying neither has nothing
+    to resolve against at all, and the question this class settles is what
+    happens to it.
+
+    Measured over the region, every one of them was the same thing: the
+    centre's own daily announcement of its WCMP2 discovery metadata record,
+    which a wis2box republishes on a schedule at 15:00 UTC. An announcement
+    names no record because it *is* one, and it is recognised by its data
+    identifier and set aside before any of this -- so what is left here is a
+    centre publishing data notifications without the record they belong to,
+    which nothing may guess at.
+    """
+
+    def archived(self, *, naming_a_record):
+        """The first captured message that does, or does not, name a record."""
+        for feature in load_json_fixture(SHALLOW)["features"]:
+            if bool(feature["properties"].get("metadata_id")) is naming_a_record:
+                return feature
+
+        raise AssertionError(f"nothing matching in {SHALLOW}")
+
+    def stripped_of_its_record(self):
+        """A captured data notification with the record it names taken out.
+
+        Taken from a real one rather than written here, so what is asserted
+        about is a notification the archive really returns, short one field.
+        """
+        feature = self.archived(naming_a_record=True)
+        properties = {
+            name: value
+            for name, value in feature["properties"].items()
+            if name != "metadata_id"
+        }
+
+        return dict(feature, properties=properties)
+
+    def poll_naming_no_record(self):
+        """Poll an archive offering one data notification that names no record."""
+        return self.poll({"features": [self.stripped_of_its_record()]})
+
+    def test_what_carries_neither_is_recognised_as_an_announcement(self):
+        """The cause, asked of the rule that acts on it.
+
+        A WCMP2 announcement carries no ``metadata_id`` property at all -- the
+        record is the thing it announces, not something it points at -- and the
+        archive gives it no topic. So the captured message carrying neither is
+        the announcement, and what recognises it is the data identifier, which
+        is asked here rather than spelled out again: a test that wrote out what
+        one looks like would go on passing after the two spellings had drifted.
+
+        The 15:00 UTC stamp is the wis2box schedule that republishes them, and
+        is what made the population a daily one across many centres at once.
+        """
+        announcement = self.archived(naming_a_record=False)
+
+        self.assertTrue(
+            announces_catalogue_record(
+                "", data_id=announcement["properties"]["data_id"]
+            )
+        )
+        self.assertEqual(announcement["properties"]["pubtime"], "2026-08-12T15:00:00Z")
+
+    def test_it_is_not_counted_as_traffic_the_centre_published(self):
+        """Excluded rather than reported: re-announcing a record is not a fault.
+
+        It is what every wis2box does daily, so there is no finding about the
+        centre in it -- only a message that would inflate the centre's volume
+        for having said nothing new.
+        """
+        self.dataset()
+
+        sync_log = self.poll_capture()
+
+        self.assertEqual(sync_log.items_found, 13)
+        self.assertEqual(NotificationMessage.objects.count(), 13)
+        self.assertFalse(NotificationMessage.objects.filter(metadata_id="").exists())
+
+    def test_a_data_notification_naming_no_record_resolves_to_no_dataset(self):
+        """The centre's one declared dataset is a guess, not an answer.
+
+        With no topic and no record there is nothing left that says which
+        dataset a message belongs to, and a centre declaring exactly one is
+        the case where guessing would look most reasonable and read exactly
+        like a real attribution afterwards.
+        """
+        self.dataset()
+
+        self.poll_naming_no_record()
+
+        (stored,) = NotificationMessage.objects.all()
+
+        self.assertIsNone(stored.dataset)
+        self.assertEqual(stored.metadata_id, "")
+        self.assertEqual(stored.topic, "")
+
+    def test_it_is_still_the_traffic_of_the_centre_that_was_asked(self):
+        """Which is not a guess: the poll chose the address it read."""
+        self.dataset()
+
+        self.poll_naming_no_record()
+
+        (stored,) = NotificationMessage.objects.all()
+
+        self.assertEqual(stored.node, self.node)
+        self.assertEqual(stored.source, self.source)
+
+    def test_no_dataset_is_created_from_it(self):
+        """There is no identifier to key one on, so there is nothing to create."""
+        self.poll_naming_no_record()
+
+        self.assertEqual(Dataset.objects.count(), 0)
+        self.assertEqual(DatasetSource.objects.count(), 0)
+
+    def test_a_run_says_how_many_of_them_it_stored(self):
+        """So that the bucket stops being anonymous.
+
+        Every one of these is a wis2box publishing data without the record it
+        belongs to. The population is empty today, and a run that absorbed a
+        returning one into its totals is how it got to be 221 messages before
+        anybody looked.
+        """
+        self.dataset()
+
+        with self.assertLogs("wis2watch.ingest.archive", level="WARNING") as logged:
+            self.poll_naming_no_record()
+
+        (said,) = logged.records
+
+        self.assertIn("sc-seychelles-met", said.getMessage())
+        self.assertEqual(said.args[0], 1)
+
+    def test_a_run_whose_messages_all_resolved_says_nothing(self):
+        """A warning every poll carries is one nobody reads."""
+        self.dataset()
+
+        with self.assertNoLogs("wis2watch.ingest.archive", level="WARNING"):
+            self.poll_capture()
+
+    def test_a_run_that_failed_partway_still_says_what_it_stored(self):
+        """It keeps what it read, so it keeps what was odd about it too.
+
+        The centres this path exists for are the ones whose servers hang, so a
+        poll that dies on its second page is the ordinary case rather than the
+        exception -- and a report only a clean run makes is one those centres
+        would never get.
+        """
+        self.dataset()
+
+        def fetch(*_args, **_kwargs):
+            yield {"features": [self.stripped_of_its_record()]}
+            raise OSError("the connection dropped")
+
+        with self.assertLogs("wis2watch.ingest.archive", level="WARNING") as logged:
+            sync_log = poll_message_archive(
+                self.source, since=SINCE, until=UNTIL, fetch=fetch
+            )
+
+        # The failure itself is logged too, at ERROR: what is asserted here is
+        # that the run also said what it had already stored.
+        (said,) = [
+            record for record in logged.records if record.levelname == "WARNING"
+        ]
+
+        self.assertEqual(sync_log.status, SyncLog.FAILED)
+        self.assertEqual(said.args[0], 1)
 
 
 class RepeatedPollTests(ArchiveTestCase):
