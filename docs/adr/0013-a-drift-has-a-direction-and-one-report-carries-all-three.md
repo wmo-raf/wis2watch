@@ -107,6 +107,12 @@ sharpen it against.
 registry, so naming it on every row would be a column with one value in it.
 Two readers indexing the region would make that a real question.
 
+_Answered by [ADR-0019](0019-what-a-reading-catalogue-carries-is-kept-outside-the-registry.md),
+which keeps what each reading catalogue carries and reports the catalogues'
+disagreement as a report of its own, with the catalogue on the row. This
+report is unchanged: it still asks what a centre and its catalogues do not
+both declare, and still names no catalogue._
+
 **A per-centre view of the same disagreement.** The node page lists a centre's
 datasets and does not yet say which of them its own metadata declares. That is
 where somebody chasing one centre would rather read this, and it wants the

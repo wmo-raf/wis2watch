@@ -1,0 +1,54 @@
+{% extends "wis2watchcore/gap_reports/base.html" %}
+
+{% load i18n %}
+
+{% block report_note %}
+    <p class="report-note">
+        {% trans "One Global Discovery Catalogue writes this registry and the others are read so that their divergence from it can be reported. The catalogue is the errand: a record missing from one of them is a record nobody reading that one can discover, and a record only it carries is one the registry has never seen." %}
+    </p>
+{% endblock %}
+
+{% block table_head %}
+    <th>{% trans "Catalogue" %}</th>
+    <th>{% trans "Centre" %}</th>
+    <th>{% trans "Dataset" %}</th>
+    <th>{% trans "Which way it diverges" %}</th>
+    <th>{% trans "Last carried" %}</th>
+{% endblock %}
+
+{% block table_row %}
+    <td class="wrapping">
+        {{ row.catalogue_name }}
+        <div class="row-detail"><code>{{ row.catalogue_centre_id }}</code></div>
+    </td>
+    {% comment %}
+        Linked where the registry holds the centre at all. Where it does not,
+        the plain centre ID is the finding rather than a missing link: another
+        catalogue is indexing a centre of this region that nothing here knows.
+    {% endcomment %}
+    <td>
+        {% if row.node_id %}
+            <a href="{% url 'node_details' row.node_id %}"><code>{{ row.centre_id }}</code></a>
+        {% else %}
+            <code>{{ row.centre_id }}</code>
+            <div class="row-detail">{% trans "not in the registry" %}</div>
+        {% endif %}
+    </td>
+    <td class="wrapping">
+        {{ row.title }}
+        <div class="row-detail"><code>{{ row.identifier }}</code></div>
+    </td>
+    <td>
+        <span class="badge badge-warning">{{ row.divergence_label }}</span>
+    </td>
+    {% comment %}
+        When the catalogue that does carry it last said so, which is what
+        separates a live disagreement from a record nothing has touched for
+        months.
+    {% endcomment %}
+    <td>{{ row.last_carried_at|date:"Y-m-d H:i"|default:"—" }}</td>
+{% endblock %}
+
+{% block empty_message %}
+    {% trans "Every catalogue this tool has read carries the same records as the writer catalogue" %}
+{% endblock %}
