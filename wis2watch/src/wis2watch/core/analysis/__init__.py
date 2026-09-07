@@ -15,6 +15,8 @@ them.
 from .gaps import (
     GAP_REPORTS,
     UNATTRIBUTED_MESSAGES_SLUG,
+    CatalogueDivergence,
+    CatalogueDivergenceRow,
     DeclarationDrift,
     DeclaringCentre,
     DriftingDatasetRow,
@@ -31,6 +33,8 @@ from .gaps import (
     UndeclaredStationRow,
     UnregisteredCentreRow,
     attribution_window_label,
+    catalogue_divergences,
+    catalogue_divergences_not_compared,
     catalogues_that_keep_failing,
     centres_answering_for_what_they_publish,
     datasets_out_of_step,
@@ -112,6 +116,8 @@ from .windows import Grain, UnknownWindow, Window
 
 __all__ = [
     "GAP_REPORTS",
+    "CatalogueDivergence",
+    "CatalogueDivergenceRow",
     "UNATTRIBUTED_MESSAGES_SLUG",
     "AllNodesStatistics",
     "Bucket",
@@ -172,6 +178,8 @@ __all__ = [
     "WindowStats",
     "all_nodes_statistics",
     "attribution_window_label",
+    "catalogue_divergences",
+    "catalogue_divergences_not_compared",
     "catalogues_that_keep_failing",
     "centres_answering_for_what_they_publish",
     "dataset_silence",

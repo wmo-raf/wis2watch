@@ -17,9 +17,11 @@ Two rules keep the registry stable:
 
 - **One writer.** Exactly one catalogue is designated the writer. The others
   are fetched read-only, so records cannot flap between catalogues that
-  disagree about a centre. A reading catalogue records how much it found for
-  the region, which is enough to see that two catalogues disagree; saying
-  *which* records they disagree on is the gap reports' job, not this module's.
+  disagree about a centre. What a reading catalogue reads is written down as
+  what *it* carries, in a table of its own that no picture of the region is
+  built from -- so which records two catalogues disagree on is a query rather
+  than something nobody ever computed. Reporting that disagreement is the gap
+  reports' job, not this module's.
 - **Manual corrections win.** A node flagged as manually managed keeps its own
   fields and its own broker; the catalogue is expected to be wrong about
   centres whose metadata registration is incomplete. Its datasets are still
@@ -50,6 +52,7 @@ from .models import (
     DatasetSource,
     GlobalDiscoveryCatalogue,
     MessageSource,
+    ReadingCatalogueRecord,
     SyncLog,
     WIS2Node,
 )
@@ -392,6 +395,85 @@ def _refresh_dataset(dataset, discovered, catalogue):
     dataset.save(update_fields=[*fields, "last_synced", "modified"])
 
 
+#: What a reading catalogue keeps of a record, out of everything the shared
+#: mapping reads off one. The rest is what a canonical dataset is described by,
+#: and this is not one: the identifier says which record it is, the title and
+#: the topic are what make it recognisable in a report, and the record itself
+#: is kept whole beside them so that nothing here has to be read again to
+#: sharpen the comparison later.
+KEPT_FROM_A_READ_RECORD = ("title", "wmo_topic_hierarchy", "raw_json")
+
+
+def _what_a_reading_catalogue_keeps(discovered):
+    """The fields of a read record, off the mapping every sync reads one by.
+
+    Taken from :func:`~wis2watch.core.sync.declared_dataset_fields` rather
+    than off the record again, so that what a reading catalogue is recorded as
+    carrying and what a writing one is recorded as declaring cannot come to be
+    read out of the same feature differently -- which would show up as the two
+    catalogues disagreeing about a record neither had published differently.
+    """
+    fields = declared_dataset_fields(discovered)
+
+    return {name: fields[name] for name in KEPT_FROM_A_READ_RECORD}
+
+
+def keep_read_record(catalogue, record):
+    """Write down that this catalogue carries a record, and what it says.
+
+    Args:
+        catalogue: the reading catalogue the record was read from.
+        record: the discovery record it returned.
+
+    Returns:
+        The outcome, for the run's counts: created, updated, or stepped over.
+
+    Nothing here touches the registry -- no node, no dataset, no broker, no
+    declaration -- and the schema is what enforces that rather than this
+    function remembering to. What a catalogue nobody writes from carries is
+    interesting only beside what the writer carries, and the comparison is a
+    report's to make.
+
+    A record for a centre the writer has never indexed is kept like any other,
+    and is the row most worth reporting: a catalogue the rest of the world
+    discovers this region through, carrying a centre the registry does not
+    have. That is exactly the record with no canonical dataset to hang a
+    declaration on, which is why these live in a table of their own.
+
+    ``first_seen`` is set when the row is created and never moved, in the way a
+    declaration's is: it is when this catalogue was first seen carrying the
+    record, and a six-hourly run would otherwise reset it to the last run every
+    time.
+
+    Stepped over in its own savepoint, for the reason a written record is
+    (ADR-0010): a record the database refuses -- one whose title is longer than
+    the column, say -- is counted and named rather than losing the rest of the
+    run.
+    """
+    try:
+        with transaction.atomic():
+            _, created = ReadingCatalogueRecord.objects.update_or_create(
+                catalogue=catalogue,
+                identifier=record.dataset.identifier,
+                defaults={
+                    "centre_id": record.node.centre_id,
+                    **_what_a_reading_catalogue_keeps(record.dataset),
+                    "last_seen": dj_timezone.now(),
+                },
+            )
+
+            return CREATED if created else UPDATED
+    except Exception as exc:
+        logger.warning(
+            "Could not keep %s as read from %s: %s",
+            record.dataset.identifier,
+            catalogue.centre_id,
+            exc,
+        )
+
+        return SteppedOver(item=record.dataset.identifier, reason=str(exc))
+
+
 def apply_discovery_record(
     record,
     catalogue,
@@ -444,7 +526,17 @@ def apply_discovery_record(
 def sync_catalogue(catalogue, fetch=None):
     """Sync one catalogue, returning the ``SyncLog`` recording the run.
 
-    A reading catalogue reports what it found and writes nothing.
+    The writer builds the registry. A reading catalogue writes nothing to it
+    and instead records what it carries, which is what makes the two
+    catalogues' divergence reportable rather than merely suspected.
+
+    Nothing a reading catalogue has been recorded as carrying is ever cleared
+    -- not by a run that failed, and not by one that no longer sees the record.
+    What it last carried stands and is dated instead, because a run refused at
+    the door, a record this run stepped over and a catalogue that has withdrawn
+    one cannot be told apart from here; and a report that cleared its records
+    on a refused connection would read as a catalogue agreeing with the
+    registry about everything.
 
     ``fetch`` is how the catalogue's pages are read, defaulting to the network.
     """
@@ -488,6 +580,8 @@ def sync_catalogue(catalogue, fetch=None):
                             centres_answering_for_themselves=answering_for_themselves,
                         )
                     )
+                else:
+                    counts.record(keep_read_record(catalogue, record))
     except Exception as exc:
         logger.error("Catalogue sync failed for %s: %s", catalogue.centre_id, exc)
 

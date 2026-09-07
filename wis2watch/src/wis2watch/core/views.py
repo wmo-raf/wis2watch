@@ -75,7 +75,7 @@ def gap_report_index(request):
     """Which of the gap reports is worth opening, and what each one finds.
 
     Counts rather than findings: the index exists to point at a report, and
-    reading nine reports in full to show nine numbers would make the cheapest
+    reading ten reports in full to show ten numbers would make the cheapest
     page in the tool the most expensive.
     """
     context = {

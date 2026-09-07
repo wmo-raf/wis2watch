@@ -895,6 +895,85 @@ class DatasetSource(TimeStampedModel):
         return f"{self.dataset.identifier} - {self.get_source_type_display()}"
 
 
+class ReadingCatalogueRecord(TimeStampedModel):
+    """One record a catalogue this tool does not write the registry from carries.
+
+    Exactly one Global Discovery Catalogue writes the registry; the others are
+    read so that their divergence from it is itself reportable (ADR-0004). A
+    reading catalogue's records used to be counted and dropped on the floor,
+    so the divergence was never computed: two catalogues disagreeing about what
+    a centre publishes is a WIS2-level finding, and one of them is the record
+    the rest of the world discovers this region through.
+
+    Kept here rather than as a :class:`DatasetSource` beside the canonical
+    dataset, which is where every other declaration lives. Two reasons, and the
+    second is the one that decides it:
+
+    - **A reading catalogue writes nothing to the registry.** A declaration
+      hangs off a :class:`Dataset`, so recording one is either a registry row
+      this catalogue was not entitled to create or a row it was. Its records
+      landing in a table of their own is that rule enforced by the schema
+      rather than remembered by a sync.
+    - **The interesting record is the one the registry does not have.** A
+      reader carrying a record for a monitored centre the writer has never
+      indexed is the finding that most wants reporting, and it is exactly the
+      record with no canonical dataset to sit beside.
+
+    Keyed on the catalogue and the identifier, which is the grain a catalogue
+    publishes at: one feature per dataset, and an identifier it carries twice
+    is one record. ``centre_id`` is stored beside it rather than parsed out of
+    the identifier when the report is read, because a record whose identifier
+    does not name its centre is one that would then belong to nobody.
+
+    Nothing here is ever deleted for having gone quiet. What the catalogue last
+    said stands, and ``last_seen`` is what dates it: a record it confirmed this
+    morning is a live disagreement, and one it last carried in March is a
+    record nothing has touched since -- the distinction ADR-0013 draws for the
+    other divergence report, and read the same way here.
+    """
+
+    catalogue = models.ForeignKey(
+        GlobalDiscoveryCatalogue,
+        on_delete=models.CASCADE,
+        related_name="records",
+    )
+    centre_id = models.CharField(
+        max_length=200,
+        help_text=_("The centre whose dataset this record describes"),
+    )
+    identifier = models.CharField(
+        max_length=500,
+        help_text=_("URN identifier of the dataset the record describes"),
+    )
+    title = models.CharField(max_length=500, blank=True)
+    wmo_topic_hierarchy = models.CharField(max_length=500, blank=True)
+
+    raw_json = models.JSONField(
+        null=True,
+        blank=True,
+        help_text=_("What this catalogue said about the dataset, as it said it"),
+    )
+    first_seen = models.DateTimeField(default=dj_timezone.now)
+    last_seen = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["catalogue", "centre_id", "identifier"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["catalogue", "identifier"],
+                name="unique_record_per_reading_catalogue",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["catalogue", "centre_id"]),
+        ]
+        verbose_name = _("Reading Catalogue Record")
+        verbose_name_plural = _("Reading Catalogue Records")
+
+    def __str__(self):
+        return f"{self.identifier} - {self.catalogue.centre_id}"
+
+
 class StationQuerySet(models.QuerySet):
     def resolve(self, wigos_id, *also_known_as):
         """The one station these identifiers name, created if none knows it.

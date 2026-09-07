@@ -19,10 +19,13 @@ from django.test import TestCase, override_settings
 
 from wis2watch.core.analysis import (
     GAP_REPORTS,
+    CatalogueDivergence,
     DeclarationDrift,
     DeclaringCentre,
     OriginTransport,
     RegistryStanding,
+    catalogue_divergences,
+    catalogue_divergences_not_compared,
     catalogues_that_keep_failing,
     datasets_out_of_step,
     datasets_out_of_step_unasked_centres,
@@ -47,6 +50,7 @@ from wis2watch.core.models import (
     HourlyRollup,
     MessageSource,
     PropagationGap,
+    ReadingCatalogueRecord,
     Station,
     StationSource,
     SyncLog,
@@ -933,7 +937,10 @@ class FrozenRegistryTests(GapReportTestCase):
 
         The dataset drift report is left out for the opposite reason: its
         bound is about centres whose own metadata nothing has ever read, which
-        it says whether the registry is being rebuilt or not.
+        it says whether the registry is being rebuilt or not. The catalogue
+        divergence report is left out for the same reason again, one level up:
+        it says what it could not compare -- and in a world with no catalogue
+        designated the writer, which is this one, that is everything.
         """
         self.in_oscar("0-20000-0-63741")
         self.seen("ml-meteo")
@@ -945,7 +952,12 @@ class FrozenRegistryTests(GapReportTestCase):
         bounds = {
             summary.slug: summary.bound
             for summary in gap_report_summaries(now=NOW)
-            if summary.slug not in ("unregistered-centres", "datasets-out-of-step")
+            if summary.slug
+            not in (
+                "unregistered-centres",
+                "datasets-out-of-step",
+                "catalogue-divergence",
+            )
         }
 
         self.assertEqual(counted["declared-but-silent"], 1)
@@ -1601,7 +1613,7 @@ class SteppedOverRunNoticeTests(SteppedOverRunTestCase):
 
 
 class GapReportSummaryTests(GapReportTestCase):
-    """The index that says which of the nine is worth opening."""
+    """The index that says which of the ten is worth opening."""
 
     def test_every_report_is_summarised(self):
         self.assertEqual(
@@ -2319,5 +2331,377 @@ class DatasetDriftNoticeTests(DatasetDriftTestCase):
         DatasetSource.objects.create(
             dataset=dataset, source_type=DatasetSource.NODE, last_seen=NOW
         )
+
+        self.assertEqual(self.report(), [])
+
+
+class CatalogueDivergenceTestCase(GapReportTestCase):
+    """The region as two Global Discovery Catalogues index it.
+
+    One of them writes the registry and the other is read, so what is seeded
+    on each side is what each is on record as carrying: a declaration against
+    the writing catalogue for the registry's, and a read record for the
+    reader's. Beside them, the fact the whole comparison is bounded by --
+    whether a run of that reader ever brought records back at all.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.writer = GlobalDiscoveryCatalogue.objects.create(
+            centre_id="ca-eccc-msc-global-discovery-catalogue",
+            name="Meteorological Service of Canada",
+            base_url="https://wis2-gdc.example.ca",
+            is_writer=True,
+        )
+        self.reader = GlobalDiscoveryCatalogue.objects.create(
+            centre_id="de-dwd-global-discovery-catalogue",
+            name="Deutscher Wetterdienst",
+            base_url="https://wis2-gdc.example.de",
+        )
+        self.read(self.reader)
+
+    def read(self, catalogue, *, hours_ago=6, status=SyncLog.SUCCESS, found=63):
+        """A run that asked a catalogue for the region and was answered."""
+        return SyncLog.objects.create(
+            catalogue=catalogue,
+            sync_type=SyncLog.CATALOGUE,
+            status=status,
+            started_at=NOW - timedelta(hours=hours_ago),
+            items_found=found,
+        )
+
+    def failed_to_read(self, catalogue, *, hours_ago=1):
+        """A run that asked and was refused."""
+        return self.read(catalogue, hours_ago=hours_ago, status=SyncLog.FAILED, found=0)
+
+    def the_writer_carries(self, identifier, *, node=None, hours_ago=6):
+        """A record in the registry, declared by the catalogue that writes it."""
+        node = self.kenya if node is None else node
+        dataset = Dataset.objects.create(
+            node=node,
+            identifier=identifier,
+            title=identifier.rsplit(":", 1)[-1].upper(),
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy=f"origin/a/wis2/{node.centre_id}/data/core/weather",
+            raw_json={},
+        )
+        DatasetSource.objects.create(
+            dataset=dataset,
+            source_type=DatasetSource.GDC,
+            catalogue=self.writer,
+            last_seen=NOW - timedelta(hours=hours_ago),
+        )
+
+        return dataset
+
+    def the_reader_carries(
+        self, identifier, *, catalogue=None, centre_id="ke-meteo", hours_ago=6
+    ):
+        """A record a catalogue nothing is written from says it holds."""
+        return ReadingCatalogueRecord.objects.create(
+            catalogue=catalogue or self.reader,
+            centre_id=centre_id,
+            identifier=identifier,
+            title=identifier.rsplit(":", 1)[-1].upper(),
+            wmo_topic_hierarchy=f"origin/a/wis2/{centre_id}/data/core/weather",
+            last_seen=NOW - timedelta(hours=hours_ago),
+        )
+
+    def report(self):
+        return catalogue_divergences(now=NOW)
+
+    def divergences(self):
+        """Which way each reported record diverges, by identifier."""
+        return {row.identifier: row.divergence for row in self.report()}
+
+    def bound(self):
+        return catalogue_divergences_not_compared(now=NOW)
+
+
+class CatalogueDivergenceTests(CatalogueDivergenceTestCase):
+    """What the region's catalogues do not both carry."""
+
+    def test_a_record_both_catalogues_carry_is_not_reported(self):
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+        self.the_reader_carries("urn:wmo:md:ke-meteo:synop")
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_record_only_the_registry_s_catalogue_carries_is_reported(self):
+        """A centre the rest of the world does not discover through that one."""
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+
+        self.assertEqual(
+            self.divergences(),
+            {"urn:wmo:md:ke-meteo:synop": CatalogueDivergence.WRITER_ONLY},
+        )
+
+    def test_a_record_only_the_read_catalogue_carries_is_reported(self):
+        """A record the registry does not have, and would never learn of."""
+        self.the_reader_carries("urn:wmo:md:ke-meteo:climat")
+
+        self.assertEqual(
+            self.divergences(),
+            {"urn:wmo:md:ke-meteo:climat": CatalogueDivergence.READER_ONLY},
+        )
+
+    def test_a_record_for_a_centre_the_registry_has_never_heard_of_is_reported(self):
+        """The row with nowhere to link to, which is the finding itself."""
+        self.the_reader_carries("urn:wmo:md:ml-meteo:synop", centre_id="ml-meteo")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.divergence, CatalogueDivergence.READER_ONLY)
+        self.assertEqual(row.centre_id, "ml-meteo")
+        self.assertIsNone(row.node_id)
+
+    def test_a_retired_dataset_the_registry_s_catalogue_still_carries_is_compared(self):
+        """Retirement is the centre's word about itself, not the catalogue's.
+
+        A record the catalogue carries and the centre has stopped serving is
+        still a record that catalogue carries, and whether another catalogue
+        carries it too is the same question it was before.
+        """
+        dataset = self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+        dataset.status = Dataset.INACTIVE
+        dataset.save(update_fields=["status"])
+
+        self.assertEqual(
+            self.divergences(),
+            {"urn:wmo:md:ke-meteo:synop": CatalogueDivergence.WRITER_ONLY},
+        )
+
+    def test_a_dataset_no_catalogue_declared_is_not_a_divergence(self):
+        """Traffic and a centre's own metadata are the drift report's business.
+
+        A dataset heard on the wire that no catalogue carries is a finding
+        already, one report along. Counting it here would report it twice and
+        name the wrong two sources as disagreeing.
+        """
+        dataset = Dataset.objects.create(
+            node=self.kenya,
+            identifier="urn:wmo:md:ke-meteo:heard",
+            title="HEARD",
+            wmo_data_policy=Dataset.CORE,
+            wmo_topic_hierarchy="origin/a/wis2/ke-meteo/data/core/weather",
+            raw_json={},
+        )
+        DatasetSource.objects.create(
+            dataset=dataset, source_type=DatasetSource.OBSERVED, last_seen=NOW
+        )
+
+        self.assertEqual(self.report(), [])
+
+    def test_each_read_catalogue_is_compared_on_its_own(self):
+        """Two catalogues disagreeing about one record are two findings.
+
+        Which catalogue is carrying what is the whole of what makes the row
+        actionable: the errand is with that catalogue's operator, and one row
+        naming neither would be a report nobody could act on.
+        """
+        other = GlobalDiscoveryCatalogue.objects.create(
+            centre_id="cn-cma-global-discovery-catalogue",
+            name="China Meteorological Administration",
+            base_url="https://wis2-gdc.example.cn",
+        )
+        self.read(other)
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+        self.the_reader_carries("urn:wmo:md:ke-meteo:synop")
+
+        (row,) = self.report()
+
+        self.assertEqual(row.catalogue_centre_id, other.centre_id)
+        self.assertEqual(row.divergence, CatalogueDivergence.WRITER_ONLY)
+
+    def test_a_catalogue_no_run_has_ever_read_is_not_compared(self):
+        """The reading it exists to prevent: silence read as disagreement.
+
+        A catalogue nothing has ever got records out of carries nothing as far
+        as this tool knows, so every record the registry holds would read as a
+        divergence -- ADR-0005's mistake made about catalogues.
+        """
+        SyncLog.objects.filter(catalogue=self.reader).delete()
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_catalogue_whose_runs_all_brought_nothing_back_is_not_compared(self):
+        """A run that answered with nothing has not said the region is empty."""
+        SyncLog.objects.filter(catalogue=self.reader).delete()
+        self.read(self.reader, found=0)
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_catalogue_that_answered_once_and_has_failed_since_is_compared(self):
+        """What it last said stands, which is the rule the sync writes by."""
+        self.failed_to_read(self.reader)
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+        self.the_reader_carries("urn:wmo:md:ke-meteo:synop")
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_catalogue_switched_off_is_not_compared(self):
+        """Nothing is asking it any more, so its records are last year's."""
+        self.reader.is_active = False
+        self.reader.save()
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+
+        self.assertEqual(self.report(), [])
+
+    def test_nothing_is_compared_where_no_catalogue_writes_the_registry(self):
+        self.writer.is_writer = False
+        self.writer.save()
+        self.the_reader_carries("urn:wmo:md:ke-meteo:climat")
+
+        self.assertEqual(self.report(), [])
+
+    def test_the_row_carries_what_it_takes_to_open_the_conversation(self):
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop", hours_ago=3)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.catalogue_centre_id, self.reader.centre_id)
+        self.assertEqual(row.catalogue_name, self.reader.name)
+        self.assertEqual(row.centre_id, "ke-meteo")
+        self.assertEqual(row.node_id, self.kenya.pk)
+        self.assertEqual(row.identifier, "urn:wmo:md:ke-meteo:synop")
+        self.assertEqual(row.title, "SYNOP")
+        self.assertEqual(row.last_carried_at, NOW - timedelta(hours=3))
+
+    def test_a_read_only_record_is_dated_by_the_catalogue_that_carries_it(self):
+        self.the_reader_carries("urn:wmo:md:ke-meteo:climat", hours_ago=9)
+
+        (row,) = self.report()
+
+        self.assertEqual(row.last_carried_at, NOW - timedelta(hours=9))
+
+    def test_the_rows_are_ordered_by_catalogue_then_centre_then_record(self):
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+        self.the_reader_carries(
+            "urn:wmo:md:bi-igebu:synop", centre_id="bi-igebu"
+        )
+
+        self.assertEqual(
+            [(row.catalogue_centre_id, row.identifier) for row in self.report()],
+            [
+                (self.reader.centre_id, "urn:wmo:md:bi-igebu:synop"),
+                (self.reader.centre_id, "urn:wmo:md:ke-meteo:synop"),
+            ],
+        )
+
+    def test_the_count_on_the_index_is_what_the_report_lists(self):
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+        self.the_reader_carries("urn:wmo:md:ke-meteo:climat")
+
+        counted = {
+            summary.slug: summary.count for summary in gap_report_summaries(now=NOW)
+        }
+
+        self.assertEqual(counted["catalogue-divergence"], len(self.report()))
+        self.assertEqual(counted["catalogue-divergence"], 2)
+
+
+class CatalogueDivergenceBoundTests(CatalogueDivergenceTestCase):
+    """Which catalogues the comparison could not include, and why."""
+
+    def test_nothing_is_said_where_every_catalogue_has_been_read(self):
+        self.assertIsNone(self.bound())
+
+    def test_a_catalogue_nothing_has_read_is_named(self):
+        never = GlobalDiscoveryCatalogue.objects.create(
+            centre_id="cn-cma-global-discovery-catalogue",
+            name="China Meteorological Administration",
+            base_url="https://wis2-gdc.example.cn",
+        )
+
+        self.assertIn(never.centre_id, self.bound())
+
+    def test_the_bound_is_said_over_a_report_that_found_nothing(self):
+        """No rows and no sentence reads as two catalogues that agree."""
+        GlobalDiscoveryCatalogue.objects.create(
+            centre_id="cn-cma-global-discovery-catalogue",
+            name="China Meteorological Administration",
+            base_url="https://wis2-gdc.example.cn",
+        )
+
+        self.assertEqual(self.report(), [])
+        self.assertIsNotNone(self.bound())
+
+    def test_no_writer_leaves_nothing_to_compare_anything_with(self):
+        self.writer.is_writer = False
+        self.writer.save()
+
+        self.assertIsNotNone(self.bound())
+
+    def test_no_other_catalogue_at_all_is_said_rather_than_left_blank(self):
+        self.reader.delete()
+
+        self.assertIsNotNone(self.bound())
+
+    def test_the_bound_travels_with_the_count_on_the_index(self):
+        GlobalDiscoveryCatalogue.objects.create(
+            centre_id="cn-cma-global-discovery-catalogue",
+            name="China Meteorological Administration",
+            base_url="https://wis2-gdc.example.cn",
+        )
+
+        (summary,) = [
+            summary
+            for summary in gap_report_summaries(now=NOW)
+            if summary.slug == "catalogue-divergence"
+        ]
+
+        self.assertIn("cn-cma-global-discovery-catalogue", summary.bound)
+
+    def test_the_report_carries_the_sentence_as_its_bound(self):
+        GlobalDiscoveryCatalogue.objects.create(
+            centre_id="cn-cma-global-discovery-catalogue",
+            name="China Meteorological Administration",
+            base_url="https://wis2-gdc.example.cn",
+        )
+
+        self.assertEqual(
+            gap_report("catalogue-divergence").describe_bound(now=NOW), self.bound()
+        )
+
+
+class CatalogueDivergenceNoticeTests(CatalogueDivergenceTestCase):
+    """The same findings as the sentences the morning digest carries."""
+
+    def notice(self):
+        (row,) = self.report()
+
+        return gap_report("catalogue-divergence").describe_row(row)
+
+    def test_a_record_the_registry_s_catalogue_alone_carries_says_so(self):
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+
+        summary = self.notice().summary
+
+        self.assertIn("urn:wmo:md:ke-meteo:synop", summary)
+        self.assertIn("de-dwd-global-discovery-catalogue", summary)
+
+    def test_a_record_the_read_catalogue_alone_carries_says_so(self):
+        self.the_reader_carries("urn:wmo:md:ke-meteo:climat")
+
+        summary = self.notice().summary
+
+        self.assertIn("de-dwd-global-discovery-catalogue", summary)
+        self.assertIn("registry", summary)
+
+    def test_it_is_keyed_on_the_catalogue_and_the_record(self):
+        """One catalogue disagreeing about one record is one finding."""
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+
+        self.assertEqual(
+            self.notice().key,
+            "de-dwd-global-discovery-catalogue:urn:wmo:md:ke-meteo:synop",
+        )
+
+    def test_a_divergence_that_is_settled_leaves_the_report(self):
+        """Which is what the digest reads as the two having come together."""
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+        self.the_reader_carries("urn:wmo:md:ke-meteo:synop")
 
         self.assertEqual(self.report(), [])

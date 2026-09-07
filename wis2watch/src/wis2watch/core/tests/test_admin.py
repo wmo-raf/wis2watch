@@ -19,6 +19,7 @@ from wis2watch.core.models import (
     MessageSource,
     NodeLastSeen,
     PropagationGap,
+    ReadingCatalogueRecord,
     Station,
     StationSource,
     SyncLog,
@@ -507,7 +508,7 @@ class NodeOverviewViewTests(TestCase):
 
 
 class GapReportViewTests(TestCase):
-    """The nine reports, and the ways somebody arrives at one.
+    """The ten reports, and the ways somebody arrives at one.
 
     What the reports find is the analysis seam's business; what is guarded here
     is that each of them can actually be reached and rendered, since a finding
@@ -642,6 +643,35 @@ class GapReportViewTests(TestCase):
             catalogue=catalogue,
             last_seen=dj_timezone.now(),
         )
+        # A catalogue read for its divergence, carrying the record above and
+        # one more besides: the row that names a catalogue rather than a
+        # centre, and the one whose centre the registry has never heard of.
+        reader = GlobalDiscoveryCatalogue.objects.create(
+            centre_id="de-dwd-global-discovery-catalogue",
+            name="Deutscher Wetterdienst",
+            base_url="https://wis2-gdc.example.de",
+        )
+        SyncLog.objects.create(
+            catalogue=reader,
+            sync_type=SyncLog.CATALOGUE,
+            status=SyncLog.SUCCESS,
+            started_at=dj_timezone.now() - timedelta(hours=6),
+            items_found=63,
+        )
+        for centre_id, identifier in (
+            ("ke-kmd", "urn:wmo:md:ke-kmd:surface-weather"),
+            ("ml-meteo", "urn:wmo:md:ml-meteo:surface-weather"),
+        ):
+            ReadingCatalogueRecord.objects.create(
+                catalogue=reader,
+                centre_id=centre_id,
+                identifier=identifier,
+                title="Surface weather observations",
+                wmo_topic_hierarchy=(
+                    f"origin/a/wis2/{centre_id}/data/core/weather/synop"
+                ),
+                last_seen=dj_timezone.now(),
+            )
         # A run that reached its source and lost a record out of what it read.
         # Against another of the centre's syncs on purpose: a newer station
         # run would be an answer, and the registry above would stop failing.

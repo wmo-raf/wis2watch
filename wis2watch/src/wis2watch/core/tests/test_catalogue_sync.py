@@ -29,6 +29,7 @@ from wis2watch.core.models import (
     DatasetSource,
     GlobalDiscoveryCatalogue,
     MessageSource,
+    ReadingCatalogueRecord,
     SyncLog,
     WIS2Node,
 )
@@ -220,8 +221,12 @@ class DatasetDeclarationTests(CatalogueSyncTestCase):
         self.assertEqual(self.declaration().first_seen, first_seen)
         self.assertGreater(self.declaration().last_seen, last_seen)
 
-    def test_a_reading_catalogue_declares_nothing(self):
-        """It writes no records, so it has recorded no claim about any."""
+    def test_a_reading_catalogue_declares_no_dataset(self):
+        """What it carries is kept in its own table, not beside a dataset.
+
+        A declaration hangs off a canonical dataset, and a catalogue not
+        entitled to create one is not entitled to declare one either.
+        """
         reader = GlobalDiscoveryCatalogue.objects.create(
             centre_id="cn-cma-global-discovery-catalogue",
             name="China Global Discovery Catalogue",
@@ -231,6 +236,12 @@ class DatasetDeclarationTests(CatalogueSyncTestCase):
         sync_catalogue(reader, fetch=pages(self.payload))
 
         self.assertEqual(DatasetSource.objects.count(), 0)
+
+    def test_the_writer_keeps_no_reading_records(self):
+        """Its records are the registry; a second copy of them would drift."""
+        self.sync()
+
+        self.assertEqual(ReadingCatalogueRecord.objects.count(), 0)
 
 
 class OperatorExpectationTests(CatalogueSyncTestCase):
@@ -1014,12 +1025,27 @@ class ManuallyManagedNodeTests(CatalogueSyncTestCase):
 
 
 class ReadOnlyCatalogueTests(CatalogueSyncTestCase):
-    """Only the writer catalogue may create or change registry records."""
+    """Only the writer catalogue may create or change registry records.
+
+    What a reading catalogue does instead is write down what it carries, in a
+    table of its own that nothing about the region is built from. That is the
+    whole of it: the registry is untouched, and the divergence between the two
+    catalogues becomes a query rather than a thing nobody ever computed.
+    """
 
     def setUp(self):
         super().setUp()
         self.catalogue.is_writer = False
         self.catalogue.save()
+
+    def records(self):
+        """What this catalogue is on record as carrying, by identifier."""
+        return {
+            record.identifier: record
+            for record in ReadingCatalogueRecord.objects.filter(
+                catalogue=self.catalogue
+            )
+        }
 
     def test_it_creates_nothing(self):
         self.sync()
@@ -1038,13 +1064,109 @@ class ReadOnlyCatalogueTests(CatalogueSyncTestCase):
         self.assertEqual(node.name, "Congo")
         self.assertEqual(node.country, "CD")
 
+    def test_it_keeps_the_record_it_read_for_every_monitored_centre(self):
+        self.sync()
+
+        self.assertEqual(
+            set(self.records()),
+            {
+                KE_DATASET,
+                CG_DATASET,
+                SZ_DATASET,
+                "urn:wmo:md:gh-gmet:urn:wmo:md:gh-gmet:"
+                "core.surface-based-observations.synop",
+                "urn:wmo:md:tg-anamet:core.surface-based-observations.synop",
+            },
+        )
+
+    def test_a_record_says_which_centre_it_is_about(self):
+        self.sync()
+
+        self.assertEqual(self.records()[KE_DATASET].centre_id, "ke-meteo")
+
+    def test_a_record_is_kept_as_the_catalogue_published_it(self):
+        self.sync()
+
+        record = self.records()[KE_DATASET]
+
+        self.assertEqual(record.raw_json["id"], KE_DATASET)
+        self.assertTrue(record.title)
+        self.assertTrue(record.wmo_topic_hierarchy)
+        self.assertIsNotNone(record.last_seen)
+
+    def test_centres_outside_the_monitored_region_are_not_kept(self):
+        self.sync()
+
+        self.assertEqual(
+            ReadingCatalogueRecord.objects.filter(
+                centre_id__in=("il-ims", "us-cimss", "int-eumetsat")
+            ).count(),
+            0,
+        )
+
+    def test_a_second_run_refreshes_what_it_carries_rather_than_doubling_it(self):
+        self.sync()
+        first_seen = self.records()[KE_DATASET].first_seen
+        last_seen = self.records()[KE_DATASET].last_seen
+
+        self.sync()
+
+        self.assertEqual(len(self.records()), len(MONITORED_CENTRE_IDS))
+        self.assertEqual(self.records()[KE_DATASET].first_seen, first_seen)
+        self.assertGreater(self.records()[KE_DATASET].last_seen, last_seen)
+
+    def test_a_run_that_could_not_reach_it_leaves_what_it_carries_alone(self):
+        """A catalogue that did not answer has not stopped carrying anything.
+
+        The reading it exists to prevent is the worse one: records cleared on
+        a refused connection read as a catalogue that agrees with the registry
+        about everything, which is the opposite of what is known.
+        """
+        self.sync()
+        before = {
+            identifier: record.last_seen
+            for identifier, record in self.records().items()
+        }
+
+        log = sync_catalogue(self.catalogue, fetch=failing_fetch("connection refused"))
+
+        self.assertEqual(log.status, SyncLog.FAILED)
+        self.assertEqual(
+            {
+                identifier: record.last_seen
+                for identifier, record in self.records().items()
+            },
+            before,
+        )
+
     def test_it_still_records_what_it_found(self):
         log = self.sync()
 
         self.assertEqual(log.items_found, len(MONITORED_CENTRE_IDS))
-        self.assertEqual(log.items_created, 0)
+        self.assertEqual(log.items_created, len(MONITORED_CENTRE_IDS))
         self.assertEqual(log.items_updated, 0)
         self.assertEqual(log.status, SyncLog.SUCCESS)
+
+    def test_a_second_run_counts_what_it_refreshed(self):
+        self.sync()
+
+        log = self.sync()
+
+        self.assertEqual(log.items_created, 0)
+        self.assertEqual(log.items_updated, len(MONITORED_CENTRE_IDS))
+
+    def test_a_record_it_cannot_store_is_stepped_over_rather_than_lost(self):
+        """The rule the writer reads by, and for the same reason (ADR-0010)."""
+        payload = copy.deepcopy(self.payload)
+        record = next(f for f in payload["features"] if f["id"] == KE_DATASET)
+        record["properties"]["title"] = "x" * 600
+
+        log = self.sync(payload)
+
+        self.assertEqual(log.status, SyncLog.PARTIAL)
+        self.assertEqual(log.items_errored, 1)
+        self.assertEqual(log.stepped_over[0]["item"], KE_DATASET)
+        self.assertEqual(len(self.records()), len(MONITORED_CENTRE_IDS) - 1)
 
 
 class SharedTopicTests(CatalogueSyncTestCase):

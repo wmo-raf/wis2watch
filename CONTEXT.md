@@ -61,6 +61,15 @@ catalogue-only, node-only, or heard but declared by neither -- and the
 direction is whose errand it is.
 _Avoid_: mismatch, divergence for this specific finding.
 
+**Divergence**:
+Two Global Discovery Catalogues carrying different records for a monitored
+centre. It has a direction -- the record only the registry's catalogue
+carries, or the record only another one does -- and the errand is with a
+catalogue rather than with a centre (ADR-0019). What a catalogue nothing
+writes from carries is kept in `ReadingCatalogueRecord`, outside the registry
+entirely.
+_Avoid_: drift for this one, which is a centre and its own catalogue.
+
 **Retired**:
 A dataset the centre has stopped declaring: `status` is `inactive`, and its
 row, declarations, rollups and history all survive. Only the centre retires
