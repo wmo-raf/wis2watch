@@ -443,8 +443,8 @@ class CatalogueDivergence:
     with nothing wrong with it rather than as a direction nothing has diverged
     in yet.
 
-    ``WRITER_ONLY`` is a record the registry is built from and another
-    catalogue does not carry. What the region is discovered through is whatever
+    ``WRITER_ONLY`` is a record the writer catalogue carries and a reading
+    catalogue does not. What the region is discovered through is whatever
     catalogue a consumer happens to read, so a centre missing from one of them
     is a centre invisible to everybody reading that one.
 
@@ -452,27 +452,21 @@ class CatalogueDivergence:
     a record the registry has never seen. Nothing here is monitored against it,
     and where the centre is one the registry does not hold at all, the record
     is the only evidence that the centre is in WIS2.
+
+    There is no classifier here, unlike the drift report's, because there is
+    nothing to classify: which direction a row is in is what the two halves of
+    the comparison are, and each of them says so itself.
     """
 
     WRITER_ONLY = "writer_only"
     READER_ONLY = "reader_only"
 
     CHOICES = [
-        (WRITER_ONLY, _("The registry's catalogue carries it, this one does not")),
-        (READER_ONLY, _("This catalogue carries it, the registry's does not")),
+        (WRITER_ONLY, _("The writer catalogue carries it, this one does not")),
+        (READER_ONLY, _("This catalogue carries it, the writer catalogue does not")),
     ]
 
     LABELS = dict(CHOICES)
-
-    @classmethod
-    def of(cls, *, in_the_registrys_catalogue):
-        """Which of the two a record's absence adds up to.
-
-        Asked only of the records one catalogue carries and the other does
-        not, which is what the single argument is read against: a record both
-        of them carry is agreement and never reaches here.
-        """
-        return cls.WRITER_ONLY if in_the_registrys_catalogue else cls.READER_ONLY
 
     @classmethod
     def label(cls, value):
@@ -974,7 +968,7 @@ def catalogue_divergences_not_compared(*, now=None):
     whether anything has ever had records out of the catalogue, which only
     stops being true by never having been true.
     """
-    if _the_registrys_catalogue() is None:
+    if _the_writer_catalogue() is None:
         return gettext(
             "Nothing is compared here: no catalogue is designated the writer, "
             "so there is no registry of record to compare the others with."
@@ -983,7 +977,7 @@ def catalogue_divergences_not_compared(*, now=None):
     unread = [catalogue.centre_id for catalogue in _catalogues_never_read()]
 
     if not unread:
-        if _catalogues_compared_for_divergence().exists():
+        if _catalogues_read_at_least_once().exists():
             return None
 
         # Every catalogue accounted for and none of them compared, which is a
@@ -1004,6 +998,65 @@ def catalogue_divergences_not_compared(*, now=None):
         "unknown rather than in agreement.",
         len(unread),
     ) % {"count": len(unread), "catalogues": ", ".join(unread)}
+
+
+def catalogue_divergences_as_of(*, now=None):
+    """What each compared catalogue was last read, and when.
+
+    Args:
+        now: unused; taken so that every caveat is asked in the same way.
+
+    Returns:
+        str | None: when each catalogue in the comparison was last read
+        through, or nothing where there is no comparison.
+
+    The other half of not reading silence as agreement. A catalogue that has
+    never answered is bounded out and named, but one that answered in March
+    and has failed every run since goes on agreeing with the registry about
+    everything -- correctly, because what it last said stands, and invisibly,
+    because agreement is the absence of a row and an absent row carries no
+    date. So the dates are said once, above the table.
+
+    The writer catalogue is dated here beside the others, and that is what
+    this report does instead of withholding itself while the registry is
+    frozen. ADR-0004 expected a divergence report to be suppressed by a stale
+    writer the way the unregistered-centre report is. It reads better as a
+    date: the rows stay true -- a record this tool holds and another catalogue
+    does not really is a difference -- and a writer last read in March, said
+    beside a reader read this morning, is what tells a reader which of the two
+    the difference is likelier to be about.
+
+    Read from the newest run that brought records back rather than from the
+    newest run, so that the sentence says when the comparison was actually
+    made rather than when something last tried.
+
+    Stamped the way the tables stamp an instant, rather than in the locale's
+    own words, because these sit in a sentence: a localised datetime ends in a
+    full stop of its own, and the sentence would end in two.
+    """
+    writer = _the_writer_catalogue()
+    compared = list(_catalogues_read_at_least_once())
+
+    if not compared:
+        return None
+
+    read = [(catalogue, _newest_complete_read(catalogue)) for catalogue in compared]
+
+    if writer is not None:
+        read.insert(0, (writer, _newest_complete_read(writer)))
+
+    return gettext(
+        "Compared against what each catalogue carried when it was last read "
+        "through: %(catalogues)s."
+    ) % {
+        "catalogues": "; ".join(
+            f"{catalogue.centre_id}"
+            f"{gettext(' (the writer)') if catalogue == writer else ''}, "
+            f"{date_format(run.started_at, 'Y-m-d H:i')}"
+            for catalogue, run in read
+            if run is not None
+        )
+    }
 
 
 def propagation_gaps(*, now=None):
@@ -2031,7 +2084,7 @@ def _drifting_dataset_row(dataset):
     )
 
 
-def _the_registrys_catalogue():
+def _the_writer_catalogue():
     """The catalogue the registry is built from, or None if none is designated.
 
     Its ``is_active`` is deliberately not asked. What it wrote is the registry
@@ -2042,52 +2095,49 @@ def _the_registrys_catalogue():
     return GlobalDiscoveryCatalogue.objects.filter(is_writer=True).first()
 
 
-def _catalogues_compared_for_divergence():
-    """The catalogues whose records can honestly be compared with the registry.
+def _reading_catalogues():
+    """The catalogues that are read rather than written from.
 
-    Active, because a catalogue an operator has switched off is one nothing is
-    asking any more, and comparing today's registry against records that
+    Active ones only. A catalogue an operator has switched off is one nothing
+    is asking any more, and comparing today's registry against records that
     stopped being refreshed last year would report the schedule rather than the
     region.
 
-    And read at least once, in the sense the registry's own staleness is
-    measured by (:meth:`SyncLogQuerySet.brought_records_back`): a run that
-    failed, or answered with nothing at all, has told this tool nothing about
-    what the catalogue carries. Asked of every run rather than the newest,
-    because a catalogue that answered a fortnight ago and has failed every run
-    since has still said what it carries.
+    Written once because the two sets below have to partition it exactly: a
+    catalogue in neither would be one nobody was told about, and one in both
+    would be compared and disclaimed at once.
     """
-    read = (
-        SyncLog.objects.brought_records_back()
+    return GlobalDiscoveryCatalogue.objects.filter(
+        is_active=True, is_writer=False
+    ).order_by("centre_id")
+
+
+def _catalogues_read_at_least_once():
+    """The reading catalogues a run has actually brought records back from.
+
+    Read in the sense the registry's own staleness is measured by
+    (:meth:`SyncLogQuerySet.brought_records_back`): a run that failed, or
+    answered with nothing at all, has told this tool nothing about what the
+    catalogue carries. Asked of every run rather than the newest, because a
+    catalogue that answered a fortnight ago and has failed every run since has
+    still said what it carries.
+    """
+    return _reading_catalogues().filter(
+        pk__in=SyncLog.objects.brought_records_back()
         .filter(sync_type=SyncLog.CATALOGUE)
         .values("catalogue")
     )
 
-    return (
-        GlobalDiscoveryCatalogue.objects.filter(is_active=True, is_writer=False)
-        .filter(pk__in=read)
-        .order_by("centre_id")
-    )
-
 
 def _catalogues_never_read():
-    """The active catalogues no run has ever brought records back from.
-
-    The complement of the set above rather than a second predicate over the
-    same logs. The rows the report lists and the catalogues its bound names
-    have to partition the region's catalogues between them: one in neither
-    would be a catalogue nobody was told about, and one in both would be
-    compared and disclaimed at once.
-    """
-    return (
-        GlobalDiscoveryCatalogue.objects.filter(is_active=True, is_writer=False)
-        .exclude(pk__in=_catalogues_compared_for_divergence().values("pk"))
-        .order_by("centre_id")
+    """The reading catalogues no run has ever brought records back from."""
+    return _reading_catalogues().exclude(
+        pk__in=_catalogues_read_at_least_once().values("pk")
     )
 
 
-def _records_the_registrys_catalogue_carries(catalogue):
-    """What the writing catalogue is on record as carrying, by identifier.
+def _records_the_writer_carries(catalogue):
+    """What the writer catalogue is on record as carrying, by identifier.
 
     Read from its declarations rather than from the datasets themselves. A
     dataset exists because some source declared it, and a centre's own
@@ -2114,6 +2164,61 @@ def _records_the_registrys_catalogue_carries(catalogue):
     }
 
 
+def _newest_complete_read(catalogue):
+    """The last run that read this catalogue through, or None if none has.
+
+    "Through" in the sense the registry's own currency is measured by: not
+    failed, and with more records brought back than it lost. It is the instant
+    everything about a reading catalogue is read as of -- what it still
+    carries, and the date the comparison says it was made on -- so it is asked
+    once here rather than spelled out at each of them.
+    """
+    return (
+        SyncLog.objects.brought_records_back()
+        .filter(sync_type=SyncLog.CATALOGUE, catalogue=catalogue)
+        .order_by("-started_at")
+        .first()
+    )
+
+
+def _records_a_catalogue_still_carries(catalogue):
+    """What one reading catalogue carried when it was last read through.
+
+    Nothing is ever deleted from what a catalogue has been recorded as
+    carrying -- what it said is kept, in the way every declaration in this tool
+    is -- but what is *compared* is the newest complete read of it. A record
+    the catalogue has withdrawn is exactly the divergence this report exists to
+    find, and one that went on counting as carried because it was carried in
+    March would hide the finding for good.
+
+    The newest run that brought records back is the picture, for the reason it
+    is the picture everywhere else: a run that failed, or answered with
+    nothing, has not said the catalogue stopped carrying anything, so a
+    catalogue failing every run since Tuesday is still compared on what it said
+    on Tuesday.
+
+    A record that run stepped over is kept in it. The run read the record and
+    could not store it, which is this tool failing rather than the catalogue
+    withdrawing anything -- and ADR-0010 keeps which records those were on the
+    run precisely so that a later question like this one has an answer. Past
+    the fifty a run records, a stepped-over record reads as withdrawn; a run
+    losing more than fifty records is a fault of its own, reported as one.
+    """
+    read = _newest_complete_read(catalogue)
+
+    if read is None:
+        return {}
+
+    stepped_over = {record.get("item") for record in read.stepped_over}
+
+    return {
+        record.identifier: record
+        for record in catalogue.records.all()
+        if (record.last_seen and record.last_seen >= read.started_at)
+        or record.identifier in stepped_over
+    }
+
+
 def _catalogue_divergences():
     """Every record the region's catalogues do not all carry, as findings.
 
@@ -2128,24 +2233,24 @@ def _catalogue_divergences():
     a way somebody has to look at, and normalising it here would be this tool
     quietly agreeing on the region's behalf.
     """
-    registrys_catalogue = _the_registrys_catalogue()
+    writer = _the_writer_catalogue()
 
-    if registrys_catalogue is None:
+    if writer is None:
         return []
 
-    carried = _records_the_registrys_catalogue_carries(registrys_catalogue)
+    carried = _records_the_writer_carries(writer)
     nodes = dict(WIS2Node.objects.values_list("centre_id", "pk"))
 
     return [
         row
-        for catalogue in _catalogues_compared_for_divergence()
+        for catalogue in _catalogues_read_at_least_once()
         for row in _divergences_from(catalogue, carried, nodes)
     ]
 
 
 def _divergences_from(catalogue, carried, nodes):
-    """What one catalogue and the registry's do not both carry, in order."""
-    records = {record.identifier: record for record in catalogue.records.all()}
+    """What one catalogue and the writer's do not both carry, in order."""
+    records = _records_a_catalogue_still_carries(catalogue)
 
     rows = [
         _writer_only_row(catalogue, declaration)
@@ -2161,7 +2266,7 @@ def _divergences_from(catalogue, carried, nodes):
 
 
 def _writer_only_row(catalogue, declaration):
-    """A record the registry is built from that this catalogue does not carry."""
+    """A record the writer catalogue carries and this one does not."""
     dataset = declaration.dataset
 
     return CatalogueDivergenceRow(
@@ -2172,7 +2277,7 @@ def _writer_only_row(catalogue, declaration):
         identifier=dataset.identifier,
         title=dataset.display_title,
         topic=dataset.wmo_topic_hierarchy,
-        divergence=CatalogueDivergence.of(in_the_registrys_catalogue=True),
+        divergence=CatalogueDivergence.WRITER_ONLY,
         last_carried_at=declaration.last_seen,
     )
 
@@ -2187,7 +2292,7 @@ def _reader_only_row(catalogue, record, nodes):
         identifier=record.identifier,
         title=record.title or record.identifier,
         topic=record.wmo_topic_hierarchy,
-        divergence=CatalogueDivergence.of(in_the_registrys_catalogue=False),
+        divergence=CatalogueDivergence.READER_ONLY,
         last_carried_at=record.last_seen,
     )
 
@@ -2473,15 +2578,14 @@ def _diverging_record_notice(row):
     """
     if row.divergence == CatalogueDivergence.WRITER_ONLY:
         diverged = (
-            f"is carried by the catalogue the registry is built from and not "
-            f"by {row.catalogue_centre_id}, so nothing reading that catalogue "
-            f"can discover it"
+            f"is carried by the writer catalogue and not by "
+            f"{row.catalogue_centre_id}, so nothing reading that catalogue can "
+            f"discover it"
         )
     else:
         diverged = (
-            f"is carried by {row.catalogue_centre_id} and not by the "
-            f"catalogue the registry is built from, so nothing here is "
-            f"watching it"
+            f"is carried by {row.catalogue_centre_id} and not by the writer "
+            f"catalogue, so the registry has never seen it"
         )
 
     return Notice(
@@ -2778,16 +2882,17 @@ GAP_REPORTS = (
         slug="catalogue-divergence",
         title=_("Records the catalogues disagree about"),
         description=_(
-            "Datasets the Global Discovery Catalogue the registry is built "
-            "from and another catalogue do not both carry, saying which of "
-            "them carries it and for which centre. A catalogue no run has "
-            "ever brought records back from is not compared: what it carries "
-            "is unknown rather than in agreement."
+            "Datasets the writer catalogue and another Global Discovery "
+            "Catalogue do not both carry, saying which of them carries it and "
+            "for which centre. A catalogue no run has ever brought records "
+            "back from is not compared: what it carries is unknown rather "
+            "than in agreement."
         ),
         find_rows=catalogue_divergences,
         count_rows=lambda *, now=None: len(_catalogue_divergences()),
         describe_row=_diverging_record_notice,
         describe_bound=catalogue_divergences_not_compared,
+        describe_caveat=catalogue_divergences_as_of,
     ),
     GapReport(
         slug="propagation-gaps",

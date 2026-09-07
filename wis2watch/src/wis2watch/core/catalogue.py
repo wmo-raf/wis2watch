@@ -401,7 +401,7 @@ def _refresh_dataset(dataset, discovered, catalogue):
 #: the topic are what make it recognisable in a report, and the record itself
 #: is kept whole beside them so that nothing here has to be read again to
 #: sharpen the comparison later.
-KEPT_FROM_A_READ_RECORD = ("title", "wmo_topic_hierarchy", "raw_json")
+FIELDS_A_READING_CATALOGUE_KEEPS = ("title", "wmo_topic_hierarchy", "raw_json")
 
 
 def _what_a_reading_catalogue_keeps(discovered):
@@ -415,10 +415,10 @@ def _what_a_reading_catalogue_keeps(discovered):
     """
     fields = declared_dataset_fields(discovered)
 
-    return {name: fields[name] for name in KEPT_FROM_A_READ_RECORD}
+    return {name: fields[name] for name in FIELDS_A_READING_CATALOGUE_KEEPS}
 
 
-def keep_read_record(catalogue, record):
+def record_what_a_catalogue_carries(catalogue, record):
     """Write down that this catalogue carries a record, and what it says.
 
     Args:
@@ -530,12 +530,12 @@ def sync_catalogue(catalogue, fetch=None):
     and instead records what it carries, which is what makes the two
     catalogues' divergence reportable rather than merely suspected.
 
-    Nothing a reading catalogue has been recorded as carrying is ever cleared
-    -- not by a run that failed, and not by one that no longer sees the record.
-    What it last carried stands and is dated instead, because a run refused at
-    the door, a record this run stepped over and a catalogue that has withdrawn
-    one cannot be told apart from here; and a report that cleared its records
-    on a refused connection would read as a catalogue agreeing with the
+    Nothing a reading catalogue has been recorded as carrying is ever cleared,
+    by a run that failed or by one that no longer sees the record. What a
+    catalogue still carries is a question about the newest run that read it
+    through, which the report asks of the run rather than of a delete: a run
+    refused at the door says nothing about what the catalogue holds, and one
+    that cleared its records would read as a catalogue agreeing with the
     registry about everything.
 
     ``fetch`` is how the catalogue's pages are read, defaulting to the network.
@@ -581,7 +581,9 @@ def sync_catalogue(catalogue, fetch=None):
                         )
                     )
                 else:
-                    counts.record(keep_read_record(catalogue, record))
+                    counts.record(
+                        record_what_a_catalogue_carries(catalogue, record)
+                    )
     except Exception as exc:
         logger.error("Catalogue sync failed for %s: %s", catalogue.centre_id, exc)
 

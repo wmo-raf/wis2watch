@@ -104,13 +104,32 @@ answered at all: an empty report with nothing beside it announces that the
 region's catalogues carry the same records, and that is the one thing this
 report cannot know about a catalogue nothing has read.
 
-**Nothing is pruned; the instant on the row is what dates it.** A record is
-not deleted for having gone missing from a run, because a run that stepped
-over a record and a catalogue that has withdrawn one are indistinguishable
-from here -- and stepping over records is measurably the commoner of the two.
-What each row carries instead is when the catalogue that does carry it last
-said so, which is ADR-0013's distinction between a live disagreement and a
-record nothing has touched since March.
+**Nothing is deleted, and what is compared is the newest complete read.**
+The record a catalogue once carried is kept, in the way every declaration in
+this tool is kept. What the report reads is the picture the newest run that
+brought records back confirmed: a record that run did not see is one the
+catalogue has withdrawn, which is precisely the divergence this report exists
+to find, and a record that went on counting as carried because it was carried
+in March would hide it for good. A run that failed, and one that answered with
+nothing, move nothing -- so a catalogue failing every run since Tuesday is
+still compared on what it said on Tuesday.
+
+**A record the newest run stepped over is still carried.** That run read it
+and could not store it, which is this tool failing rather than the catalogue
+withdrawing anything. ADR-0010 keeps which records a run lost on the run
+itself, and this is the question that list was worth keeping for. It is why
+the currency rule above is safe to apply: the two ways a record can be missing
+from a run are told apart by the run's own record of it.
+
+**The comparison is dated rather than withheld.** ADR-0004 expected a
+divergence report to be suppressed by a stale writer, the way the
+unregistered-centre report is. A date reads better here. The rows stay true
+either way -- a record this tool holds and another catalogue does not really
+is a difference -- and what a reader needs is to know which side is stale, so
+every catalogue in the comparison carries the instant it was last read
+through, the writer among them. Agreement is the absence of a row and an
+absent row carries no date, which is why the dates are said once above the
+table rather than left to the rows.
 
 **The report reads and writes nothing.** Neither catalogue is corrected from
 the other. Which of them is wrong cannot be settled from here, and a tool that
@@ -130,10 +149,10 @@ stepped over with its reason, exactly as the writer's are (ADR-0010). A run
 that lost records already had a report of its own, which is where that finding
 stays.
 
-**A record stepped over on a reader's run reads as a divergence until the next
-run stores it.** That is the cost of not pruning, and it is the right way
-round: the alternative is a catalogue's withdrawal of a record going unnoticed
-for as long as the tool keeps failing to store it.
+**A record no run has ever managed to store reads as a divergence.** The
+stepped-over list keeps a record a run lost from reading as withdrawn, so this
+is only true of one that has never been stored at all -- and of one lost past
+the fifty a run records, which is a fault reported as one in its own right.
 
 **The first run against a catalogue nothing had read is a noisy morning**, in
 the way onboarding a centre's metadata endpoint is. Whatever it disagrees with
@@ -146,9 +165,18 @@ it differently, nothing here says so. The records are kept whole on both
 sides, so this can be sharpened without another sync.
 
 **Readers compared with each other.** Two reading catalogues that agree with
-each other and not with the registry's produce a row apiece saying the same
-thing. Naming that as one finding needs a third catalogue that answers, which
-the region does not yet have.
+each other and not with the writer produce a row apiece saying the same thing.
+Naming that as one finding needs a third catalogue that answers, which the
+region does not yet have.
+
+**A record the writer catalogue has withdrawn.** The currency rule above is
+applied to the reading catalogues and not to the writer, whose declarations
+say what it carried whenever it last confirmed them and are never withdrawn.
+So a record the writer has dropped goes on counting as carried, and neither
+this report nor the drift report says so. Both sides would want it, and how
+the drift report reads a catalogue declaration is ADR-0013's ground rather
+than this record's -- changing it here would leave two reports disagreeing
+about the same rows.
 
 **A per-centre view of the same disagreement.** The node page lists a centre's
 datasets and does not say which catalogues carry each of them. That is where

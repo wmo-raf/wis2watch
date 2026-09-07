@@ -925,11 +925,12 @@ class ReadingCatalogueRecord(TimeStampedModel):
     the identifier when the report is read, because a record whose identifier
     does not name its centre is one that would then belong to nobody.
 
-    Nothing here is ever deleted for having gone quiet. What the catalogue last
-    said stands, and ``last_seen`` is what dates it: a record it confirmed this
-    morning is a live disagreement, and one it last carried in March is a
-    record nothing has touched since -- the distinction ADR-0013 draws for the
-    other divergence report, and read the same way here.
+    Nothing here is ever deleted, and ``last_seen`` is what says whether the
+    catalogue still carries it. A record its newest complete run confirmed is
+    one it carries; a record only older runs saw is one it has withdrawn, which
+    is a divergence rather than a row to remove. Keeping it is what lets a
+    withdrawal be dated and, where a run merely failed to store the record,
+    told apart from one (ADR-0019).
     """
 
     catalogue = models.ForeignKey(

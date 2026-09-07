@@ -26,6 +26,12 @@ may create a registry record, and the only source that can say a centre exists
 at all.
 _Avoid_: GDC outside code and identifiers.
 
+**Reading catalogue**:
+One of the catalogues that is not the writer. It is read for its divergence
+and writes nothing: what it carries is kept in `ReadingCatalogueRecord`,
+outside the registry entirely (ADR-0019).
+_Avoid_: read-only catalogue, secondary catalogue.
+
 **Dataset**:
 A collection a centre publishes, keyed on `(node, identifier)`. The topic is
 not part of the key: a centre publishing several datasets on one topic is the
@@ -63,11 +69,9 @@ _Avoid_: mismatch, divergence for this specific finding.
 
 **Divergence**:
 Two Global Discovery Catalogues carrying different records for a monitored
-centre. It has a direction -- the record only the registry's catalogue
-carries, or the record only another one does -- and the errand is with a
-catalogue rather than with a centre (ADR-0019). What a catalogue nothing
-writes from carries is kept in `ReadingCatalogueRecord`, outside the registry
-entirely.
+centre. It has a direction -- the record only the writer catalogue carries, or
+the record only a reading catalogue does -- and the errand is with a catalogue
+rather than with a centre (ADR-0019).
 _Avoid_: drift for this one, which is a centre and its own catalogue.
 
 **Retired**:

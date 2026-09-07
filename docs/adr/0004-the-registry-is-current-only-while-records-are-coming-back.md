@@ -11,6 +11,15 @@ datasets and its origin broker, and the catalogue keeps what only it can know
 — that a centre exists, and its address. Every decision this record takes
 stands, because a dead catalogue still means new centres never appear.
 
+Taken up in part by [ADR-0019](0019-what-a-reading-catalogue-carries-is-kept-outside-the-registry.md),
+which builds the divergence report this record calls for and does not build.
+Three things left unaddressed below have an answer there: which records the
+catalogues disagree on, a measure of a reading catalogue's staleness, and what
+becomes of the report when a catalogue goes dark. The answer is not the
+withholding this record expected — the rows stay, the catalogues nothing has
+ever read are named rather than compared, and every catalogue in the
+comparison carries the date it was last read through, the writer among them.
+
 ## Context
 
 Exactly one Global Discovery Catalogue creates registry records. Nodes,

@@ -25,6 +25,7 @@ from wis2watch.core.analysis import (
     OriginTransport,
     RegistryStanding,
     catalogue_divergences,
+    catalogue_divergences_as_of,
     catalogue_divergences_not_compared,
     catalogues_that_keep_failing,
     datasets_out_of_step,
@@ -2360,14 +2361,32 @@ class CatalogueDivergenceTestCase(GapReportTestCase):
         )
         self.read(self.reader)
 
-    def read(self, catalogue, *, hours_ago=6, status=SyncLog.SUCCESS, found=63):
-        """A run that asked a catalogue for the region and was answered."""
+    def read(
+        self,
+        catalogue,
+        *,
+        hours_ago=12,
+        status=SyncLog.SUCCESS,
+        found=63,
+        stepped_over=(),
+    ):
+        """A run that asked a catalogue for the region and was answered.
+
+        Older than the records it is seeded beside, because a run brings its
+        records back after it starts -- and what a catalogue still carries is
+        read as of its newest complete run.
+        """
         return SyncLog.objects.create(
             catalogue=catalogue,
             sync_type=SyncLog.CATALOGUE,
-            status=status,
+            status=SyncLog.PARTIAL if stepped_over else status,
             started_at=NOW - timedelta(hours=hours_ago),
             items_found=found,
+            items_errored=len(stepped_over),
+            stepped_over=[
+                {"item": identifier, "reason": "value too long"}
+                for identifier in stepped_over
+            ],
         )
 
     def failed_to_read(self, catalogue, *, hours_ago=1):
@@ -2416,6 +2435,9 @@ class CatalogueDivergenceTestCase(GapReportTestCase):
 
     def bound(self):
         return catalogue_divergences_not_compared(now=NOW)
+
+    def as_of(self):
+        return catalogue_divergences_as_of(now=NOW)
 
 
 class CatalogueDivergenceTests(CatalogueDivergenceTestCase):
@@ -2535,6 +2557,38 @@ class CatalogueDivergenceTests(CatalogueDivergenceTestCase):
 
     def test_a_catalogue_that_answered_once_and_has_failed_since_is_compared(self):
         """What it last said stands, which is the rule the sync writes by."""
+        self.failed_to_read(self.reader)
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+        self.the_reader_carries("urn:wmo:md:ke-meteo:synop")
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_record_the_catalogue_has_stopped_carrying_is_reported(self):
+        """The withdrawal this report exists to find.
+
+        A record kept from an older run and not confirmed by the newest one is
+        a record the catalogue no longer carries, and going on counting it as
+        carried would hide the divergence for good.
+        """
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+        self.the_reader_carries("urn:wmo:md:ke-meteo:synop", hours_ago=48)
+
+        self.assertEqual(
+            self.divergences(),
+            {"urn:wmo:md:ke-meteo:synop": CatalogueDivergence.WRITER_ONLY},
+        )
+
+    def test_a_record_the_newest_run_stepped_over_is_not_read_as_withdrawn(self):
+        """The run read it and could not store it, which is this tool failing."""
+        SyncLog.objects.filter(catalogue=self.reader).delete()
+        self.read(self.reader, stepped_over=("urn:wmo:md:ke-meteo:synop",))
+        self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
+        self.the_reader_carries("urn:wmo:md:ke-meteo:synop", hours_ago=48)
+
+        self.assertEqual(self.report(), [])
+
+    def test_a_failed_run_does_not_move_what_a_catalogue_still_carries(self):
+        """Only a run that read the catalogue through says what it carries now."""
         self.failed_to_read(self.reader)
         self.the_writer_carries("urn:wmo:md:ke-meteo:synop")
         self.the_reader_carries("urn:wmo:md:ke-meteo:synop")
@@ -2666,6 +2720,56 @@ class CatalogueDivergenceBoundTests(CatalogueDivergenceTestCase):
         )
 
 
+class CatalogueDivergenceAsOfTests(CatalogueDivergenceTestCase):
+    """When each compared catalogue was last read, said above the table.
+
+    A catalogue that answered in March and has failed ever since goes on
+    agreeing with the registry about everything, and agreement is the absence
+    of a row -- so without this the reading is of two catalogues that agree
+    today.
+    """
+
+    def test_it_says_when_a_compared_catalogue_was_last_read(self):
+        self.assertIn("de-dwd-global-discovery-catalogue", self.as_of())
+
+    def test_the_writer_is_dated_beside_them(self):
+        """A registry read in March against a reader read this morning."""
+        self.read(self.writer, hours_ago=72)
+
+        as_of = self.as_of()
+
+        self.assertIn(self.writer.centre_id, as_of)
+        self.assertIn("writer", as_of)
+
+    def test_a_catalogue_that_has_failed_since_is_dated_by_its_last_real_read(self):
+        self.failed_to_read(self.reader)
+
+        self.assertIn(
+            str((NOW - timedelta(hours=12)).year),
+            self.as_of(),
+        )
+
+    def test_a_catalogue_nothing_has_read_is_not_dated_here(self):
+        """It is bounded out instead, which is a different sentence."""
+        never = GlobalDiscoveryCatalogue.objects.create(
+            centre_id="cn-cma-global-discovery-catalogue",
+            name="China Meteorological Administration",
+            base_url="https://wis2-gdc.example.cn",
+        )
+
+        self.assertNotIn(never.centre_id, self.as_of())
+
+    def test_nothing_is_said_where_no_catalogue_is_compared(self):
+        SyncLog.objects.filter(catalogue=self.reader).delete()
+
+        self.assertIsNone(self.as_of())
+
+    def test_the_report_carries_the_sentence_as_its_caveat(self):
+        self.assertEqual(
+            gap_report("catalogue-divergence").describe_caveat(now=NOW), self.as_of()
+        )
+
+
 class CatalogueDivergenceNoticeTests(CatalogueDivergenceTestCase):
     """The same findings as the sentences the morning digest carries."""
 
@@ -2688,7 +2792,7 @@ class CatalogueDivergenceNoticeTests(CatalogueDivergenceTestCase):
         summary = self.notice().summary
 
         self.assertIn("de-dwd-global-discovery-catalogue", summary)
-        self.assertIn("registry", summary)
+        self.assertIn("writer catalogue", summary)
 
     def test_it_is_keyed_on_the_catalogue_and_the_record(self):
         """One catalogue disagreeing about one record is one finding."""
