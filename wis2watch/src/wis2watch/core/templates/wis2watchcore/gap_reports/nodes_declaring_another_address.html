@@ -1,0 +1,67 @@
+{% extends "wis2watchcore/gap_reports/base.html" %}
+
+{% load i18n %}
+
+{% block report_note %}
+    <p class="report-note">
+        {% trans "Nothing here is broken: every centre listed answers at the address this tool asks. What it also does is publish its own canonical links from somewhere else, which is the centre saying the address we hold is not the one it considers its own -- and that is a host likely to move, on the day it moves. Nothing is corrected from this page: an address is only this tool's to take back once the registry has been reported dead." %}
+    </p>
+{% endblock %}
+
+{% block table_head %}
+    <th>{% trans "Centre" %}</th>
+    <th>{% trans "Country" %}</th>
+    <th>{% trans "Asked at" %}</th>
+    <th>{% trans "Declared by the centre" %}</th>
+    <th>{% trans "Which two agree" %}</th>
+    <th>{% trans "Last declared" %}</th>
+{% endblock %}
+
+{% block table_row %}
+    <td>
+        <a href="{% url 'node_details' row.node_id %}"><code>{{ row.centre_id }}</code></a>
+    </td>
+    <td>{{ row.country_name|default:"—" }}</td>
+    {% comment %}
+        The catalogue's address sits under the one being asked rather than in
+        a column of its own: the two are the same string for every centre
+        nobody has corrected, and a column repeating it would push the pair
+        that actually disagree apart.
+    {% endcomment %}
+    <td class="wrapping">
+        <code>{{ row.asked_url }}</code>
+        {% if row.advertised_url and row.advertised_url != row.asked_url %}
+            <div class="row-detail">
+                {% blocktrans with advertised=row.advertised_url %}the catalogue advertises {{ advertised }}{% endblocktrans %}
+            </div>
+        {% endif %}
+    </td>
+    {% comment %}
+        How far the move has got, under the host it has moved to. All of a
+        centre's records naming it is a move that is done; three of eight is
+        one under way, which is the state this report exists to catch early --
+        and a cell that read the same either way would be a row somebody has
+        to open the centre to understand.
+    {% endcomment %}
+    <td class="wrapping">
+        <code>{{ row.declared_url }}</code>
+        {% if not row.declares_it_throughout %}
+            <div class="row-detail">
+                {% blocktrans with declaring=row.records_declaring read=row.records_read %}on {{ declaring }} of {{ read }} records{% endblocktrans %}
+            </div>
+        {% endif %}
+    </td>
+    <td>
+        <span class="badge badge-warning">{{ row.agreement_label }}</span>
+    </td>
+    <td>{{ row.last_declared_at|date:"Y-m-d H:i"|default:"—" }}</td>
+{% endblock %}
+
+{% comment %}
+    Not "every centre is asked where it lives", which the bound above can be
+    contradicting: a centre nothing has read has no records to have declared
+    anything in.
+{% endcomment %}
+{% block empty_message %}
+    {% trans "Every centre this tool has read publishes from the address it is asked at" %}
+{% endblock %}

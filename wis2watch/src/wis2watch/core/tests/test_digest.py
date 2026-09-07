@@ -875,6 +875,87 @@ class BadDayTests(DigestTestCase):
         self.assertEqual(mail.outbox, [])
 
 
+class DeclaredAddressTests(DigestTestCase):
+    """A centre answering at one address and publishing from another, in the mail.
+
+    The report is on a page somebody has to think to open, and this finding is
+    the one least likely to make them think of it: nothing is broken, every
+    count is good, and the only sign is a host in a link. So it goes to
+    somebody who has not thought of it.
+    """
+
+    def declaring_another_address(self, centre_id, *, declared, advertised=None):
+        """A centre that answered, whose own records name somewhere else."""
+        node = WIS2Node.objects.create(
+            centre_id=centre_id,
+            name=centre_id.upper(),
+            base_url=f"https://{centre_id}.example.int",
+        )
+        node.advertised_base_url = advertised or node.base_url
+        node.save()
+        SyncLog.objects.create(
+            node=node,
+            sync_type=SyncLog.DISCOVERY_METADATA,
+            status=SyncLog.SUCCESS,
+            started_at=NOW - timedelta(hours=1),
+        )
+        identifier = f"urn:wmo:md:{centre_id}:synop"
+        DatasetSource.objects.create(
+            dataset=Dataset.objects.create(
+                node=node,
+                identifier=identifier,
+                title="SYNOP",
+                wmo_data_policy=Dataset.CORE,
+                wmo_topic_hierarchy=f"origin/a/wis2/{centre_id}/data/core/weather",
+                raw_json={},
+            ),
+            source_type=DatasetSource.NODE,
+            last_seen=NOW - timedelta(hours=1),
+            raw_json={
+                "links": [
+                    {"rel": "canonical", "href": f"{declared}/data/metadata/x.json"}
+                ]
+            },
+        )
+
+        return node
+
+    def test_the_finding_names_both_addresses(self):
+        self.declaring_another_address(
+            "ke-meteo", declared="https://wis2.meteo.go.ke"
+        )
+
+        change = self.changes_for("nodes-declaring-another-address")
+
+        self.assertIn("https://ke-meteo.example.int", change.new[0].summary)
+        self.assertIn("https://wis2.meteo.go.ke", change.new[0].summary)
+
+    def test_the_mail_says_which_centres_could_not_be_asked(self):
+        """The bound the count is measured against, beside the news itself."""
+        self.declaring_another_address(
+            "ke-meteo", declared="https://wis2.meteo.go.ke"
+        )
+        WIS2Node.objects.create(
+            centre_id="bi-igebu",
+            name="BI-IGEBU",
+            base_url="https://bi-igebu.example.int",
+        )
+
+        self.send()
+
+        self.assertIn("bi-igebu", self.body())
+
+    def test_the_same_address_is_not_carried_every_morning(self):
+        self.declaring_another_address(
+            "ke-meteo", declared="https://wis2.meteo.go.ke"
+        )
+        self.send()
+
+        self.assertIsNone(
+            self.changes_for("nodes-declaring-another-address", now=TOMORROW)
+        )
+
+
 class DatasetDriftTests(DigestTestCase):
     """A dataset the catalogue and the centre disagree about, in the mail.
 

@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from wis2watch.core.interpretation import (
     extract_discovery_record,
     extract_discovery_records,
+    node_base_url,
+    web_host,
 )
 
 from .support import NoNetworkTestCase, load_json_fixture
@@ -286,3 +288,61 @@ class CollectionExtractionTests(NoNetworkTestCase):
     def test_a_collection_with_no_features_yields_nothing(self):
         self.assertEqual(extract_discovery_records({}), [])
         self.assertEqual(extract_discovery_records({"features": []}), [])
+
+
+class WebHostTests(NoNetworkTestCase):
+    """A stored address cut down to the same thing a canonical link is read for.
+
+    The one place a host is spelled, because two places would be a report
+    comparing a centre's declared host against a stored address by a rule that
+    had quietly stopped being the rule the stored address was written by.
+    """
+
+    def test_a_bare_host_is_itself(self):
+        self.assertEqual(web_host("https://wis2.meteo.sc"), "https://wis2.meteo.sc")
+
+    def test_a_path_below_the_host_is_dropped(self):
+        """What a node serves under its address says nothing about the address."""
+        self.assertEqual(
+            web_host("https://wis2.meteo.sc/oapi/collections"),
+            "https://wis2.meteo.sc",
+        )
+
+    def test_a_trailing_slash_is_not_a_different_host(self):
+        self.assertEqual(web_host("https://wis2.meteo.sc/"), "https://wis2.meteo.sc")
+
+    def test_a_port_is_part_of_the_host(self):
+        """``sn-anacim`` is asked at a bare address and a port."""
+        self.assertEqual(
+            web_host("http://213.154.77.59:8002/data"), "http://213.154.77.59:8002"
+        )
+
+    def test_an_address_reached_over_anything_but_http_names_no_host(self):
+        self.assertEqual(web_host("mqtts://everyone@wis2.meteo.sc:8883"), "")
+
+    def test_an_empty_address_names_no_host(self):
+        self.assertEqual(web_host(""), "")
+        self.assertEqual(web_host(None), "")
+
+
+class DeclaredHostTests(NoNetworkTestCase):
+    """The same reading asked of one record on its own.
+
+    A centre's own records are the identical WCMP2 features a catalogue
+    serves, so the host is read out of a stored declaration by the function
+    that reads it out of a catalogue's copy rather than by a second one that
+    could come to disagree with it.
+    """
+
+    def test_a_stored_record_is_read_for_the_host_it_declares(self):
+        self.assertEqual(
+            node_base_url(
+                feature("urn:wmo:md:ke-meteo:synop-dataset-surface-observations")
+            ),
+            "http://wis.meteo.go.ke",
+        )
+
+    def test_a_record_kept_as_nothing_at_all_declares_no_host(self):
+        """What a declaration whose payload was never stored comes to."""
+        self.assertEqual(node_base_url({}), "")
+        self.assertEqual(node_base_url(None), "")

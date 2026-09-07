@@ -8,8 +8,8 @@ stations are declared to the world and have never once transmitted, a centre
 publishing that no catalogue has indexed, data announced to a broker the rest
 of the world never hears.
 
-Ten reports, because there are ten ways the picture can be wrong that no
-single view of one centre can show:
+Eleven reports, because there are eleven ways the picture can be wrong that
+no single view of one centre can show:
 
 * what a country declares in OSCAR and has never been heard from;
 * what is transmitting that no registry -- OSCAR's or a centre's own --
@@ -18,6 +18,8 @@ single view of one centre can show:
 * which records the region's catalogues do not all carry;
 * what a centre published that the Global Broker never carried;
 * which centres publish with no catalogue record at all;
+* which centres answer where this tool asks and publish from somewhere
+  else;
 * whose own station registry has stopped answering, or never did;
 * which syncs are reading a source and losing records out of what they read;
 * which discovery catalogues fail a share of their runs while succeeding at
@@ -98,6 +100,7 @@ from django.utils.translation import gettext_lazy as _
 from django.utils.translation import ngettext
 from django_countries.fields import Country
 
+from ..interpretation import node_base_url, web_host
 from ..models import (
     Dataset,
     DatasetSource,
@@ -123,10 +126,10 @@ from .silence import hours_between
 #: over a day.
 DEFAULT_ATTRIBUTION_WINDOW_HOURS = 168
 
-#: Which report answers "is this share bad?" for a centre. Alone among the ten
-#: slugs in being named here, because it is the only one reversed from outside
-#: this module -- the statistics tab links to it. Renaming it should not be a
-#: search for the same string somewhere else in the tree.
+#: Which report answers "is this share bad?" for a centre. Alone among the
+#: eleven slugs in being named here, because it is the only one reversed from
+#: outside this module -- the statistics tab links to it. Renaming it should
+#: not be a search for the same string somewhere else in the tree.
 UNATTRIBUTED_MESSAGES_SLUG = "unattributed-messages"
 
 #: How long a centre's registry may fail every run before the report names it,
@@ -513,6 +516,140 @@ class CatalogueDivergenceRow:
         return CatalogueDivergence.label(self.divergence)
 
 
+class AddressAgreement:
+    """Which two of a centre's three addresses agree, where one stands alone.
+
+    A centre answering at one address while its own records name another has
+    three of them, and the row is unreadable without saying which two are the
+    same. ``base_url`` is the address being asked; ``advertised_base_url`` is
+    what the writing catalogue last said (ADR-0007); and the third is what the
+    centre's own records point at, which is stored nowhere and is read back
+    out of a declaration every time the report runs.
+
+    ``CENTRE_ALONE`` is the ordinary shape and the one the region is most
+    likely to produce. The address in use is the catalogue's, nobody has
+    touched it, and the centre publishes its canonical links from somewhere
+    else -- a host that has moved, with only the centre's own records saying
+    so. Nothing here corrects it: the registry is answering, and ADR-0007
+    licenses a correction only where it has been reported dead.
+
+    ``ASKED_ALONE`` is the sharper one. The catalogue and the centre name the
+    same host, and the address being asked is neither -- which by ADR-0007's
+    ownership test is somebody's correction, now contradicted by the very
+    centre it was made on behalf of. The errand is with whoever typed it
+    rather than with the centre.
+
+    ``NOTHING_AGREES`` is all three apart: a correction on an address the
+    catalogue has since moved, on a centre that publishes from a third host.
+    It also covers a node no catalogue ever advertised an address for, which
+    has two addresses rather than three -- and no two of those agree either,
+    which is the whole of what this says.
+    """
+
+    CENTRE_ALONE = "centre_alone"
+    ASKED_ALONE = "asked_alone"
+    NOTHING_AGREES = "nothing_agrees"
+
+    CHOICES = [
+        (CENTRE_ALONE, _("Asked what the catalogue advertises")),
+        (ASKED_ALONE, _("Asked a correction the centre contradicts")),
+        (NOTHING_AGREES, _("No two of the three agree")),
+    ]
+
+    LABELS = dict(CHOICES)
+
+    @classmethod
+    def of(cls, *, asked, advertised, declared):
+        """Which of the three a centre's addresses add up to.
+
+        Args:
+            asked: the stored ``base_url``, as stored.
+            advertised: the stored ``advertised_base_url``, as stored.
+            declared: the host the centre's own records name.
+
+        Asked only of the centres the report has already picked out, which is
+        to say ones whose records name a host the asked address does not.
+
+        Whether the asked address is this tool's own is settled by the exact
+        strings, which is ADR-0007's ownership test and deliberately the same
+        comparison the catalogue sync makes before it will move an address. A
+        value equal to what the catalogue last said is one this tool put there;
+        anything else is one somebody typed. Normalising the two here would
+        have a trailing slash read as a hand-correction to the sync and as the
+        catalogue's own value to this report -- a tool acting on an ownership
+        it was showing somebody the opposite of.
+
+        The centre's host is compared against the catalogue's as a host,
+        because it only ever was one: it is read out of a link, never typed,
+        so there is no keystroke to preserve and nothing an exact comparison
+        could tell apart.
+        """
+        if asked == advertised:
+            return cls.CENTRE_ALONE
+
+        if declared and declared == web_host(advertised):
+            return cls.ASKED_ALONE
+
+        return cls.NOTHING_AGREES
+
+    @classmethod
+    def label(cls, value):
+        """What that is called, for a cell or an email."""
+        return cls.LABELS.get(value, value)
+
+
+@dataclass(frozen=True)
+class DeclaredAddressRow:
+    """A node answering where this tool asks and declaring somewhere else.
+
+    All three addresses are on the row, because the finding is a comparison
+    and a row carrying one of them would be a host with nothing to read it
+    against. Which two of them agree is ``agreement``, worked out once here so
+    that the table cell, the digest sentence and anybody reading the row do
+    not each work it out again and disagree.
+
+    The addresses are carried as they are stored rather than as they were
+    compared. A row is somebody's errand -- an address to go and look at, a
+    catalogue record to go and correct -- and an operator who is shown a
+    tidied host cannot find the string they have to change.
+
+    ``last_declared_at`` is when the centre last served the record this host
+    was read from. A centre declaring another address this morning is a host
+    that has moved; one whose newest record is a fortnight old is a centre
+    that has stopped answering as well, and the two are different
+    conversations.
+
+    ``records_declaring`` out of ``records_read`` is how far the move has got,
+    and without it the row cannot be read at all. All of them naming the new
+    host is a centre that has moved and an address nobody has corrected; three
+    of eight is a move under way, which is the state worth catching; one of
+    eight is a record somebody hand-wrote. Three errands behind one address.
+    """
+
+    node_id: int
+    centre_id: str
+    name: str
+    country_code: str
+    country_name: str
+    asked_url: str
+    advertised_url: str
+    declared_url: str
+    agreement: str
+    last_declared_at: datetime | None
+    records_declaring: int
+    records_read: int
+
+    @property
+    def agreement_label(self):
+        """Which two of them agree, for a table cell or an email."""
+        return AddressAgreement.label(self.agreement)
+
+    @property
+    def declares_it_throughout(self):
+        """Whether every record that names a host names this one."""
+        return self.records_declaring == self.records_read
+
+
 @dataclass(frozen=True)
 class PropagationGapRow:
     """One notification a centre published that the world never received.
@@ -873,7 +1010,7 @@ def datasets_out_of_step_unasked_centres(*, now=None):
         str | None: the centres whose own metadata has never been read, or
         nothing where every centre has answered.
 
-    Eleven findings computed from twenty-seven of the region's thirty-two
+    Eleven findings computed from thirty-one of the region's thirty-two
     centres is not "the region has eleven drifts"; it is eleven among the
     centres something could ask. A count read without that is read as the
     region, which is the whole of what a reader wants it for.
@@ -908,6 +1045,130 @@ def datasets_out_of_step_unasked_centres(*, now=None):
         "carries cannot be told from one they agree with.",
         len(unasked),
     ) % {"count": len(unasked), "centres": ", ".join(unasked)}
+
+
+def nodes_declaring_another_address(*, now=None):
+    """Centres answering where this tool asks and declaring somewhere else.
+
+    Args:
+        now: unused; taken so that every report is asked for the same way.
+
+    Returns:
+        list[DeclaredAddressRow]: by centre, each naming all three of its
+        addresses and which two of them agree.
+
+    The one finding ADR-0015 named and deliberately left unwritten. The registry
+    has two writers and each writes what only it can know: the catalogue says
+    that a centre exists and where to reach it, and everything downstream of a
+    successful fetch is the centre's own word about itself (ADR-0018). The
+    address is the one field a centre's own record cannot settle by being
+    served from it -- a node answering at all is not evidence that the address
+    this tool holds is the one it should be asked at -- so where the two
+    disagree there is nothing to write and something to say.
+
+    What makes it worth a reader's attention is precisely that nothing is
+    broken. The centre answers, the records come back, every count in the tool
+    is good. But a centre publishing its canonical links from ``B`` while
+    answering at ``A`` is telling us the address we ask is not the one it
+    considers its own, and that is a host that is likely to move -- on the day
+    it moves, which is the day this stops being a curiosity.
+
+    The third address is derived rather than stored. It is read out of the
+    ``canonical`` link of the centre's own declarations, by the same
+    :mod:`~wis2watch.core.interpretation` seam that reads it out of a
+    catalogue's copy, on a pass over declarations this report is reading
+    anyway. A column would need a migration and a writer, and a writer for a
+    value that is already whole on the declaration is a second copy that can
+    drift from the record it was copied from -- which is the mistake ADR-0015
+    declined to make for every field below the address.
+
+    A report of its own, where ADR-0015 guessed at ADR-0013's. That guess
+    was made before either report had rows: the drift report is dataset-
+    grained -- its rows are identifiers with a direction, and its count is a
+    count of records -- and this finding is one address per centre, so a row
+    here would be a row with no identifier in a table keyed on them, and a
+    count of centres added to a count of datasets. ``unregistered-centres``
+    and ``registries-not-answering`` are the precedent for a node-grained gap
+    report, and this is the eleventh beside them. ADR-0020 records the
+    departure.
+
+    Only centres something has actually read are here. A centre nothing has
+    asked declares nothing, and a centre whose own records this tool has never
+    read has no third address to compare -- which is ADR-0005's mistake made
+    about addresses. Those are named by
+    :func:`nodes_declaring_another_address_unread` instead.
+
+    Nothing in the region is in this state today. Thirty-one of the
+    thirty-two centres have answered, and every one of them publishes its
+    canonical links from the host it is being asked at -- which is why the
+    rule is worth writing now, while nobody is depending on the wrong one, and
+    is the reason this is a report rather than an alert. Six of the region's
+    centres are asked at bare IP addresses, two of those with a port, which is
+    where a disagreement of this shape appears first: an address with no name
+    in front of it moves whenever the host does.
+
+    A centre that answers and declares no canonical link anywhere is not a row
+    either, and is not in the bound. It answered, so nothing is being withheld
+    about it; it simply named no host, and reading that silence as a
+    disagreement would report every such centre for an address it never gave.
+    Pinned by a test rather than left to be discovered, as ADR-0015 pinned the
+    same absence for a broker.
+    """
+    return [
+        _declared_address_row(
+            node, declared=declared, seen_at=seen_at, declaring=declaring, read=read
+        )
+        for node, declared, seen_at, declaring, read in (
+            _nodes_declaring_another_address()
+        )
+    ]
+
+
+def nodes_declaring_another_address_unread(*, now=None):
+    """Which centres this count is measured against, in a sentence.
+
+    Args:
+        now: unused; taken so that every bound is asked in the same way.
+
+    Returns:
+        str | None: the centres whose own records nothing has ever read, or
+        nothing where every centre has answered.
+
+    Reachable is the whole precondition of this report, so the centres that
+    are not are the whole of its bound. No rows over thirty-one of the
+    region's thirty-two centres is not "every centre declares the address it
+    is asked at": it is every centre something could ask, and the one nobody
+    could -- ``cm-meteocameroon``, whose address is a bare IP -- is exactly
+    the sort of centre whose address is most likely to be wrong.
+
+    Read from the discovery-metadata sync logs rather than from a live probe,
+    and asked of the same helper the catalogue sync defers to, so that the
+    centres this report treats as having spoken and the centres a sync stands
+    back for can never be a different set. The probes are demonstrably flaky
+    in this region -- a centre failed one sweep and answered the next -- and a
+    bound that moved between two readings of the same page would be a page
+    nobody could quote.
+
+    Said even where the report is empty, and most of all there.
+    """
+    unread = list(
+        _nodes_never_answering_for_what_they_publish().values_list(
+            "centre_id", flat=True
+        )
+    )
+
+    if not unread:
+        return None
+
+    return ngettext(
+        "%(count)d centre is not counted here, nothing having ever read the "
+        "records that would say where it lives: %(centres)s. The address this "
+        "tool holds for it is the only one anything knows.",
+        "%(count)d centres are not counted here, nothing having ever read the "
+        "records that would say where they live: %(centres)s. The addresses "
+        "this tool holds for them are the only ones anything knows.",
+        len(unread),
+    ) % {"count": len(unread), "centres": ", ".join(unread)}
 
 
 def catalogue_divergences(*, now=None):
@@ -2016,6 +2277,114 @@ def _nodes_never_answering_for_what_they_publish():
     ).order_by("centre_id")
 
 
+def _nodes_declaring_another_address():
+    """The centres whose own records name a host other than the one asked.
+
+    Returns:
+        list[tuple]: each a centre, the host its records point at, when it
+        last said so, how many of its records say it and how many named a host
+        at all -- by centre ID.
+
+    One pass over the declarations of the centres that have answered, in one
+    query, rather than a query per centre: the region's centres declare a few
+    dozen records between them, and asking each centre's separately would be a
+    page of findings costing a query per centre to say nothing about most of
+    them.
+
+    What the pass costs is each record's payload, since the host is read back
+    out of the record rather than off a column. Measured against the region:
+    fifty-one declarations, a hundred and sixty kilobytes, thirty-five
+    milliseconds -- which is what makes deriving the address the cheaper of
+    the two answers, and would stop being true at a region some orders of
+    magnitude larger than this one.
+
+    **One record naming another host is enough.** A centre's records are
+    served from the host they name, and a wis2box writes its canonical links
+    from the address it is configured with -- so records already published
+    keep the old host until they are republished, and a centre part-way
+    through moving is exactly a set where some records name the new host and
+    the rest still name the old. That is the state this report exists to catch
+    on the day it happens, and a rule that waited for every record to agree
+    would report it only once the move was over.
+
+    So the counts travel with the finding instead. Three of a centre's eight
+    records naming a new host is a move under way; eight of eight is a move
+    that is done and an address nobody has corrected; one of eight is a record
+    somebody hand-wrote. Those are three different errands, and the row cannot
+    tell them apart without the pair of numbers.
+
+    Among the records that do name another host, the newest is the one the row
+    names, because it is what the centre says now. Ordered by ``pk`` under the
+    stamp so that a centre whose records were all confirmed in one run -- which
+    is every centre, since the stamp is written per run -- names the same host
+    on two readings of the same page rather than an arbitrary one of them.
+    """
+    nodes = {node.pk: node for node in _nodes_answering_for_what_they_publish()}
+
+    read = {}
+    elsewhere = {}
+
+    for node_id, seen_at, raw in (
+        DatasetSource.objects.filter(
+            source_type=DatasetSource.NODE, dataset__node_id__in=list(nodes)
+        )
+        .order_by(F("last_seen").asc(nulls_first=True), "pk")
+        .values_list("dataset__node_id", "last_seen", "raw_json")
+    ):
+        host = node_base_url(raw)
+
+        if not host:
+            continue
+
+        read[node_id] = read.get(node_id, 0) + 1
+
+        # A node with no address of its own is asked at whatever endpoint
+        # somebody typed into it, and has nothing for its records to
+        # contradict. That is a blank field rather than a centre that has
+        # moved, and it is the node page's finding rather than this one's.
+        asked = web_host(nodes[node_id].base_url)
+
+        if not asked or host == asked:
+            continue
+
+        declaring, _host, _seen_at = elsewhere.get(node_id, (0, "", None))
+        elsewhere[node_id] = (declaring + 1, host, seen_at)
+
+    found = [
+        (nodes[node_id], host, seen_at, declaring, read[node_id])
+        for node_id, (declaring, host, seen_at) in elsewhere.items()
+    ]
+
+    return sorted(found, key=lambda finding: finding[0].centre_id)
+
+
+def _declared_address_row(node, *, declared, seen_at, declaring, read):
+    """One centre declaring another address as a finding.
+
+    The addresses go onto the row as they are stored rather than as they were
+    compared. A row is somebody's errand, and an operator shown a tidied host
+    cannot find the string they have to change.
+    """
+    return DeclaredAddressRow(
+        node_id=node.pk,
+        centre_id=node.centre_id,
+        name=node.name,
+        country_code=node.country.code if node.country else "",
+        country_name=node.country.name if node.country else "",
+        asked_url=node.base_url,
+        advertised_url=node.advertised_base_url,
+        declared_url=declared,
+        agreement=AddressAgreement.of(
+            asked=node.base_url,
+            advertised=node.advertised_base_url,
+            declared=declared,
+        ),
+        last_declared_at=seen_at,
+        records_declaring=declaring,
+        records_read=read,
+    )
+
+
 def _datasets_out_of_step():
     """The datasets whose sources do not agree that they exist.
 
@@ -2628,6 +2997,60 @@ def _unregistered_centre_notice(row):
     )
 
 
+def _declared_address_notice(row):
+    """A centre declaring an address other than the one asked, in a sentence.
+
+    Both addresses, because one of them is not a finding: "ke-meteo declares
+    another address" sends a reader to open the report, and the pair sends
+    them to the centre or to the catalogue record with the two strings in
+    hand. Quoted as stored, never as compared -- a tidied host is not a string
+    anybody can go and find.
+
+    Three sentences, because which two of the three agree decides who the
+    errand is with. A centre pointing away from the catalogue's own address is
+    a host that has moved and a registration to correct; an address somebody
+    typed that the centre itself contradicts is a correction to revisit, and
+    mailing that one as a centre's fault sends somebody to a centre to ask
+    about a string typed here; three addresses that all differ are both
+    errands at once, so all three are named and neither is blamed.
+
+    How far the move has got is said wherever it is not the whole of the
+    centre's records. A part-moved centre is the case this report exists to
+    catch early, and a line that read the same for one odd record and for a
+    node that has entirely left would send the reader to the page to find out
+    which.
+
+    Keyed on the centre, which is the finding: a centre has one address, so a
+    node that moves again is the same finding rather than a new one, and a key
+    carrying the addresses would announce it afresh every time either moved.
+    """
+    if row.agreement == AddressAgreement.ASKED_ALONE:
+        summary = (
+            f"{row.centre_id} is being asked at {row.asked_url}, an address "
+            f"corrected by hand, while both the catalogue and the centre's own "
+            f"records name {row.advertised_url}"
+        )
+    elif row.agreement == AddressAgreement.NOTHING_AGREES:
+        summary = (
+            f"{row.centre_id} answers at {row.asked_url}, the catalogue "
+            f"advertises {row.advertised_url}, and the centre's own records "
+            f"name {row.declared_url}: no two of the three agree"
+        )
+    else:
+        summary = (
+            f"{row.centre_id} answers at {row.asked_url} and declares its own "
+            f"records from {row.declared_url}"
+        )
+
+    if not row.declares_it_throughout:
+        summary += (
+            f" on {row.records_declaring} of the {row.records_read} records it "
+            f"serves"
+        )
+
+    return Notice(key=row.centre_id, summary=summary)
+
+
 def _unattributed_rate_notice(row):
     """A centre naming no station for some of its traffic, in a sentence.
 
@@ -2767,9 +3190,9 @@ def _leaves_nothing_unsettled(*, now=None):
 class GapReport:
     """One report: what it finds, and how to ask for it.
 
-    The nine are held as a list rather than as nine hard-wired pages so that
-    the index, the routing, the report itself and the digest all read from one
-    place. A report that exists but is not on the index is a finding nobody
+    The eleven are held as a list rather than as eleven hard-wired pages so
+    that the index, the routing, the report itself and the digest all read from
+    one place. A report that exists but is not on the index is a finding nobody
     sees, which is the failure this whole module exists to prevent -- and one
     that exists but is not in the digest is a finding nobody sees until they
     next open the tool.
@@ -2832,10 +3255,10 @@ class GapReportSummary:
     bound: str | None = None
 
 
-#: The ten reports, in the order the index shows them: what is declared and
+#: The eleven reports, in the order the index shows them: what is declared and
 #: missing, what is arriving and unaccounted for, what the two registries of a
 #: centre's datasets disagree about and what the region's catalogues disagree
-#: about, then the three about the centres themselves, and last the three about
+#: about, then the four about the centres themselves, and last the three about
 #: this tool rather than them.
 GAP_REPORTS = (
     GapReport(
@@ -2923,6 +3346,22 @@ GAP_REPORTS = (
         find_unsettled=unregistered_centres_unsettled,
     ),
     GapReport(
+        slug="nodes-declaring-another-address",
+        title=_("Nodes declaring another address"),
+        description=_(
+            "Centres answering at the address this tool asks while their own "
+            "records publish from a different host, naming all three "
+            "addresses and which two of them agree. Nothing is corrected: an "
+            "address is only this tool's to take back once the registry has "
+            "been reported dead. Centres whose own records have never been "
+            "read are not counted."
+        ),
+        find_rows=nodes_declaring_another_address,
+        count_rows=lambda *, now=None: len(_nodes_declaring_another_address()),
+        describe_row=_declared_address_notice,
+        describe_bound=nodes_declaring_another_address_unread,
+    ),
+    GapReport(
         slug="registries-not-answering",
         title=_("Registries that are not answering"),
         description=_(
@@ -3000,7 +3439,7 @@ def gap_report_summaries(*, now=None):
     """Every report with how much it has found, for the index.
 
     Counted rather than listed: the index exists to say which report is worth
-    opening, and building ten reports in full to show ten numbers would make
+    opening, and building eleven reports in full to show eleven numbers would make
     the cheapest page in the tool the most expensive.
     """
     now = now or dj_timezone.now()

@@ -74,6 +74,17 @@ the record only a reading catalogue does -- and the errand is with a catalogue
 rather than with a centre (ADR-0019).
 _Avoid_: drift for this one, which is a centre and its own catalogue.
 
+**Declared address**:
+The host a centre's own records publish from, read out of the `canonical`
+link of its `NODE` declarations. It is stored nowhere and derived when
+something asks. A centre answering at the address this tool holds while
+declaring another one is a third finding again -- neither a drift nor a
+divergence, since one centre and one address are all that take part -- and it
+is only ever reported: an address is this tool's to take back only once the
+registry has been reported dead (ADR-0007, ADR-0020).
+_Avoid_: drift or divergence for this one; base URL for the declared host,
+which is the address being asked.
+
 **Retired**:
 A dataset the centre has stopped declaring: `status` is `inactive`, and its
 row, declarations, rollups and history all survive. Only the centre retires

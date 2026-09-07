@@ -148,7 +148,32 @@ def _link_href(feature, rel):
     return ""
 
 
-def _node_base_url(feature):
+def web_host(url):
+    """An address cut down to the scheme and host it names, or an empty string.
+
+    The one place a host is spelled. A stored ``base_url`` and a host read out
+    of a canonical link are compared by whatever reports on the two, and two
+    readings of what counts as the same host would be a report calling a
+    trailing slash a centre that has moved.
+
+    What follows the host is dropped: a path is where something is served
+    under an address rather than part of the address. A port is kept, because
+    two of the region's centres are asked at one -- ``cv-inmg`` on 8080 and
+    ``sn-anacim`` on 8002 -- and the host without it answers nothing.
+
+    An address reached over anything but HTTP names no host here. A canonical
+    link is occasionally a broker or a DOI, and a host taken from one of those
+    would name somewhere nothing can be asked of.
+    """
+    parts = urlsplit((url or "").strip())
+
+    if parts.scheme in WEB_SCHEMES and parts.netloc:
+        return f"{parts.scheme}://{parts.netloc}"
+
+    return ""
+
+
+def node_base_url(feature):
     """Where the node's own API is, read from its canonical link, or empty.
 
     A canonical link points at the metadata file on the centre's own host --
@@ -161,15 +186,21 @@ def _node_base_url(feature):
     Where a centre advertises several they name one host between them; taking
     the first is what keeps the reading from depending on the order a catalogue
     happens to return links in.
+
+    Asked of a catalogue's copy of a record as this sync runs, and of a
+    centre's own stored declaration long afterwards -- the two are the
+    identical WCMP2 feature, so the host a centre declares is read by the
+    function that reads the host a catalogue advertises rather than by a
+    second one that could come to disagree with it.
     """
-    for link in feature.get("links", []) or []:
+    for link in (feature or {}).get("links", []) or []:
         if link.get("rel") != "canonical":
             continue
 
-        parts = urlsplit((link.get("href") or "").strip())
+        host = web_host(link.get("href"))
 
-        if parts.scheme in WEB_SCHEMES and parts.netloc:
-            return f"{parts.scheme}://{parts.netloc}"
+        if host:
+            return host
 
     return ""
 
@@ -204,7 +235,7 @@ def extract_discovery_record(feature):
         node=DiscoveredNode(
             centre_id=centre_id,
             country=monitored_country_code_for_centre_id(centre_id),
-            base_url=_node_base_url(feature),
+            base_url=node_base_url(feature),
         ),
         dataset=DiscoveredDataset(
             identifier=identifier,

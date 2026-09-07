@@ -658,8 +658,42 @@ class GapReportViewTests(TestCase):
             started_at=dj_timezone.now() - timedelta(hours=6),
             items_found=63,
         )
+        # A dataset both registries declare, so that it is nobody's drift --
+        # carried here only so that the centre has a record of its own to be
+        # read for the host it publishes from, which is a different host from
+        # the one this tool asks it at.
+        DatasetSource.objects.create(
+            dataset=Dataset.objects.create(
+                node=self.node,
+                identifier="urn:wmo:md:ke-kmd:upper-air",
+                title="Upper-air observations",
+                wmo_data_policy=Dataset.CORE,
+                wmo_topic_hierarchy="origin/a/wis2/ke-kmd/data/core/weather/temp",
+                raw_json={},
+            ),
+            source_type=DatasetSource.GDC,
+            catalogue=catalogue,
+            last_seen=dj_timezone.now(),
+        )
+        DatasetSource.objects.create(
+            dataset=Dataset.objects.get(identifier="urn:wmo:md:ke-kmd:upper-air"),
+            source_type=DatasetSource.NODE,
+            last_seen=dj_timezone.now(),
+            raw_json={
+                "links": [
+                    {
+                        "rel": "canonical",
+                        "href": (
+                            "https://wis2.kenyamet.test/data/metadata/"
+                            "urn:wmo:md:ke-kmd:upper-air.json"
+                        ),
+                    }
+                ]
+            },
+        )
         for centre_id, identifier in (
             ("ke-kmd", "urn:wmo:md:ke-kmd:surface-weather"),
+            ("ke-kmd", "urn:wmo:md:ke-kmd:upper-air"),
             ("ml-meteo", "urn:wmo:md:ml-meteo:surface-weather"),
         ):
             ReadingCatalogueRecord.objects.create(
