@@ -6,7 +6,7 @@ second way a centre can speak for itself: the first is the broker it publishes
 to, and a centre whose broker cannot be reached from outside -- which is a
 great many of them -- can still be asked here what it published.
 
-Four things about that reading are decisions rather than mechanics.
+Five things about that reading are decisions rather than mechanics.
 
 **There is no topic.** The archive returns the WIS2 Notification Message
 itself, envelope and all, but nothing that says what topic it went out on.
@@ -18,6 +18,19 @@ stored topic stays empty, because none was observed. Synthesising one from the
 dataset's declared topic would read better and would quietly destroy the
 evidence for a centre transmitting data no dataset of its own claims, which is
 a message no topic would ever have named.
+
+**A message that names no record belongs to no dataset.** With no topic to
+fall back on, a notification carrying no metadata identifier has nothing left
+to resolve against, and the centre's own declared dataset is not an answer to
+that -- it is a guess, and one that would be indistinguishable from a real
+attribution the moment it was written. Measured over the region, every message
+carrying neither was the centre's own daily announcement of its WCMP2 record,
+which names no record because it is one, and which is recognised by its data
+identifier and set aside before any of this -- which is what emptied the
+population. What is left is a centre publishing data notifications without the
+record they belong to, and a poll that finds one says so rather than absorbing
+it into its totals: it is nil today, and it was 221 messages across 24 centres
+before anybody looked.
 
 **The whole collection is asked for, not one dataset of it.** On the nodes
 surveyed it costs the same -- each declares a single dataset -- and a message
@@ -191,6 +204,43 @@ def _store_page(source, payload):
     return len(notifications) - counts.catalogue_records, counts
 
 
+def _report_what_resolved_to_nothing(source, messages):
+    """Say how many of a poll's messages joined no dataset at all.
+
+    With no topic to fall back on, a notification naming no discovery metadata
+    record has nothing left to resolve against, and the centre's own datasets
+    are not an answer to that. Such a message is still stored and still counts
+    in the centre's volume, because the centre did publish it; what is missing
+    is the record saying which of its datasets did.
+
+    Said out loud rather than absorbed into the run's totals, which is how the
+    region came to be carrying 221 of these unnoticed.
+
+    **This contradicts ADR-0010 and is meant to.** That decision took a
+    population out of a worker's log and put it on the run, because a record
+    stepped over never landed, is therefore missing from the region, and a
+    reader has to be able to find out which. This is the other case: the
+    message landed, and nothing about the region is missing on its account.
+    The population is nil, so a report of it would be a page that is always
+    empty and a schema change to hold a zero. If it stops being nil, ADR-0010
+    says where it belongs then.
+
+    What is counted is what the store could not attribute, which is a shade
+    wider than messages naming no record: a record too long for the column
+    fails inside its savepoint and lands here too, having already said so
+    itself. So this says only that they resolved to no dataset, which is true
+    of both.
+    """
+    if not messages:
+        return
+
+    logger.warning(
+        "%s of the notifications in %s's archive resolved to no dataset",
+        messages,
+        source.owning_centre_id,
+    )
+
+
 def poll_message_archive(
     source, *, since, until, max_pages=MAX_ARCHIVE_PAGES, fetch=None
 ):
@@ -210,6 +260,11 @@ def poll_message_archive(
     already stored are evidence about the centre whatever went wrong on the
     next request, and re-reading the window is free.
 
+    What the run stored that joined no dataset is reported apart from the
+    counts, by :func:`_report_what_resolved_to_nothing`, on every path out of
+    here -- a run that failed partway keeps what it read, and what was odd
+    about it is kept with it.
+
     ``fetch`` is how the archive's pages are read, defaulting to the network.
     """
     fetch = fetch or fetch_archive_pages
@@ -221,6 +276,7 @@ def poll_message_archive(
     )
 
     counts = SyncCounts()
+    unknown_dataset = 0
 
     try:
         for payload in fetch(source, since=since, until=until, max_pages=max_pages):
@@ -229,6 +285,7 @@ def poll_message_archive(
             counts.found += published
             counts.created += stored.accepted
             counts.errored += stored.discarded
+            unknown_dataset += stored.unknown_dataset
 
             # The count comes from the store, which counted the page; the
             # reasons are taken one at a time, so that the ceiling on how many
@@ -246,6 +303,7 @@ def poll_message_archive(
             exc,
         )
         _record_answer(source)
+        _report_what_resolved_to_nothing(source, unknown_dataset)
 
         return counts.close(sync_log, SyncLog.FAILED, str(exc))
     except Exception as exc:
@@ -253,10 +311,12 @@ def poll_message_archive(
             "Could not read %s's message archive: %s", source.owning_centre_id, exc
         )
         _record_answer(source, error=str(exc))
+        _report_what_resolved_to_nothing(source, unknown_dataset)
 
         return counts.close(sync_log, SyncLog.FAILED, str(exc))
 
     _record_answer(source)
+    _report_what_resolved_to_nothing(source, unknown_dataset)
     counts.close(sync_log, counts.status)
 
     logger.info(
