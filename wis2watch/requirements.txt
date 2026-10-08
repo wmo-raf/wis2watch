@@ -1,5 +1,5 @@
 wagtail==7.1.2
-django==5.2.7
+django==5.2.17
 dj-database-url==3.0.1
 django-extensions==4.1
 django-timescaledb==0.2.13
