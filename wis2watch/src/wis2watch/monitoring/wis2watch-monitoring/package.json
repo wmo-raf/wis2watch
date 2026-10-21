@@ -11,7 +11,7 @@
   },
   "dependencies": {
     "@primeuix/themes": "^1.2.5",
-    "maplibre-gl": "^5.10.0",
+    "maplibre-gl": "^6.4.1",
     "primeicons": "^7.0.0",
     "primevue": "^4.4.1",
     "vite-plugin-css-injected-by-js": "^3.5.2",
