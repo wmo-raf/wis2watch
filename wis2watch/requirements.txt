@@ -1,4 +1,4 @@
-wagtail==7.1.2
+wagtail==7.3.4
 django==5.2.7
 dj-database-url==3.0.1
 django-extensions==4.1
